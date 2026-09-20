@@ -1,0 +1,16 @@
+{
+  "name": "westeros-origin-admin",
+  "version": "1.0.0",
+  "description": "Site d'admin (maisons / régions / profils) pour Westeros Origin — connecté à la même base MongoDB que le bot Discord.",
+  "main": "web/server.js",
+  "scripts": {
+    "start": "node web/server.js"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "express": "^4.21.2",
+    "mongodb": "^7.1.1"
+  }
+}

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Westeros Admin — 356 AC</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800;900&family=Cinzel+Decorative:wght@700;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="/logo.jpg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Particules d'ambiance (braises flottantes, purement décoratif / CSS) -->
+  <div id="particules" class="particules" aria-hidden="true"></div>
+
+  <div class="app-shell">
+
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <img class="brand-sigil" src="/logo.jpg" alt="Logo Westeros Admin">
+        <div class="brand-text">
+          <h1>Westeros<span>Admin</span></h1>
+          <p class="brand-sub">An 356 après la Conquête</p>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-btn" data-collection="profils" onclick="chargerDonnees('profils')">
+          <span class="nav-icon">👤</span>
+          <span class="nav-label">Profils RP</span>
+          <span class="nav-count" id="count-profils"></span>
+        </button>
+        <button class="nav-btn" data-collection="maisons" onclick="chargerDonnees('maisons')">
+          <span class="nav-icon">🏰</span>
+          <span class="nav-label">Maisons</span>
+          <span class="nav-count" id="count-maisons"></span>
+        </button>
+        <button class="nav-btn" data-collection="regions" onclick="chargerDonnees('regions')">
+          <span class="nav-icon">🗺️</span>
+          <span class="nav-label">Régions</span>
+          <span class="nav-count" id="count-regions"></span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="btn-secondaire btn-sync" id="btn-sync" onclick="synchroniser()">
+          <span id="sync-icone">🔄</span> Synchroniser
+        </button>
+        <div class="statut-ligne">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="connexion-statut">Prêt</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ ZONE PRINCIPALE ============ -->
+    <main class="main-area">
+      <div class="ambient-glow"></div>
+
+      <header class="main-header">
+        <div class="header-titres">
+          <h2 id="titre-section">Bienvenue, Maître des Chuchoteurs</h2>
+          <p id="sous-titre" class="sous-titre">Choisissez une section dans le menu pour commencer.</p>
+        </div>
+        <div class="search-wrap" id="search-wrap" hidden>
+          <span class="search-icon">🔍</span>
+          <input id="recherche" type="text" placeholder="Rechercher un nom..." oninput="filtrerListe()" autocomplete="off">
+        </div>
+      </header>
+
+      <div id="contenu" class="contenu">
+        <div class="etat-vide">
+          <div class="etat-vide-icone">🕯️</div>
+          <p>En attente de sélection...</p>
+          <span class="etat-vide-sub">Choisissez « Profils », « Maisons » ou « Régions » dans le menu.</span>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ============ PANNEAU D'ÉDITION COULISSANT ============ -->
+  <div id="overlay" class="overlay" onclick="fermerPanneau()"></div>
+  <aside id="panneau-edition" class="panneau-edition">
+    <div class="panneau-header">
+      <div>
+        <span class="panneau-eyebrow" id="panneau-eyebrow">Édition</span>
+        <h3 id="panneau-titre">—</h3>
+      </div>
+      <button class="btn-fermer" onclick="fermerPanneau()" aria-label="Fermer">✕</button>
+    </div>
+    <div id="panneau-corps" class="panneau-corps"></div>
+  </aside>
+
+  <!-- Notifications -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

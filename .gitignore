@@ -1,0 +1,10 @@
+# Secrets — ne JAMAIS pousser ça sur GitHub
+.env
+.env.*
+!.env.example
+
+# Dépendances (se réinstallent avec "npm install")
+node_modules/
+
+# Logs
+*.log

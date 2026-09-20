@@ -1,0 +1,275 @@
+[
+  {
+    "nom": "Maison Jardinier",
+    "key": "Gardener (Bief)",
+    "type": "majeure",
+    "region": "Le Bief",
+    "croyance": "Foi des Sept",
+    "renommee": 85,
+    "argent": "Élevée",
+    "uniteSpeciale": "Chevaliers du Bief",
+    "armee": {
+      "fantassins": 25000,
+      "archers": 8000,
+      "cavalerie": 5000,
+      "flotte": 80,
+      "noteFlotte": "Redwyne"
+    },
+    "imagePath": "image/logo/logojardinier.png"
+  },
+  {
+    "nom": "Maison Lannister",
+    "key": "Lannister",
+    "type": "majeure",
+    "region": "Les Terres de l'Ouest",
+    "croyance": "Foi des Sept",
+    "renommee": 80,
+    "argent": "Très élevée",
+    "uniteSpeciale": "Lions d'Or",
+    "armee": {
+      "fantassins": 18000,
+      "archers": 5000,
+      "cavalerie": 5000,
+      "flotte": 20
+    },
+    "imagePath": "image/logo/logolannister.png"
+  },
+  {
+    "nom": "Maison Arryn",
+    "key": "Arryn",
+    "type": "majeure",
+    "region": "Le Val",
+    "croyance": "Foi des Sept",
+    "renommee": 60,
+    "argent": "Élevée",
+    "uniteSpeciale": "Chevaliers du Val",
+    "armee": {
+      "fantassins": 15000,
+      "archers": 4000,
+      "cavalerie": 3000,
+      "flotte": 10
+    },
+    "imagePath": "image/logo/logoarryn.png"
+  },
+  {
+    "nom": "Maison Baratheon",
+    "key": "Baratheon",
+    "type": "majeure",
+    "region": "Les Terres de l'Orage",
+    "croyance": "Foi des Sept",
+    "renommee": 55,
+    "argent": "Moyenne",
+    "uniteSpeciale": "Tempête Noire",
+    "armee": {
+      "fantassins": 14000,
+      "archers": 4000,
+      "cavalerie": 3500,
+      "flotte": 40
+    },
+    "imagePath": "image/logo/logobaratheon.png"
+  },
+  {
+    "nom": "Maison Stark",
+    "key": "Stark",
+    "type": "majeure",
+    "region": "Le Nord",
+    "croyance": "Anciens Dieux",
+    "renommee": 75,
+    "argent": "Moyenne",
+    "uniteSpeciale": "Loups d'Hiver",
+    "armee": {
+      "fantassins": 12000,
+      "archers": 3500,
+      "cavalerie": 2000,
+      "flotte": 10
+    },
+    "imagePath": "image/logo/logostark.png"
+  },
+  {
+    "nom": "Maison Tully",
+    "key": "Tully",
+    "type": "majeure",
+    "region": "Le Conflans",
+    "croyance": "Foi des Sept",
+    "renommee": 50,
+    "argent": "Faible",
+    "uniteSpeciale": "Truites d'Acier",
+    "armee": {
+      "fantassins": 10000,
+      "archers": 3000,
+      "cavalerie": 2500,
+      "flotte": 5
+    },
+    "imagePath": "image/logo/logotully.png"
+  },
+  {
+    "nom": "Maison Greyjoy",
+    "key": "Greyjoy",
+    "type": "majeure",
+    "region": "Les Îles de Fer",
+    "croyance": "Dieu Noyé",
+    "renommee": 60,
+    "argent": "Faible",
+    "uniteSpeciale": "Capitaines de Fer",
+    "armee": {
+      "fantassins": 4000,
+      "archers": 1000,
+      "cavalerie": 500,
+      "flotte": 150,
+      "noteFlotte": "Fer-nés = flotte avant tout"
+    },
+    "imagePath": "image/logo/logogreyjoy.png"
+  },
+  {
+    "nom": "Maison Martell",
+    "key": "Martell",
+    "type": "majeure",
+    "region": "Dorne",
+    "croyance": "Foi des Sept",
+    "renommee": 65,
+    "argent": "Élevée",
+    "uniteSpeciale": "Lances du Soleil",
+    "armee": {
+      "fantassins": 8000,
+      "archers": 3000,
+      "cavalerie": 1500,
+      "flotte": 5
+    },
+    "imagePath": "image/logo/logomartell.png"
+  },
+  {
+    "nom": "Maison Targaryen",
+    "key": "Targaryen",
+    "type": "mineure",
+    "region": "Essos (dispersés)",
+    "croyance": "Aucune officielle / vestiges valyriens",
+    "renommee": 40,
+    "argent": "Très faible",
+    "uniteSpeciale": "Gardes du Dragon",
+    "armee": {
+      "fantassins": 400,
+      "archers": 150,
+      "cavalerie": 100,
+      "flotte": 3
+    },
+    "imagePath": "image/logo/logotargaryen.png"
+  },
+  {
+    "nom": "Maison Frey",
+    "key": "Frey",
+    "type": "mineure",
+    "region": "Le Conflans",
+    "croyance": "Foi des Sept",
+    "renommee": 30,
+    "argent": "Élevée",
+    "uniteSpeciale": "Gardiens des Jumeaux",
+    "armee": {
+      "fantassins": 2500,
+      "archers": 800,
+      "cavalerie": 500,
+      "flotte": 2
+    },
+    "imagePath": "image/logo/logofrey.png"
+  },
+  {
+    "nom": "Maison Tarly",
+    "key": "Tarly",
+    "type": "mineure",
+    "region": "Le Bief",
+    "croyance": "Foi des Sept",
+    "renommee": 45,
+    "argent": "Moyenne",
+    "uniteSpeciale": "Lames de Corcolline",
+    "armee": {
+      "fantassins": 2000,
+      "archers": 1200,
+      "cavalerie": 400,
+      "flotte": null
+    },
+    "imagePath": "image/logo/logotarly.png"
+  },
+  {
+    "nom": "Maison Bolton",
+    "key": "Bolton",
+    "type": "mineure",
+    "region": "Le Nord",
+    "croyance": "Anciens Dieux",
+    "renommee": 35,
+    "argent": "Moyenne",
+    "uniteSpeciale": "Écorcheurs",
+    "armee": {
+      "fantassins": 1800,
+      "archers": 600,
+      "cavalerie": 400,
+      "flotte": null
+    },
+    "imagePath": "image/logo/logobolton.png"
+  },
+  {
+    "nom": "Maison Karstark",
+    "key": "Karstark",
+    "type": "mineure",
+    "region": "Le Nord",
+    "croyance": "Anciens Dieux",
+    "renommee": 40,
+    "argent": "Faible",
+    "uniteSpeciale": "Haches du Nord",
+    "armee": {
+      "fantassins": 1500,
+      "archers": 500,
+      "cavalerie": 300,
+      "flotte": null
+    },
+    "imagePath": "image/logo/logokarstark.png"
+  },
+  {
+    "nom": "Maison Tyrell",
+    "key": "Tyrell",
+    "type": "mineure",
+    "region": "Le Bief",
+    "croyance": "Foi des Sept",
+    "renommee": 15,
+    "argent": "Très faible",
+    "uniteSpeciale": "Derniers Fidèles",
+    "armee": {
+      "fantassins": 1200,
+      "archers": 400,
+      "cavalerie": 300,
+      "flotte": null
+    },
+    "imagePath": "image/logo/logotyrell.png"
+  },
+  {
+    "nom": "Maison Dayne",
+    "key": "Dayne",
+    "type": "mineure",
+    "region": "Dorne",
+    "croyance": "Foi des Sept",
+    "renommee": 50,
+    "argent": "Moyenne",
+    "uniteSpeciale": "Épée du Matin",
+    "armee": {
+      "fantassins": 600,
+      "archers": 400,
+      "cavalerie": 200,
+      "flotte": null
+    },
+    "imagePath": "image/logo/logodayne.png"
+  },
+  {
+    "nom": "Sauvageons",
+    "key": "Sauvageons",
+    "type": "clan",
+    "region": "Le Nord (au-delà du Mur, historiquement)",
+    "croyance": "Anciens Dieux",
+    "renommee": 20,
+    "argent": "Très faible",
+    "uniteSpeciale": "Coureurs de Glace",
+    "armee": {
+      "guerriers": 600,
+      "archers": 300,
+      "eclaireurs": 150
+    },
+    "imagePath": "image/logo/logosauvageons.png"
+  }
+]

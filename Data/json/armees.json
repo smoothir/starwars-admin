@@ -1,0 +1,26 @@
+{
+  "MAISONS_MAJEURES": [
+    { "maison": "Gardener (Bief)", "fantassins": 25000, "archers": 8000, "cavalerie": 5000, "flotte": 80, "noteFlotte": "Redwyne" },
+    { "maison": "Lannister", "fantassins": 18000, "archers": 5000, "cavalerie": 5000, "flotte": 20 },
+    { "maison": "Arryn", "fantassins": 15000, "archers": 4000, "cavalerie": 3000, "flotte": 10 },
+    { "maison": "Baratheon", "fantassins": 14000, "archers": 4000, "cavalerie": 3500, "flotte": 40 },
+    { "maison": "Stark", "fantassins": 12000, "archers": 3500, "cavalerie": 2000, "flotte": 10 },
+    { "maison": "Tully", "fantassins": 10000, "archers": 3000, "cavalerie": 2500, "flotte": 5 },
+    { "maison": "Greyjoy", "fantassins": 4000, "archers": 1000, "cavalerie": 500, "flotte": 150, "noteFlotte": "Fer-nés = flotte avant tout" },
+    { "maison": "Martell", "fantassins": 8000, "archers": 3000, "cavalerie": 1500, "flotte": 5 }
+  ],
+
+  "MAISONS_MINEURES": [
+    { "maison": "Frey", "fantassins": 2500, "archers": 800, "cavalerie": 500, "flotte": 2 },
+    { "maison": "Tarly", "fantassins": 2000, "archers": 1200, "cavalerie": 400, "flotte": null },
+    { "maison": "Bolton", "fantassins": 1800, "archers": 600, "cavalerie": 400, "flotte": null },
+    { "maison": "Karstark", "fantassins": 1500, "archers": 500, "cavalerie": 300, "flotte": null },
+    { "maison": "Tyrell", "fantassins": 1200, "archers": 400, "cavalerie": 300, "flotte": null },
+    { "maison": "Targaryen", "fantassins": 400, "archers": 150, "cavalerie": 100, "flotte": 3 },
+    { "maison": "Dayne", "fantassins": 600, "archers": 400, "cavalerie": 200, "flotte": null }
+  ],
+
+  "CLANS": [
+    { "clan": "Sauvageons", "guerriers": 600, "archers": 300, "eclaireurs": 150 }
+  ]
+}
