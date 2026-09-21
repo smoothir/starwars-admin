@@ -1,10 +1,10 @@
-# Westeros Origin — Site admin (déploiement séparé)
+# RP Origin — Site admin (déploiement séparé)
 
-Ce dépôt est une version **autonome** du site d'admin (maisons / régions /
-profils) : il ne contient que ce qui est nécessaire pour le faire tourner
-tout seul, séparément du bot Discord. Il se connecte à la **même base
-MongoDB** que le bot, donc toute modification faite ici est immédiatement
-visible sur Discord et inversement — sans rien dupliquer.
+Ce dépôt est une version **autonome** du site d'admin (profils de
+personnages) : il ne contient que ce qui est nécessaire pour le faire
+tourner tout seul, séparément du bot Discord. Il se connecte à la **même
+base MongoDB** que le bot, donc toute modification faite ici est
+immédiatement visible sur Discord et inversement — sans rien dupliquer.
 
 ## Où l'héberger
 
@@ -56,17 +56,16 @@ Puis ouvre `http://localhost:3000`.
 ## Structure de ce dépôt
 
 ```
-Data/               → les mêmes fichiers que le bot (config maisons/régions,
+Data/               → les mêmes fichiers que le bot (config factions/rôles,
                        accès MongoDB) — copiés depuis le projet du bot.
 web/server.js        → l'API + sert la page
 web/public/index.html → l'interface (une seule page, pas de framework)
 ```
 
-Si tu modifies un jour les maisons/régions côté bot (`Data/maisons.js`,
-`Data/regions.js`, `Data/json/*.json`), pense à recopier ces mêmes fichiers
-ici pour que le site reste synchro (ce sont des fichiers statiques, pas de
-la donnée en base — donc ils ne se mettent pas à jour tout seuls entre les
-deux dépôts).
+Si tu modifies un jour la config des factions/rôles côté bot
+(`Data/config.js`), pense à recopier ce même fichier ici pour que le site
+reste synchro (c'est un fichier statique, pas de la donnée en base — donc
+il ne se met pas à jour tout seul entre les deux dépôts).
 
 ## Sécurité
 

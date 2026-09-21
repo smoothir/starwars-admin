@@ -141,4 +141,42 @@ async function listAllAvatars() {
   return col.find({}).toArray();
 }
 
-module.exports = { findAvatar, reserveAvatar, releaseAvatar, upsertAvatarMeta, setReservationUrl, listAllAvatars, bufferFromAvatar, extensionFromContentType, normalizeFaceclaim };
+/**
+ * Enregistre une image envoyée directement (upload depuis le site admin,
+ * buffer déjà en mémoire) — contrairement à reserveAvatar(), ne télécharge
+ * rien depuis une URL. Écrase l'image existante pour ce faceclaim s'il y en
+ * avait déjà une (changement de portrait), sans vérifier de propriétaire :
+ * c'est un outil staff, l'accès au site est déjà protégé par mot de passe.
+ */
+async function upsertAvatarImage({ faceclaim, nomPrenom, userId, buffer, contentType }) {
+  const col = await getAvatarsCollection();
+  const key = normalizeFaceclaim(faceclaim);
+  const existing = await col.findOne({ faceclaimKey: key });
+
+  const doc = {
+    faceclaimKey: key,
+    faceclaim,
+    nomPrenom: nomPrenom || existing?.nomPrenom,
+    userId: userId || existing?.userId,
+    reservationUrl: existing?.reservationUrl || null,
+    imageBase64: buffer.toString('base64'),
+    contentType: contentType || 'image/png',
+    reservedAt: existing?.reservedAt || new Date(),
+    updatedAt: new Date(),
+  };
+
+  await col.updateOne({ faceclaimKey: key }, { $set: doc }, { upsert: true });
+
+  if (!existing) {
+    const configCol = await getAvatarsConfigCollection();
+    await configCol.updateOne(
+      { _id: 'stats' },
+      { $set: { updatedAt: new Date() }, $inc: { totalReserved: 1 } },
+      { upsert: true },
+    );
+  }
+
+  return doc;
+}
+
+module.exports = { findAvatar, reserveAvatar, releaseAvatar, upsertAvatarMeta, upsertAvatarImage, setReservationUrl, listAllAvatars, bufferFromAvatar, extensionFromContentType, normalizeFaceclaim };

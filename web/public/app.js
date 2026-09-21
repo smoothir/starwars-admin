@@ -135,6 +135,7 @@ function ouvrirEditeur(collection, id) {
   if (!item) return;
 
   state.itemActuel = { collection, id };
+  state.pendingPortraitDataUrl = null;
   document.getElementById('panneau-eyebrow').textContent = 'Profil';
   document.getElementById('panneau-titre').textContent = item.nomPrenom || item._id;
 
@@ -155,6 +156,13 @@ function fermerPanneau() {
 function panneauProfil(p) {
   const optionsStatut = (state.statuts.length ? state.statuts : ['Vivant', 'Blessé', 'Prisonnier', 'Mort'])
     .map(s => `<option value="${s}" ${p.statut === s ? 'selected' : ''}>${s}</option>`).join('');
+
+  const factions = state.listes.factions || [];
+  const factionActuelle = factions.find(f => f.categoryRoleId === p.categoryId) || factions[0] || null;
+  const optionsFaction = factions.map(f =>
+    `<option value="${escapeAttr(f.key)}" ${factionActuelle && f.key === factionActuelle.key ? 'selected' : ''}>${escapeHtml(f.label)}</option>`
+  ).join('');
+  const optionsRole = optionsRoleHTML(factionActuelle, p.roleId);
 
   const relations = p.relations || {};
   const relationsHTML = (state.listes.relationFactions || []).map(f => {
@@ -177,20 +185,24 @@ function panneauProfil(p) {
 
   return `
     <div class="portrait-profil">
-      <img src="/api/profils/${encodeURIComponent(p._id)}/avatar" alt="Portrait de ${escapeAttr(p.nomPrenom || '')}"
+      <img id="apercu-portrait" src="/api/profils/${encodeURIComponent(p._id)}/avatar" alt="Portrait de ${escapeAttr(p.nomPrenom || '')}"
            onerror="this.closest('.portrait-profil').classList.add('sans-image')">
       <div class="portrait-fallback">🖼️</div>
     </div>
+    <div class="champ champ-image">
+      <label for="f-portrait">Changer l'image</label>
+      <input type="file" id="f-portrait" accept="image/*" onchange="previewPortrait(this)">
+    </div>
 
     <div class="section-titre">🪶 Identité</div>
-    <p class="section-note">Ces informations viennent de la fiche validée côté Discord — non modifiables ici pour ne jamais se désynchroniser des rôles réels.</p>
+    <p class="section-note">⚠️ Modifier le rôle/faction ici ne change QUE ce qui est affiché — ça n'attribue pas le rôle Discord réel au joueur (à faire en plus sur Discord si besoin).</p>
     <div class="grille-champs">
-      <div class="champ"><label>Nom</label><input type="text" value="${escapeAttr(p.nomPrenom || '')}" disabled></div>
-      <div class="champ"><label>Surnom</label><input type="text" value="${escapeAttr(p.surnom || '')}" disabled></div>
-      <div class="champ"><label>Âge</label><input type="text" value="${escapeAttr(p.age ?? '')}" disabled></div>
-      <div class="champ"><label>Faceclaim</label><input type="text" value="${escapeAttr(p.faceclaim || '')}" disabled></div>
-      <div class="champ"><label>Rôle</label><input type="text" value="${escapeAttr(p.roleName || '')}" disabled></div>
-      <div class="champ"><label>Faction</label><input type="text" value="${escapeAttr(p.categoryName || '')}" disabled></div>
+      <div class="champ"><label for="f-nomPrenom">Nom</label><input type="text" id="f-nomPrenom" value="${escapeAttr(p.nomPrenom || '')}"></div>
+      <div class="champ"><label for="f-surnom">Surnom</label><input type="text" id="f-surnom" value="${escapeAttr(p.surnom || '')}"></div>
+      <div class="champ"><label for="f-age">Âge</label><input type="text" id="f-age" value="${escapeAttr(p.age ?? '')}"></div>
+      <div class="champ"><label for="f-faceclaim">Faceclaim</label><input type="text" id="f-faceclaim" value="${escapeAttr(p.faceclaim || '')}"></div>
+      <div class="champ"><label for="f-faction">Faction</label><select id="f-faction" onchange="onFactionChange()">${optionsFaction}</select></div>
+      <div class="champ"><label for="f-roleId">Rôle</label><select id="f-roleId">${optionsRole}</select></div>
     </div>
 
     <div class="section-titre">✒️ Fiche modifiable</div>
@@ -211,6 +223,35 @@ function panneauProfil(p) {
     <div class="actions-panneau">
       <button class="btn-principal" id="btn-enregistrer" onclick="sauvegarder()">Enregistrer les modifications</button>
     </div>`;
+}
+
+function optionsRoleHTML(faction, roleIdActuel) {
+  if (!faction) return '<option value="">—</option>';
+  return faction.grades.map(g =>
+    `<option value="${escapeAttr(g.id)}" ${g.id === roleIdActuel ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
+  ).join('');
+}
+
+// Rechargement du menu "Rôle" quand on change de faction dans l'éditeur.
+function onFactionChange() {
+  const factionKey = val('f-faction');
+  const faction = (state.listes.factions || []).find(f => f.key === factionKey);
+  document.getElementById('f-roleId').innerHTML = optionsRoleHTML(faction, null);
+}
+
+// Aperçu + mise en mémoire de la nouvelle image choisie (envoyée en base64
+// avec le reste du formulaire au moment d'enregistrer, pas avant).
+function previewPortrait(input) {
+  const fichier = input.files && input.files[0];
+  if (!fichier) return;
+  const lecteur = new FileReader();
+  lecteur.onload = () => {
+    state.pendingPortraitDataUrl = lecteur.result;
+    const img = document.getElementById('apercu-portrait');
+    img.src = lecteur.result;
+    img.closest('.portrait-profil').classList.remove('sans-image');
+  };
+  lecteur.readAsDataURL(fichier);
 }
 
 // -----------------------------------------------------------------------
@@ -234,6 +275,11 @@ async function sauvegarder() {
     document.querySelectorAll('[data-stat-key]').forEach(el => { stats[el.dataset.statKey] = el.value; });
 
     await fetchJSON(`/api/profils/${encodeURIComponent(id)}`, {
+      nomPrenom: val('f-nomPrenom'),
+      surnom: val('f-surnom'),
+      age: val('f-age'),
+      faceclaim: val('f-faceclaim'),
+      roleId: val('f-roleId'),
       statut: val('f-statut'),
       renommee: val('f-renommee'),
       gardePersonnelle: val('f-gardePersonnelle'),
@@ -241,8 +287,10 @@ async function sauvegarder() {
       notes: val('f-notes'),
       relations,
       stats,
+      portraitDataUrl: state.pendingPortraitDataUrl || undefined,
     }, 'PATCH');
 
+    state.pendingPortraitDataUrl = null;
     toast('Modifications enregistrées avec succès.', 'succes');
     await rafraichirEtRouvrir();
   } catch (error) {
