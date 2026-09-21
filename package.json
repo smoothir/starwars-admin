@@ -1,7 +1,7 @@
 {
-  "name": "westeros-origin-admin",
+  "name": "rp-profils-admin",
   "version": "1.0.0",
-  "description": "Site d'admin (maisons / régions / profils) pour Westeros Origin — connecté à la même base MongoDB que le bot Discord.",
+  "description": "Site d'admin (profils de personnages) — connecté à la même base MongoDB que le bot Discord.",
   "main": "web/server.js",
   "scripts": {
     "start": "node web/server.js"

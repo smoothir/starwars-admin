@@ -19,7 +19,14 @@ async function findAvatar(faceclaim) {
  *
  * @returns {{ ok: true, doc } | { ok: false, reason: 'already_taken', existing }}
  */
-async function reserveAvatar({ faceclaim, nomPrenom, userId, imageUrl }) {
+/**
+ * Enregistre en base l'image d'un faceclaim réservé via /reservation (étape 2),
+ * sans bloquer si le faceclaim est déjà pris par CE MÊME joueur (mise à jour).
+ * Contrairement à reserveAvatar(), ne télécharge pas l'image à nouveau si elle
+ * vient déjà d'être mise en cache par le salon de logs (imageUrl est déjà une
+ * URL Discord CDN stable créée par le bot lui-même).
+ */
+async function reserveAvatar({ faceclaim, nomPrenom, userId, imageUrl, reservationUrl }) {
   const col = await getAvatarsCollection();
   const key = normalizeFaceclaim(faceclaim);
 
@@ -41,6 +48,7 @@ async function reserveAvatar({ faceclaim, nomPrenom, userId, imageUrl }) {
     faceclaim,
     nomPrenom,
     userId,
+    reservationUrl: reservationUrl || existing?.reservationUrl || null,
     imageBase64: buffer.toString('base64'),
     contentType,
     reservedAt: existing?.reservedAt || new Date(),
@@ -89,4 +97,48 @@ function extensionFromContentType(contentType) {
   return 'png';
 }
 
-module.exports = { findAvatar, reserveAvatar, releaseAvatar, bufferFromAvatar, extensionFromContentType, normalizeFaceclaim };
+/**
+ * Enregistre/actualise un faceclaim SANS image (utilisé par /faceclaim add, où le
+ * staff saisit les infos à la main sans forcément avoir de visuel à mettre en cache).
+ * Ne touche pas à une image déjà en cache si l'entrée existait déjà.
+ */
+async function upsertAvatarMeta({ faceclaim, nomPrenom, userId, reservationUrl }) {
+  const col = await getAvatarsCollection();
+  const key = normalizeFaceclaim(faceclaim);
+  const existing = await col.findOne({ faceclaimKey: key });
+
+  const doc = {
+    faceclaimKey: key,
+    faceclaim,
+    nomPrenom,
+    userId,
+    reservationUrl: reservationUrl || existing?.reservationUrl || null,
+    reservedAt: existing?.reservedAt || new Date(),
+    updatedAt: new Date(),
+  };
+
+  await col.updateOne({ faceclaimKey: key }, { $set: doc }, { upsert: true });
+  return doc;
+}
+
+/**
+ * Met à jour uniquement le lien de réservation d'un avatar déjà enregistré
+ * (sans retélécharger l'image), une fois que le salon de réservation existe.
+ */
+async function setReservationUrl(faceclaim, reservationUrl) {
+  const col = await getAvatarsCollection();
+  const key = normalizeFaceclaim(faceclaim);
+  await col.updateOne({ faceclaimKey: key }, { $set: { reservationUrl, updatedAt: new Date() } });
+}
+
+/**
+ * Tous les faceclaims actuellement réservés (utilisé par /syncavatars pour
+ * reconstruire entièrement l'index des salons de lettres à partir de la vraie
+ * base — c'est la vraie source de vérité, pas les fiches validées).
+ */
+async function listAllAvatars() {
+  const col = await getAvatarsCollection();
+  return col.find({}).toArray();
+}
+
+module.exports = { findAvatar, reserveAvatar, releaseAvatar, upsertAvatarMeta, setReservationUrl, listAllAvatars, bufferFromAvatar, extensionFromContentType, normalizeFaceclaim };

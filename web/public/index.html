@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Westeros Admin — 356 AC</title>
+<title>RP Admin — An 9 ABY</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800;900&family=Cinzel+Decorative:wght@700;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -20,10 +20,10 @@
     <!-- ============ SIDEBAR ============ -->
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <img class="brand-sigil" src="/logo.jpg" alt="Logo Westeros Admin">
+        <img class="brand-sigil" src="/logo.jpg" alt="Logo RP Admin">
         <div class="brand-text">
-          <h1>Westeros<span>Admin</span></h1>
-          <p class="brand-sub">An 356 après la Conquête</p>
+          <h1>RP<span>Admin</span></h1>
+          <p class="brand-sub">An 9 après la Bataille de Yavin</p>
         </div>
       </div>
 
@@ -33,22 +33,9 @@
           <span class="nav-label">Profils RP</span>
           <span class="nav-count" id="count-profils"></span>
         </button>
-        <button class="nav-btn" data-collection="maisons" onclick="chargerDonnees('maisons')">
-          <span class="nav-icon">🏰</span>
-          <span class="nav-label">Maisons</span>
-          <span class="nav-count" id="count-maisons"></span>
-        </button>
-        <button class="nav-btn" data-collection="regions" onclick="chargerDonnees('regions')">
-          <span class="nav-icon">🗺️</span>
-          <span class="nav-label">Régions</span>
-          <span class="nav-count" id="count-regions"></span>
-        </button>
       </nav>
 
       <div class="sidebar-footer">
-        <button class="btn-secondaire btn-sync" id="btn-sync" onclick="synchroniser()">
-          <span id="sync-icone">🔄</span> Synchroniser
-        </button>
         <div class="statut-ligne">
           <span class="status-dot" id="status-dot"></span>
           <span id="connexion-statut">Prêt</span>
@@ -62,8 +49,8 @@
 
       <header class="main-header">
         <div class="header-titres">
-          <h2 id="titre-section">Bienvenue, Maître des Chuchoteurs</h2>
-          <p id="sous-titre" class="sous-titre">Choisissez une section dans le menu pour commencer.</p>
+          <h2 id="titre-section">Bienvenue</h2>
+          <p id="sous-titre" class="sous-titre">Choisissez « Profils RP » dans le menu pour commencer.</p>
         </div>
         <div class="search-wrap" id="search-wrap" hidden>
           <span class="search-icon">🔍</span>
@@ -75,7 +62,7 @@
         <div class="etat-vide">
           <div class="etat-vide-icone">🕯️</div>
           <p>En attente de sélection...</p>
-          <span class="etat-vide-sub">Choisissez « Profils », « Maisons » ou « Régions » dans le menu.</span>
+          <span class="etat-vide-sub">Choisissez « Profils RP » dans le menu.</span>
         </div>
       </div>
     </main>

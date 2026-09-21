@@ -9,12 +9,12 @@ const COLLECTION_TUPPERS = 'tuppers';
 const COLLECTION_TUPPER_MESSAGES = 'tupper_messages';
 const COLLECTION_GENERAL_TICKETS = 'general_tickets';
 const COLLECTION_MAISONS_STATE = 'maisons_state';
-const COLLECTION_MAISONS_CANON = 'maisons_canon';
-const COLLECTION_REGIONS_CANON = 'regions_canon';
 const COLLECTION_SERVER_STATE = 'server_state';
 const COLLECTION_RUMEURS = 'rumeurs';
 const COLLECTION_XP = 'xp';
 const COLLECTION_PROFILS = 'profils';
+const COLLECTION_CHARLIST_INDEX = 'charlist_index';
+const COLLECTION_INV = 'inv';
 
 let client = null;
 let db = null;
@@ -36,8 +36,26 @@ async function connect() {
       throw new Error("❌ MONGO_URI manquant dans le fichier .env");
     }
 
-    client = new MongoClient(uri);
-    await client.connect();
+    const newClient = new MongoClient(uri);
+
+    // IMPORTANT : le driver MongoDB émet un évènement 'error' sur le client
+    // en cas de souci réseau/TLS. Sans listener dessus, Node considère ça comme
+    // une erreur non gérée et FAIT PLANTER TOUT LE PROCESS (c'est ce qui causait
+    // les crashs complets du bot). On l'attrape ici pour juste logger.
+    newClient.on('error', (err) => {
+      console.error('❌ Erreur MongoDB (connexion) :', err?.message || err);
+    });
+
+    try {
+      await newClient.connect();
+    } catch (err) {
+      // Connexion échouée : on ferme proprement ce client raté pour ne pas
+      // laisser de sockets ouverts qui continueraient à émettre des erreurs.
+      await newClient.close().catch(() => {});
+      throw err;
+    }
+
+    client = newClient;
     db = client.db(DB_NAME);
     console.log('✅ Connecté à MongoDB (base "westerosorigin")');
     return db;
@@ -158,24 +176,23 @@ async function getRegionsStateCollection() {
 }
 
 /**
- * Collection "maisons_canon" : la fiche OFFICIELLE de chaque maison (nom, type,
- * région, croyance, unité spéciale, armée, renommée/argent de base). C'est la
- * source de vérité partagée par le bot ET le site admin — remplace les deux
- * copies séparées de Data/json/maisons.json qui se désynchronisaient.
+ * Collection "charlist_index" : pour chaque salon de faction du forum de
+ * personnages (/synclistchara), garde l'ID du message d'index à éditer, pour
+ * toujours mettre à jour le même message plutôt que d'en recréer un nouveau.
  */
-async function getMaisonsCanonCollection() {
+async function getCharlistIndexCollection() {
   const database = await connect();
-  return database.collection(COLLECTION_MAISONS_CANON);
+  return database.collection(COLLECTION_CHARLIST_INDEX);
 }
 
 /**
- * Collection "regions_canon" : la fiche OFFICIELLE de chaque région (maison
- * dirigeante, capitale, climat, spécialité, richesse, statut politique,
- * instabilité, armée). Même principe que maisons_canon ci-dessus.
+ * Collection "inv" : l'inventaire de chaque profil (un document par personnage,
+ * _id = profileId, { items: { itemId: quantite } }). Le catalogue des objets
+ * (nom, emoji, description) vit lui dans Data/inv.json, pas en base.
  */
-async function getRegionsCanonCollection() {
+async function getInvCollection() {
   const database = await connect();
-  return database.collection(COLLECTION_REGIONS_CANON);
+  return database.collection(COLLECTION_INV);
 }
 
 module.exports = {
@@ -193,6 +210,6 @@ module.exports = {
   getProfilsCollection,
   getMaisonsStateCollection,
   getRegionsStateCollection,
-  getMaisonsCanonCollection,
-  getRegionsCanonCollection,
+  getCharlistIndexCollection,
+  getInvCollection,
 };
