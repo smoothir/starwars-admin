@@ -49,12 +49,6 @@ app.use((req, res, next) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Le logo vit à la racine du projet (à côté du .env), pas dans web/public,
-// donc il a besoin de sa propre route pour être accessible depuis le navigateur.
-app.get('/logo.jpg', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'logo.jpg'));
-});
-
 // ---------------------------------------------------------------------------
 // PROFILS
 // ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ const state = {
 // Démarrage
 // -----------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
-  genererBraises();
+  genererEtoiles();
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fermerPanneau(); });
 
   Promise.allSettled([
@@ -26,13 +26,13 @@ document.addEventListener('DOMContentLoaded', () => {
   ]).then(() => setStatutConnexion(true));
 });
 
-function genererBraises() {
+function genererEtoiles() {
   const conteneur = document.getElementById('particules');
-  const n = window.innerWidth < 700 ? 10 : 22;
+  const n = window.innerWidth < 700 ? 12 : 28;
   for (let i = 0; i < n; i++) {
     const b = document.createElement('div');
-    b.className = 'braise';
-    b.style.setProperty('--s', `${2 + Math.random() * 4}px`);
+    b.className = 'etoile';
+    b.style.setProperty('--s', `${1.5 + Math.random() * 3}px`);
     b.style.left = `${Math.random() * 100}%`;
     b.style.setProperty('--dur-fly', `${9 + Math.random() * 10}s`);
     b.style.setProperty('--delay', `${Math.random() * 12}s`);

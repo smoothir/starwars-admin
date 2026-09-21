@@ -1,38 +1,41 @@
 /* =========================================================================
-   Westeros Admin — thème "conseil restreint"
-   Palette : fer / nuit / or / sang. Animations CSS uniquement, pas de son.
+   RP Admin — thème "HUD impérial"
+   Palette : jaune Star Wars / bleu sabre laser / noir spatial.
+   Animations CSS uniquement, pas de son.
    ========================================================================= */
 
 :root {
-  --bg-void: #05060a;
-  --bg-deep: #0a0d16;
-  --bg-panel: #10131e;
-  --bg-card: #151926;
-  --bg-card-hover: #1b2032;
-  --bg-input: #0c0f18;
+  --bg-void: #05070c;
+  --bg-deep: #090c14;
+  --bg-panel: #0d111c;
+  --bg-card: #121826;
+  --bg-card-hover: #17203a;
+  --bg-input: #0a0e17;
   --border-subtle: rgba(255, 255, 255, 0.07);
   --border-soft: rgba(255, 255, 255, 0.13);
-  --border-gold: rgba(212, 175, 55, 0.45);
+  --border-gold: rgba(255, 216, 42, 0.45);
 
-  --gold: #d4af37;
-  --gold-bright: #f2cf6a;
-  --gold-dim: #8a7328;
-  --crimson: #9c1c2e;
-  --crimson-bright: #e0273f;
-  --emerald: #2f9e6e;
+  --gold: #ffd82a;
+  --gold-bright: #fff27a;
+  --gold-dim: #a3891c;
+  --blue: #3fc5ff;
+  --blue-bright: #8fe3ff;
+  --crimson: #a3202c;
+  --crimson-bright: #ff3b48;
+  --emerald: #2fbe7e;
   --steel: #7d8aa3;
 
-  --text-primary: #f3f4f8;
-  --text-secondary: #a4abbe;
-  --text-muted: #626a7d;
+  --text-primary: #f2f5fb;
+  --text-secondary: #9aa6bd;
+  --text-muted: #5d6883;
 
-  --radius-lg: 18px;
-  --radius: 12px;
-  --radius-sm: 8px;
+  --radius-lg: 14px;
+  --radius: 8px;
+  --radius-sm: 5px;
 
   --shadow-soft: 0 10px 30px -12px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 25px 70px -20px rgba(0, 0, 0, 0.75);
-  --shadow-gold: 0 0 0 1px var(--border-gold), 0 12px 40px -14px rgba(212, 175, 55, 0.25);
+  --shadow-gold: 0 0 0 1px var(--border-gold), 0 12px 40px -14px rgba(255, 216, 42, 0.25);
 
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -50,29 +53,43 @@ body {
   font-family: 'Inter', -apple-system, sans-serif;
   color: var(--text-primary);
   background:
-    radial-gradient(ellipse 1200px 600px at 15% -10%, rgba(156, 28, 46, 0.16), transparent 60%),
-    radial-gradient(ellipse 900px 500px at 100% 0%, rgba(212, 175, 55, 0.08), transparent 55%),
+    radial-gradient(ellipse 1200px 600px at 15% -10%, rgba(63, 197, 255, 0.10), transparent 60%),
+    radial-gradient(ellipse 900px 500px at 100% 0%, rgba(255, 216, 42, 0.07), transparent 55%),
     var(--bg-void);
   min-height: 100vh;
   overflow-x: hidden;
+  position: relative;
+}
+/* Léger quadrillage "HUD" en fond, purement décoratif */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(63, 197, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(63, 197, 255, 0.035) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 40%, transparent 100%);
 }
 
 h1, h2, h3, h4 {
-  font-family: 'Cinzel', serif;
+  font-family: 'Orbitron', sans-serif;
   margin: 0;
   letter-spacing: 0.02em;
 }
 
-::selection { background: rgba(212, 175, 55, 0.35); }
+::selection { background: rgba(255, 216, 42, 0.35); }
 
 /* Scrollbars */
-* { scrollbar-width: thin; scrollbar-color: rgba(212,175,55,0.35) transparent; }
+* { scrollbar-width: thin; scrollbar-color: rgba(255,216,42,0.35) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: rgba(212,175,55,0.3); border-radius: 10px; }
-*::-webkit-scrollbar-thumb:hover { background: rgba(212,175,55,0.55); }
+*::-webkit-scrollbar-thumb { background: rgba(255,216,42,0.3); border-radius: 10px; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(255,216,42,0.55); }
 
 /* =========================================================================
-   Particules d'ambiance (braises)
+   Particules d'ambiance (poussière d'étoiles)
    ========================================================================= */
 .particules {
   position: fixed;
@@ -81,13 +98,13 @@ h1, h2, h3, h4 {
   z-index: 0;
   overflow: hidden;
 }
-.braise {
+.etoile {
   position: absolute;
   bottom: -10px;
   width: var(--s, 4px);
   height: var(--s, 4px);
   border-radius: 50%;
-  background: radial-gradient(circle, var(--gold-bright), var(--crimson-bright) 70%, transparent);
+  background: radial-gradient(circle, #ffffff, var(--blue-bright) 60%, transparent 75%);
   opacity: 0;
   filter: blur(0.3px);
   animation: monter var(--dur-fly, 14s) linear infinite;
@@ -95,7 +112,7 @@ h1, h2, h3, h4 {
 }
 @keyframes monter {
   0%   { transform: translate(0, 0) scale(0.6); opacity: 0; }
-  8%   { opacity: 0.85; }
+  8%   { opacity: 0.9; }
   90%  { opacity: 0.5; }
   100% { transform: translate(var(--drift, 40px), -110vh) scale(1); opacity: 0; }
 }
@@ -136,15 +153,19 @@ h1, h2, h3, h4 {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 35% 30%, #1a2436, #060810 75%);
   border: 1px solid var(--border-gold);
-  filter: drop-shadow(0 0 10px rgba(224, 39, 63, 0.55));
+  filter: drop-shadow(0 0 10px rgba(63, 197, 255, 0.45));
   animation: respirer 5s ease-in-out infinite;
   flex-shrink: 0;
 }
+.brand-sigil svg { width: 24px; height: 24px; }
 @keyframes respirer {
   0%, 100% { transform: scale(1) rotate(0deg); }
-  50% { transform: scale(1.08) rotate(-3deg); }
+  50% { transform: scale(1.08) rotate(3deg); }
 }
 .brand-text h1 {
   font-size: 1.15rem;
@@ -195,7 +216,7 @@ h1, h2, h3, h4 {
   position: absolute;
   left: 0; top: 0; bottom: 0;
   width: 3px;
-  background: linear-gradient(180deg, var(--gold-bright), var(--crimson-bright));
+  background: linear-gradient(180deg, var(--gold-bright), var(--blue));
   transform: scaleY(0);
   transition: transform var(--dur) var(--ease);
 }
@@ -206,7 +227,7 @@ h1, h2, h3, h4 {
   transform: translateX(3px);
 }
 .nav-btn.active {
-  background: linear-gradient(90deg, rgba(212,175,55,0.14), rgba(212,175,55,0.02));
+  background: linear-gradient(90deg, rgba(255,216,42,0.14), rgba(255,216,42,0.02));
   color: var(--gold-bright);
   border-color: var(--border-gold);
 }
@@ -223,7 +244,7 @@ h1, h2, h3, h4 {
   min-width: 18px;
   text-align: center;
 }
-.nav-btn.active .nav-count { background: rgba(212,175,55,0.2); color: var(--gold-bright); }
+.nav-btn.active .nav-count { background: rgba(255,216,42,0.2); color: var(--gold-bright); }
 
 .sidebar-footer {
   margin-top: auto;
@@ -276,7 +297,7 @@ h1, h2, h3, h4 {
   position: absolute;
   top: -120px; right: -120px;
   width: 500px; height: 500px;
-  background: radial-gradient(circle, rgba(156,28,46,0.18), transparent 70%);
+  background: radial-gradient(circle, rgba(63,197,255,0.18), transparent 70%);
   pointer-events: none;
   z-index: -1;
   animation: deriver 12s ease-in-out infinite;
@@ -327,7 +348,7 @@ h1, h2, h3, h4 {
 .search-wrap input:focus {
   outline: none;
   border-color: var(--border-gold);
-  box-shadow: 0 0 0 3px rgba(212,175,55,0.12);
+  box-shadow: 0 0 0 3px rgba(255,216,42,0.12);
   width: 340px;
 }
 .search-icon {
@@ -424,7 +445,7 @@ h1, h2, h3, h4 {
   border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
   font-size: 1.3rem;
-  background: linear-gradient(145deg, rgba(212,175,55,0.16), rgba(156,28,46,0.14));
+  background: linear-gradient(145deg, rgba(255,216,42,0.16), rgba(63,197,255,0.14));
   border: 1px solid var(--border-subtle);
 }
 .ligne-corps { flex: 1; min-width: 0; }
@@ -457,8 +478,8 @@ h1, h2, h3, h4 {
   white-space: nowrap;
 }
 .badge-defaut { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
-.badge-or { background: rgba(212,175,55,0.15); color: var(--gold-bright); border-color: rgba(212,175,55,0.3); }
-.badge-sang { background: rgba(224,39,63,0.15); color: #ff6b7d; border-color: rgba(224,39,63,0.3); }
+.badge-or { background: rgba(255,216,42,0.15); color: var(--gold-bright); border-color: rgba(255,216,42,0.3); }
+.badge-sang { background: rgba(255,59,72,0.15); color: #ff6b7d; border-color: rgba(255,59,72,0.3); }
 .badge-vert { background: rgba(47,158,110,0.15); color: #5fd8a2; border-color: rgba(47,158,110,0.3); }
 .badge-acier { background: rgba(125,138,163,0.15); color: #b6c0d6; border-color: rgba(125,138,163,0.3); }
 
@@ -468,14 +489,14 @@ h1, h2, h3, h4 {
   font-family: 'Inter', sans-serif;
   font-size: 0.82rem;
   font-weight: 700;
-  color: #17100a;
+  color: #0a0d16;
   background: linear-gradient(135deg, var(--gold-bright), var(--gold));
   border: none;
   border-radius: 9px;
   cursor: pointer;
   transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), filter var(--dur) var(--ease);
 }
-.btn-modifier:hover { transform: translateY(-1px); box-shadow: 0 8px 20px -8px rgba(212,175,55,0.6); filter: brightness(1.05); }
+.btn-modifier:hover { transform: translateY(-1px); box-shadow: 0 8px 20px -8px rgba(255,216,42,0.6); filter: brightness(1.05); }
 .btn-modifier:active { transform: translateY(0) scale(0.97); }
 
 .aucun-resultat {
@@ -586,7 +607,7 @@ h1, h2, h3, h4 {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-family: 'Cinzel', serif;
+  font-family: 'Orbitron', sans-serif;
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -650,7 +671,7 @@ h1, h2, h3, h4 {
   padding: 6px 12px;
   border: 1px solid var(--border-gold);
   border-radius: var(--radius-sm);
-  background: rgba(212,175,55,0.12);
+  background: rgba(255,216,42,0.12);
   color: var(--gold);
   font-size: 0.78rem;
   font-weight: 700;
@@ -660,7 +681,7 @@ h1, h2, h3, h4 {
 .champ input:focus, .champ select:focus, .champ textarea:focus {
   outline: none;
   border-color: var(--border-gold);
-  box-shadow: 0 0 0 3px rgba(212,175,55,0.12);
+  box-shadow: 0 0 0 3px rgba(255,216,42,0.12);
   background: #0f1220;
 }
 .champ input:disabled {
@@ -685,7 +706,7 @@ h1, h2, h3, h4 {
   margin-bottom: 6px;
 }
 .armee-tile {
-  background: linear-gradient(160deg, rgba(212,175,55,0.08), rgba(255,255,255,0.02));
+  background: linear-gradient(160deg, rgba(255,216,42,0.08), rgba(255,255,255,0.02));
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 12px 10px;
@@ -703,7 +724,7 @@ h1, h2, h3, h4 {
   display: block;
 }
 .armee-tile .armee-valeur {
-  font-family: 'Cinzel', serif;
+  font-family: 'Orbitron', sans-serif;
   font-weight: 700;
   font-size: 1.05rem;
   color: var(--gold-bright);
@@ -716,7 +737,7 @@ h1, h2, h3, h4 {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   color: var(--text-primary);
-  font-family: 'Cinzel', serif;
+  font-family: 'Orbitron', sans-serif;
   font-weight: 700;
   font-size: 0.95rem;
 }
@@ -784,19 +805,19 @@ h1, h2, h3, h4 {
 .btn-principal {
   flex: 1;
   padding: 14px;
-  font-family: 'Cinzel', serif;
+  font-family: 'Orbitron', sans-serif;
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   letter-spacing: 0.03em;
-  color: #17100a;
-  background: linear-gradient(135deg, var(--gold-bright), var(--gold) 60%, var(--crimson-bright));
+  color: #0a0d16;
+  background: linear-gradient(135deg, var(--gold-bright), var(--gold) 55%, var(--blue));
   background-size: 200% 100%;
   background-position: 0 0;
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background-position 400ms var(--ease), transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
-  box-shadow: 0 10px 30px -12px rgba(212,175,55,0.5);
+  box-shadow: 0 10px 30px -12px rgba(255,216,42,0.5);
 }
 .btn-principal:hover { background-position: 100% 0; transform: translateY(-1px); }
 .btn-principal:active { transform: translateY(0) scale(0.98); }
@@ -805,7 +826,7 @@ h1, h2, h3, h4 {
   display: inline-block;
   width: 13px; height: 13px;
   border: 2px solid rgba(0,0,0,0.25);
-  border-top-color: #17100a;
+  border-top-color: #0a0d16;
   border-radius: 50%;
   margin-right: 8px;
   vertical-align: -2px;
