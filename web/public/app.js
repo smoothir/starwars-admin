@@ -1,9 +1,3 @@
-// =============================================================================
-// RP Admin — logique front
-// Site et API sur le même serveur : tous les appels utilisent des chemins
-// relatifs ("/api/..."), pas d'IP à configurer.
-// =============================================================================
-
 const AUTH_STORAGE_KEY = 'rpadmin_auth';
 
 const state = {
@@ -445,7 +439,7 @@ function panneauProfil(p) {
     </div>
 
     <div class="section-titre">🪶 Identité</div>
-    <p class="section-note">⚠️ Modifier le rôle/faction ici ne change QUE ce qui est affiché — ça n'attribue pas le rôle Discord réel au joueur (à faire en plus sur Discord si besoin).</p>
+    <p class="section-note">⚠️ Modifier le rôle/faction ici ne change QUE ce qui est affiché, ça n'attribue pas le rôle Discord réel au joueur (à faire en plus sur Discord si besoin).</p>
     <div class="grille-champs">
       <div class="champ"><label for="f-nomPrenom">Nom</label><input type="text" id="f-nomPrenom" value="${escapeAttr(p.nomPrenom || '')}"></div>
       <div class="champ"><label for="f-surnom">Surnom</label><input type="text" id="f-surnom" value="${escapeAttr(p.surnom || '')}"></div>
