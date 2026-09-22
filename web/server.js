@@ -42,7 +42,13 @@ if (!ADMIN_USER || !ADMIN_PASSWORD) {
   process.exit(1);
 }
 
-app.use((req, res, next) => {
+// Le site (HTML/CSS/JS/logo) reste public : c'est l'écran de connexion custom
+// de la page elle-même qui gère l'authentification, pas le navigateur. Seules
+// les routes /api/* sont protégées, et sans en-tête WWW-Authenticate — pour ne
+// jamais déclencher la popup native du navigateur par-dessus notre écran.
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.use('/api', (req, res, next) => {
   const header = req.headers.authorization;
   if (header) {
     const [scheme, encoded] = header.split(' ');
@@ -53,11 +59,8 @@ app.use((req, res, next) => {
       }
     }
   }
-  res.set('WWW-Authenticate', 'Basic realm="Admin RP"');
-  return res.status(401).send('Authentification requise.');
+  return res.status(401).json({ error: 'Authentification requise.' });
 });
-
-app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------------------------------------------------------------------------
 // PROFILS

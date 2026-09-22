@@ -4,6 +4,8 @@
 // relatifs ("/api/..."), pas d'IP à configurer.
 // =============================================================================
 
+const AUTH_STORAGE_KEY = 'rpadmin_auth';
+
 const state = {
   cache: { profils: [], inventaires: [] },
   catalogue: [],
@@ -11,6 +13,7 @@ const state = {
   listes: { relationFactions: [], relationLevels: [], defaultStats: [], statMax: 10 },
   collectionActuelle: null,
   itemActuel: null, // { type: 'profil' | 'catalogue' | 'inventaire', id }
+  auth: null, // "user:pass" encodé en base64 une fois connecté
 };
 
 // -----------------------------------------------------------------------
@@ -20,12 +23,89 @@ document.addEventListener('DOMContentLoaded', () => {
   genererEtoiles();
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fermerPanneau(); });
 
-  Promise.allSettled([
-    fetch('/api/profils').then(r => r.json()).then(d => { state.cache.profils = d; majCompteur('profils', d.length); }),
-    fetch('/api/statuts').then(r => r.json()).then(d => { state.statuts = d; }),
-    fetch('/api/lists').then(r => r.json()).then(d => { state.listes = d; }),
-  ]).then(() => setStatutConnexion(true));
+  document.getElementById('form-connexion').addEventListener('submit', onSubmitConnexion);
+  document.getElementById('btn-deconnexion').addEventListener('click', deconnexion);
+
+  // Session déjà ouverte dans cet onglet (sessionStorage) ? On revérifie
+  // qu'elle est toujours valide côté serveur avant de sauter l'écran de connexion.
+  const sauvegarde = sessionStorage.getItem(AUTH_STORAGE_KEY);
+  if (sauvegarde) {
+    state.auth = sauvegarde;
+    verifierSessionExistante();
+  }
 });
+
+async function verifierSessionExistante() {
+  try {
+    const r = await apiFetch('/api/statuts');
+    if (!r.ok) throw new Error('non autorisé');
+    afficherApplication();
+    demarrerApplication();
+  } catch {
+    state.auth = null;
+    sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+}
+
+// -----------------------------------------------------------------------
+// Écran de connexion
+// -----------------------------------------------------------------------
+async function onSubmitConnexion(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btn-connexion');
+  const erreurEl = document.getElementById('connexion-erreur');
+  erreurEl.hidden = true;
+
+  const user = val('c-user');
+  const pass = val('c-pass');
+  const texteOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>Connexion...';
+
+  const encoded = btoa(unescape(encodeURIComponent(`${user}:${pass}`)));
+  try {
+    const r = await fetch('/api/statuts', { headers: { Authorization: `Basic ${encoded}` } });
+    if (!r.ok) throw new Error('non autorisé');
+    state.auth = encoded;
+    sessionStorage.setItem(AUTH_STORAGE_KEY, encoded);
+    afficherApplication();
+    demarrerApplication();
+  } catch {
+    erreurEl.hidden = false;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = texteOriginal;
+  }
+}
+
+function deconnexion() {
+  state.auth = null;
+  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  fermerPanneau();
+  document.getElementById('app-shell').hidden = true;
+  document.getElementById('ecran-connexion').hidden = false;
+  document.getElementById('c-pass').value = '';
+  document.getElementById('c-user').focus();
+}
+
+function afficherApplication() {
+  document.getElementById('ecran-connexion').hidden = true;
+  document.getElementById('app-shell').hidden = false;
+}
+
+// Ajoute automatiquement l'en-tête d'authentification à chaque appel API.
+function apiFetch(url, options = {}) {
+  const headers = Object.assign({}, options.headers, state.auth ? { Authorization: `Basic ${state.auth}` } : {});
+  return fetch(url, { ...options, headers });
+}
+
+function demarrerApplication() {
+  Promise.allSettled([
+    apiFetch('/api/profils').then(r => r.json()).then(d => { state.cache.profils = d; majCompteur('profils', d.length); majCompteur('inventaire', d.length); }),
+    apiFetch('/api/statuts').then(r => r.json()).then(d => { state.statuts = d; }),
+    apiFetch('/api/lists').then(r => r.json()).then(d => { state.listes = d; }),
+  ]).then(() => setStatutConnexion(true));
+}
 
 function genererEtoiles() {
   const conteneur = document.getElementById('particules');
@@ -60,19 +140,20 @@ async function chargerDonnees(collection) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.collection === collection));
 
   const searchWrap = document.getElementById('search-wrap');
-  searchWrap.hidden = false;
-  const rechercheInput = document.getElementById('recherche');
-  rechercheInput.value = '';
-  rechercheInput.placeholder = 'Rechercher un personnage...';
 
   if (collection === 'profils') {
+    searchWrap.hidden = false;
+    const rechercheInput = document.getElementById('recherche');
+    rechercheInput.value = '';
+    rechercheInput.placeholder = 'Rechercher un personnage...';
     document.getElementById('titre-section').textContent = 'Profils RP';
     document.getElementById('sous-titre').textContent = 'Personnages joués sur le serveur.';
     await chargerProfils();
   } else if (collection === 'inventaire') {
+    searchWrap.hidden = true; // la recherche vit désormais dans le panneau d'inventaire
     document.getElementById('titre-section').textContent = 'Inventaire';
     document.getElementById('sous-titre').textContent = "Catalogue d'objets et inventaires des personnages.";
-    await chargerInventairePage();
+    afficherAccueilInventaire();
   }
 }
 
@@ -81,11 +162,12 @@ async function chargerProfils() {
   contenuDiv.innerHTML = Array.from({ length: 5 }).map(() => '<div class="squelette"></div>').join('');
 
   try {
-    const response = await fetch('/api/profils');
+    const response = await apiFetch('/api/profils');
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     state.cache.profils = data;
     majCompteur('profils', data.length);
+    majCompteur('inventaire', data.length);
     renderListeProfils(data);
     setStatutConnexion(true);
   } catch (error) {
@@ -124,44 +206,86 @@ function ligneHTML(item, index) {
 }
 
 // -----------------------------------------------------------------------
-// Inventaire : catalogue d'objets (haut de page) + inventaire par personnage
+// Inventaire : au lieu d'afficher tout de suite le catalogue et les
+// personnages, la page n'affiche qu'un bouton. Le contenu (catalogue +
+// inventaires par personnage) s'ouvre dans le panneau coulissant.
 // -----------------------------------------------------------------------
-async function chargerInventairePage() {
+function afficherAccueilInventaire() {
   const contenuDiv = document.getElementById('contenu');
-  contenuDiv.innerHTML = Array.from({ length: 3 }).map(() => '<div class="squelette"></div>').join('');
+  contenuDiv.innerHTML = `
+    <div class="hero-inventaire">
+      <div class="hero-icone">🎒</div>
+      <p>Consulte le catalogue d'objets et gère l'inventaire de chaque personnage depuis un seul panneau.</p>
+      <button class="btn-hero" onclick="ouvrirInventaireGlobal()">Ouvrir l'inventaire</button>
+    </div>`;
+}
+
+async function ouvrirInventaireGlobal() {
+  state.itemActuel = { type: 'inventaire-global' };
+  document.getElementById('panneau-eyebrow').textContent = 'Inventaire';
+  document.getElementById('panneau-titre').textContent = 'Catalogue & personnages';
+  document.getElementById('panneau-corps').innerHTML = Array.from({ length: 3 }).map(() => '<div class="squelette"></div>').join('');
+  document.getElementById('overlay').classList.add('visible');
+  document.getElementById('panneau-edition').classList.add('ouvert');
 
   try {
     const [catalogue, inventaires, profils] = await Promise.all([
-      fetch('/api/inventaire/catalogue').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
-      fetch('/api/inventaire').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
-      state.cache.profils.length ? Promise.resolve(state.cache.profils) : fetch('/api/profils').then(r => r.json()),
+      apiFetch('/api/inventaire/catalogue').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      apiFetch('/api/inventaire').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      state.cache.profils.length ? Promise.resolve(state.cache.profils) : apiFetch('/api/profils').then(r => r.json()),
     ]);
     state.catalogue = catalogue;
     state.cache.inventaires = inventaires;
     state.cache.profils = profils;
     majCompteur('inventaire', profils.length);
-
-    const quantiteParProfil = new Map(
-      inventaires.map(inv => [inv._id, Object.values(inv.items || {}).reduce((a, b) => a + b, 0)])
-    );
-
-    contenuDiv.innerHTML = `
-      <div class="section-titre">📦 Catalogue d'objets</div>
-      <div id="catalogue-liste">${catalogue.map(catalogueItemHTML).join('') || '<p class="section-note">Catalogue vide.</p>'}</div>
-      <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue(null)">+ Ajouter un objet</button>
-
-      <div class="section-titre" style="margin-top:34px">👤 Inventaires par personnage</div>
-      <div id="liste-personnages">
-        ${profils.map((p, i) => ligneInventaireHTML(p, quantiteParProfil.get(p._id) || 0, i)).join('') || "<div class='etat-vide'><p>Aucun personnage.</p></div>"}
-      </div>
-      <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>
-    `;
-    setStatutConnexion(true);
+    renderVueCatalogueGlobal();
   } catch (error) {
-    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de connexion à l'API</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
-    setStatutConnexion(false);
+    document.getElementById('panneau-corps').innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de connexion à l'API</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
     console.error('Erreur Fetch:', error);
   }
+}
+
+// Vue "accueil" du panneau d'inventaire : catalogue + liste des personnages.
+function renderVueCatalogueGlobal() {
+  state.itemActuel = { type: 'inventaire-global' };
+  const quantiteParProfil = new Map(
+    (state.cache.inventaires || []).map(inv => [inv._id, Object.values(inv.items || {}).reduce((a, b) => a + b, 0)])
+  );
+
+  document.getElementById('panneau-eyebrow').textContent = 'Inventaire';
+  document.getElementById('panneau-titre').textContent = 'Catalogue & personnages';
+  document.getElementById('panneau-corps').innerHTML = `
+    <div class="section-titre">📦 Catalogue d'objets</div>
+    <div id="catalogue-liste">${state.catalogue.map(catalogueItemHTML).join('') || '<p class="section-note">Catalogue vide.</p>'}</div>
+    <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue(null)">+ Ajouter un objet</button>
+
+    <div class="section-titre" style="margin-top:34px">👤 Inventaires par personnage</div>
+    <div class="champ" style="margin-bottom:14px">
+      <input type="text" id="recherche-inv-panel" placeholder="Rechercher un personnage..." oninput="filtrerListeInventairePanel()" autocomplete="off">
+    </div>
+    <div id="liste-personnages">
+      ${state.cache.profils.map((p, i) => ligneInventaireHTML(p, quantiteParProfil.get(p._id) || 0, i)).join('') || "<div class='etat-vide'><p>Aucun personnage.</p></div>"}
+    </div>
+  `;
+}
+
+function filtrerListeInventairePanel() {
+  const q = (val('recherche-inv-panel') || '').trim().toLowerCase();
+  document.querySelectorAll('#panneau-corps .ligne').forEach(l => {
+    l.classList.toggle('masquee', !(!q || (l.dataset.nom || '').includes(q)));
+  });
+}
+
+// Recharge uniquement catalogue + inventaires (pas les profils, inchangés) et
+// revient à la vue d'accueil du panneau.
+async function rafraichirInventaireGlobal() {
+  const [catalogue, inventaires] = await Promise.all([
+    apiFetch('/api/inventaire/catalogue').then(r => r.json()),
+    apiFetch('/api/inventaire').then(r => r.json()),
+  ]);
+  state.catalogue = catalogue;
+  state.cache.inventaires = inventaires;
+  renderVueCatalogueGlobal();
 }
 
 function catalogueItemHTML(item) {
@@ -194,7 +318,7 @@ function ligneInventaireHTML(profile, quantiteTotale, index) {
 
 function filtrerListe() {
   const q = document.getElementById('recherche').value.trim().toLowerCase();
-  const lignes = document.querySelectorAll('.ligne');
+  const lignes = document.querySelectorAll('.contenu .ligne');
   let visibles = 0;
   lignes.forEach(l => {
     const correspond = !q || (l.dataset.nom || '').includes(q);
@@ -219,9 +343,27 @@ function ouvrirEditeur(id) {
 
   const corps = document.getElementById('panneau-corps');
   corps.innerHTML = panneauProfil(item);
+  chargerPortraitActuel(item._id);
 
   document.getElementById('overlay').classList.add('visible');
   document.getElementById('panneau-edition').classList.add('ouvert');
+}
+
+// Le portrait vit derrière l'API protégée : on le récupère via fetch (avec
+// l'en-tête d'authentification) puis on le transforme en URL locale, plutôt
+// que de le mettre en src="" direct (qui n'enverrait pas l'authentification).
+async function chargerPortraitActuel(profileId) {
+  const img = document.getElementById('apercu-portrait');
+  if (!img) return;
+  try {
+    const r = await apiFetch(`/api/profils/${encodeURIComponent(profileId)}/avatar`);
+    if (!r.ok) throw new Error('pas de portrait');
+    const blob = await r.blob();
+    img.src = URL.createObjectURL(blob);
+    img.closest('.portrait-profil').classList.remove('sans-image');
+  } catch {
+    img.closest('.portrait-profil').classList.add('sans-image');
+  }
 }
 
 function fermerPanneau() {
@@ -262,9 +404,8 @@ function panneauProfil(p) {
   }).join('');
 
   return `
-    <div class="portrait-profil">
-      <img id="apercu-portrait" src="/api/profils/${encodeURIComponent(p._id)}/avatar" alt="Portrait de ${escapeAttr(p.nomPrenom || '')}"
-           onerror="this.closest('.portrait-profil').classList.add('sans-image')">
+    <div class="portrait-profil sans-image">
+      <img id="apercu-portrait" alt="Portrait de ${escapeAttr(p.nomPrenom || '')}">
       <div class="portrait-fallback">🖼️</div>
     </div>
     <div class="champ champ-image">
@@ -350,6 +491,7 @@ function ouvrirEditeurCatalogue(itemId) {
 function panneauCatalogueItem(item) {
   const isNew = !item;
   return `
+    <button class="btn-retour" onclick="renderVueCatalogueGlobal()">← Retour</button>
     <div class="section-titre">${isNew ? '➕ Nouvel objet' : "✏️ Modifier l'objet"}</div>
     <div class="grille-champs">
       <div class="champ"><label for="f-item-name">Nom</label><input type="text" id="f-item-name" value="${escapeAttr(item?.name || '')}"></div>
@@ -382,8 +524,7 @@ async function sauvegarderCatalogueItem(itemId) {
       await fetchJSON('/api/inventaire/catalogue', payload, 'POST');
     }
     toast('Objet enregistré avec succès.', 'succes');
-    fermerPanneau();
-    await chargerInventairePage();
+    await rafraichirInventaireGlobal();
   } catch (error) {
     toast(`Échec de la sauvegarde : ${error.message}`, 'erreur');
     console.error(error);
@@ -398,7 +539,7 @@ async function supprimerCatalogueItem(itemId) {
   try {
     await fetchJSON(`/api/inventaire/catalogue/${encodeURIComponent(itemId)}`, null, 'DELETE');
     toast('Objet supprimé du catalogue.', 'succes');
-    await chargerInventairePage();
+    await rafraichirInventaireGlobal();
   } catch (error) {
     toast(`Échec de la suppression : ${error.message}`, 'erreur');
   }
@@ -440,6 +581,7 @@ function panneauInventairePersonnage(profile, inventoryDoc) {
   const optionsCatalogue = state.catalogue.map(it => `<option value="${escapeAttr(it.id)}">${escapeHtml(it.emoji || '')} ${escapeHtml(it.name)}</option>`).join('');
 
   return `
+    <button class="btn-retour" onclick="renderVueCatalogueGlobal()">← Retour au catalogue</button>
     <div class="section-titre">🎒 Objets possédés</div>
     <div id="inv-items-liste">${lignes || '<p class="section-note">Inventaire vide.</p>'}</div>
 
@@ -452,7 +594,8 @@ function panneauInventairePersonnage(profile, inventoryDoc) {
 }
 
 async function rafraichirInventairePersonnage(profileId) {
-  await chargerInventairePage();
+  const inventaires = await apiFetch('/api/inventaire').then(r => r.json());
+  state.cache.inventaires = inventaires;
   ouvrirInventairePersonnage(profileId);
 }
 
@@ -547,7 +690,7 @@ async function rafraichirEtRouvrir() {
 }
 
 async function fetchJSON(url, body, method = 'PATCH') {
-  const response = await fetch(url, {
+  const response = await apiFetch(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
