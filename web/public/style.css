@@ -1053,3 +1053,15 @@ h1, h2, h3, h4 {
   .panneau-catalogue { width: 100vw; }
   .connexion-carte { padding: 32px 24px 26px; }
 }
+
+/* Masquer les flèches des champs de type number (Chrome, Safari, Edge, Opera) */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Masquer les flèches des champs de type number (Firefox) */
+input[type="number"] {
+  -moz-appearance: textfield;
+}
