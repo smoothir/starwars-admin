@@ -4,16 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RP Admin — An 9 ABY</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="logo.jpg">
 </head>
 <body>
-
-  <!-- Particules d'ambiance (poussière d'étoiles flottante, purement décoratif / CSS) -->
-  <div id="particules" class="particules" aria-hidden="true"></div>
 
   <!-- ============ ECRAN DE CONNEXION ============ -->
   <div id="ecran-connexion" class="ecran-connexion">
@@ -107,6 +101,19 @@
       <button class="btn-fermer" onclick="fermerPanneau()" aria-label="Fermer">✕</button>
     </div>
     <div id="panneau-corps" class="panneau-corps"></div>
+  </aside>
+
+  <!-- ============ PANNEAU CATALOGUE (s'ouvre à droite au clic) ============ -->
+  <div id="overlay-catalogue" class="overlay-catalogue" onclick="fermerCataloguePanel()"></div>
+  <aside id="panneau-catalogue" class="panneau-catalogue">
+    <div class="panneau-header">
+      <div>
+        <span class="panneau-eyebrow">Inventaire</span>
+        <h3 id="panneau-catalogue-titre">Catalogue d'objets</h3>
+      </div>
+      <button class="btn-fermer" onclick="fermerCataloguePanel()" aria-label="Fermer">✕</button>
+    </div>
+    <div id="panneau-catalogue-corps" class="panneau-corps"></div>
   </aside>
 
   <!-- Notifications -->

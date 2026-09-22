@@ -20,8 +20,14 @@ const state = {
 // Démarrage
 // -----------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
-  genererEtoiles();
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fermerPanneau(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (document.getElementById('panneau-catalogue').classList.contains('ouvert')) {
+      fermerCataloguePanel();
+    } else {
+      fermerPanneau();
+    }
+  });
 
   document.getElementById('form-connexion').addEventListener('submit', onSubmitConnexion);
   document.getElementById('btn-deconnexion').addEventListener('click', deconnexion);
@@ -105,21 +111,6 @@ function demarrerApplication() {
     apiFetch('/api/statuts').then(r => r.json()).then(d => { state.statuts = d; }),
     apiFetch('/api/lists').then(r => r.json()).then(d => { state.listes = d; }),
   ]).then(() => setStatutConnexion(true));
-}
-
-function genererEtoiles() {
-  const conteneur = document.getElementById('particules');
-  const n = window.innerWidth < 700 ? 12 : 28;
-  for (let i = 0; i < n; i++) {
-    const b = document.createElement('div');
-    b.className = 'etoile';
-    b.style.setProperty('--s', `${1.5 + Math.random() * 3}px`);
-    b.style.left = `${Math.random() * 100}%`;
-    b.style.setProperty('--dur-fly', `${9 + Math.random() * 10}s`);
-    b.style.setProperty('--delay', `${Math.random() * 12}s`);
-    b.style.setProperty('--drift', `${(Math.random() - 0.5) * 120}px`);
-    conteneur.appendChild(b);
-  }
 }
 
 function setStatutConnexion(ok) {
@@ -245,7 +236,9 @@ async function ouvrirInventaireGlobal() {
   }
 }
 
-// Vue "accueil" du panneau d'inventaire : catalogue + liste des personnages.
+// Vue "accueil" du panneau d'inventaire : bouton catalogue + liste des personnages.
+// Le catalogue lui-même ne s'affiche plus ici : il faut cliquer sur le bouton
+// pour l'ouvrir dans son propre panneau, qui glisse depuis la droite.
 function renderVueCatalogueGlobal() {
   state.itemActuel = { type: 'inventaire-global' };
   const quantiteParProfil = new Map(
@@ -255,17 +248,42 @@ function renderVueCatalogueGlobal() {
   document.getElementById('panneau-eyebrow').textContent = 'Inventaire';
   document.getElementById('panneau-titre').textContent = 'Catalogue & personnages';
   document.getElementById('panneau-corps').innerHTML = `
-    <div class="section-titre">📦 Catalogue d'objets</div>
-    <div id="catalogue-liste">${state.catalogue.map(catalogueItemHTML).join('') || '<p class="section-note">Catalogue vide.</p>'}</div>
-    <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue(null)">+ Ajouter un objet</button>
+    <button class="btn-catalogue-ouvrir" onclick="ouvrirCataloguePanel()">
+      <span>📦 Catalogue d'objets</span>
+      <span class="nav-count">${state.catalogue.length}</span>
+      <span class="fleche">→</span>
+    </button>
 
-    <div class="section-titre" style="margin-top:34px">👤 Inventaires par personnage</div>
+    <div class="section-titre" style="margin-top:30px">👤 Inventaires par personnage</div>
     <div class="champ" style="margin-bottom:14px">
       <input type="text" id="recherche-inv-panel" placeholder="Rechercher un personnage..." oninput="filtrerListeInventairePanel()" autocomplete="off">
     </div>
     <div id="liste-personnages">
       ${state.cache.profils.map((p, i) => ligneInventaireHTML(p, quantiteParProfil.get(p._id) || 0, i)).join('') || "<div class='etat-vide'><p>Aucun personnage.</p></div>"}
     </div>
+  `;
+}
+
+// -----------------------------------------------------------------------
+// Panneau "Catalogue d'objets" : s'ouvre à droite au clic sur le bouton
+// dans le panneau d'inventaire principal.
+// -----------------------------------------------------------------------
+function ouvrirCataloguePanel() {
+  document.getElementById('overlay-catalogue').classList.add('visible');
+  document.getElementById('panneau-catalogue').classList.add('ouvert');
+  renderCataloguePanelListe();
+}
+
+function fermerCataloguePanel() {
+  document.getElementById('overlay-catalogue').classList.remove('visible');
+  document.getElementById('panneau-catalogue').classList.remove('ouvert');
+}
+
+function renderCataloguePanelListe() {
+  document.getElementById('panneau-catalogue-titre').textContent = "Catalogue d'objets";
+  document.getElementById('panneau-catalogue-corps').innerHTML = `
+    <div id="catalogue-liste">${state.catalogue.map(catalogueItemHTML).join('') || '<p class="section-note">Catalogue vide.</p>'}</div>
+    <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue(null)">+ Ajouter un objet</button>
   `;
 }
 
@@ -286,6 +304,18 @@ async function rafraichirInventaireGlobal() {
   state.catalogue = catalogue;
   state.cache.inventaires = inventaires;
   renderVueCatalogueGlobal();
+}
+
+// Même chose, mais reste dans le panneau catalogue (utilisé après avoir
+// ajouté/modifié/supprimé un objet depuis ce panneau-là).
+async function rafraichirCataloguePanel() {
+  const [catalogue, inventaires] = await Promise.all([
+    apiFetch('/api/inventaire/catalogue').then(r => r.json()),
+    apiFetch('/api/inventaire').then(r => r.json()),
+  ]);
+  state.catalogue = catalogue;
+  state.cache.inventaires = inventaires;
+  renderCataloguePanelListe();
 }
 
 function catalogueItemHTML(item) {
@@ -369,6 +399,7 @@ async function chargerPortraitActuel(profileId) {
 function fermerPanneau() {
   document.getElementById('overlay').classList.remove('visible');
   document.getElementById('panneau-edition').classList.remove('ouvert');
+  fermerCataloguePanel();
   state.itemActuel = null;
 }
 
@@ -480,18 +511,14 @@ function ouvrirEditeurCatalogue(itemId) {
   const item = itemId ? state.catalogue.find(it => it.id === itemId) : null;
   state.itemActuel = { type: 'catalogue', id: itemId };
 
-  document.getElementById('panneau-eyebrow').textContent = 'Catalogue';
-  document.getElementById('panneau-titre').textContent = item ? item.name : 'Nouvel objet';
-  document.getElementById('panneau-corps').innerHTML = panneauCatalogueItem(item);
-
-  document.getElementById('overlay').classList.add('visible');
-  document.getElementById('panneau-edition').classList.add('ouvert');
+  document.getElementById('panneau-catalogue-titre').textContent = item ? item.name : 'Nouvel objet';
+  document.getElementById('panneau-catalogue-corps').innerHTML = panneauCatalogueItem(item);
 }
 
 function panneauCatalogueItem(item) {
   const isNew = !item;
   return `
-    <button class="btn-retour" onclick="renderVueCatalogueGlobal()">← Retour</button>
+    <button class="btn-retour" onclick="renderCataloguePanelListe()">← Retour</button>
     <div class="section-titre">${isNew ? '➕ Nouvel objet' : "✏️ Modifier l'objet"}</div>
     <div class="grille-champs">
       <div class="champ"><label for="f-item-name">Nom</label><input type="text" id="f-item-name" value="${escapeAttr(item?.name || '')}"></div>
@@ -524,7 +551,7 @@ async function sauvegarderCatalogueItem(itemId) {
       await fetchJSON('/api/inventaire/catalogue', payload, 'POST');
     }
     toast('Objet enregistré avec succès.', 'succes');
-    await rafraichirInventaireGlobal();
+    await rafraichirCataloguePanel();
   } catch (error) {
     toast(`Échec de la sauvegarde : ${error.message}`, 'erreur');
     console.error(error);
@@ -539,7 +566,7 @@ async function supprimerCatalogueItem(itemId) {
   try {
     await fetchJSON(`/api/inventaire/catalogue/${encodeURIComponent(itemId)}`, null, 'DELETE');
     toast('Objet supprimé du catalogue.', 'succes');
-    await rafraichirInventaireGlobal();
+    await rafraichirCataloguePanel();
   } catch (error) {
     toast(`Échec de la suppression : ${error.message}`, 'erreur');
   }
