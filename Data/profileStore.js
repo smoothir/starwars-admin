@@ -43,7 +43,7 @@ function buildDefaultRelations() {
  * Crée (ou met à jour) le profil d'un personnage à partir des infos de son ticket
  * de fiche, une fois celle-ci validée. Ne touche jamais aux champs modifiables
  * par le joueur (statut, garde personnelle, bourse, alliés, rivaux, renommée, notes)
- * s'ils existent déjà — seules les infos issues de la fiche sont (re)synchronisées.
+ * s'ils existent déjà  seules les infos issues de la fiche sont (re)synchronisées.
  */
 async function upsertProfileFromTicket(ticket) {
   const col = await getProfilsCollection();
@@ -179,7 +179,7 @@ async function setRelationLevel(profileId, factionKey, level) {
 
 /**
  * Tire des statistiques aléatoires (1 à STAT_MAX sur chacune des DEFAULT_STATS)
- * pour un personnage — utilisé par le bouton "🎲 Stats aléatoire" affiché une
+ * pour un personnage  utilisé par le bouton "🎲 Stats aléatoire" affiché une
  * fois la fiche validée. Ne fait rien si les stats ont déjà été tirées, pour
  * éviter qu'on puisse relancer indéfiniment en espérant de meilleures valeurs.
  * Retourne { profile, alreadyRolled }.

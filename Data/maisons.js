@@ -61,7 +61,7 @@ function getArmeeLines(armee) {
 
 /**
  * Charge la fiche "canon" de chaque maison depuis MongoDB (collection
- * "maisons_canon") — c'est désormais la source de vérité partagée par le bot
+ * "maisons_canon")  c'est désormais la source de vérité partagée par le bot
  * ET le site admin, fini les deux copies de fichier JSON qui se
  * désynchronisaient. Si la collection est vide (première mise en route), on
  * la pré-remplit avec le contenu du fichier JSON historique. En cas de souci

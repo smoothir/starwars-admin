@@ -134,7 +134,7 @@ async function setReservationUrl(faceclaim, reservationUrl) {
 /**
  * Tous les faceclaims actuellement réservés (utilisé par /syncavatars pour
  * reconstruire entièrement l'index des salons de lettres à partir de la vraie
- * base — c'est la vraie source de vérité, pas les fiches validées).
+ * base c'est la vraie source de vérité, pas les fiches validées).
  */
 async function listAllAvatars() {
   const col = await getAvatarsCollection();
@@ -143,7 +143,7 @@ async function listAllAvatars() {
 
 /**
  * Enregistre une image envoyée directement (upload depuis le site admin,
- * buffer déjà en mémoire) — contrairement à reserveAvatar(), ne télécharge
+ * buffer déjà en mémoire) contrairement à reserveAvatar(), ne télécharge
  * rien depuis une URL. Écrase l'image existante pour ce faceclaim s'il y en
  * avait déjà une (changement de portrait), sans vérifier de propriétaire :
  * c'est un outil staff, l'accès au site est déjà protégé par mot de passe.

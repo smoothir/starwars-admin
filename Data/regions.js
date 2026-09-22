@@ -47,7 +47,7 @@ function getRegionArmyLines(armee) {
 
 /**
  * Charge la fiche "canon" de chaque région depuis MongoDB (collection
- * "regions_canon") — même principe que initMaisons() dans Data/maisons.js.
+ * "regions_canon")  même principe que initMaisons() dans Data/maisons.js.
  * À appeler (et attendre) tout au début du démarrage, avant que quoi que ce
  * soit ne lise le contenu de REGIONS.
  */

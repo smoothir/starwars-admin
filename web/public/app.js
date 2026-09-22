@@ -156,7 +156,7 @@ async function chargerProfils() {
     renderListeProfils(data);
     setStatutConnexion(true);
   } catch (error) {
-    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de connexion à l'API</p><span class="etat-vide-sub">${escapeHtml(error.message)} — vérifie que le serveur (web/server.js) tourne et que tu es bien authentifié.</span></div>`;
+    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de connexion à l'API</p><span class="etat-vide-sub">${escapeHtml(error.message)} - vérifie que le serveur (web/server.js) tourne et que tu es bien authentifié.</span></div>`;
     setStatutConnexion(false);
     console.error('Erreur Fetch:', error);
   }
@@ -182,8 +182,8 @@ function ligneHTML(item, index) {
       <div class="ligne-corps">
         <div class="ligne-nom">${escapeHtml(item.nomPrenom || item._id)}</div>
         <div class="ligne-meta">
-          <span class="badge ${statutBadge}">${escapeHtml(item.statut || '—')}</span>
-          <span class="badge badge-defaut">${escapeHtml(item.roleName || 'Sans rôle')}${item.categoryName ? ` — ${escapeHtml(item.categoryName)}` : ''}</span>
+          <span class="badge ${statutBadge}">${escapeHtml(item.statut || '-')}</span>
+          <span class="badge badge-defaut">${escapeHtml(item.roleName || 'Sans rôle')}${item.categoryName ? ` - ${escapeHtml(item.categoryName)}` : ''}</span>
         </div>
       </div>
       <button class="btn-modifier" onclick="ouvrirEditeur('${jsAttr(item._id)}')">Modifier</button>
@@ -354,7 +354,7 @@ function filtrerListe() {
 }
 
 // -----------------------------------------------------------------------
-// Panneau d'édition — profil
+// Panneau d'édition - profil
 // -----------------------------------------------------------------------
 function ouvrirEditeur(id) {
   const item = state.cache.profils.find(x => x._id === id);
@@ -414,7 +414,7 @@ function panneauProfil(p) {
     const niveau = relations[f.key] ?? 3;
     const options = (state.listes.relationLevels || []).map((label, i) => {
       const val = i + 1;
-      return `<option value="${val}" ${niveau === val ? 'selected' : ''}>${val} — ${escapeHtml(label)}</option>`;
+      return `<option value="${val}" ${niveau === val ? 'selected' : ''}>${val} - ${escapeHtml(label)}</option>`;
     }).join('');
     return `<div class="champ"><label for="f-relation-${jsAttr(f.key)}">${escapeHtml(f.label)}</label>
       <select id="f-relation-${escapeAttr(f.key)}" data-relation-key="${escapeAttr(f.key)}">${options}</select></div>`;
@@ -470,7 +470,7 @@ function panneauProfil(p) {
 }
 
 function optionsRoleHTML(faction, roleIdActuel) {
-  if (!faction) return '<option value="">—</option>';
+  if (!faction) return '<option value="">-</option>';
   return faction.grades.map(g =>
     `<option value="${escapeAttr(g.id)}" ${g.id === roleIdActuel ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
   ).join('');
@@ -499,7 +499,7 @@ function previewPortrait(input) {
 }
 
 // -----------------------------------------------------------------------
-// Panneau d'édition — objet du catalogue (ajout ou modification)
+// Panneau d'édition - objet du catalogue (ajout ou modification)
 // -----------------------------------------------------------------------
 function ouvrirEditeurCatalogue(itemId) {
   const item = itemId ? state.catalogue.find(it => it.id === itemId) : null;
@@ -567,7 +567,7 @@ async function supprimerCatalogueItem(itemId) {
 }
 
 // -----------------------------------------------------------------------
-// Panneau d'édition — inventaire d'un personnage
+// Panneau d'édition - inventaire d'un personnage
 // -----------------------------------------------------------------------
 function ouvrirInventairePersonnage(profileId) {
   const profile = state.cache.profils.find(p => p._id === profileId);
@@ -656,7 +656,7 @@ async function ajouterItemPersonnage(profileId) {
 }
 
 // -----------------------------------------------------------------------
-// Sauvegarde — profil
+// Sauvegarde - profil
 // -----------------------------------------------------------------------
 function val(id) { const el = document.getElementById(id); return el ? el.value : undefined; }
 

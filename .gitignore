@@ -1,4 +1,4 @@
-# Secrets — ne JAMAIS pousser ça sur GitHub
+# Secrets  ne JAMAIS pousser ça sur GitHub
 .env
 .env.*
 !.env.example

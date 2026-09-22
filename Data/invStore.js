@@ -3,20 +3,20 @@
 // -----------------------------------------------------------------------
 // Le bot Discord (Data/invStore.js de son côté) lit le catalogue d'objets
 // depuis un fichier statique Data/inv.json. Ici, sur le site, le catalogue
-// est stocké dans MongoDB (collection "item_catalog") — parce qu'un fichier
+// est stocké dans MongoDB (collection "item_catalog")  parce qu'un fichier
 // modifié sur Render ne survit pas à un redéploiement.
 //
 // Résultat : tant que le bot n'est pas mis à jour pour lire lui aussi cette
 // collection Mongo, un objet ajouté/modifié/supprimé ICI (depuis le site)
 // n'apparaîtra PAS automatiquement dans les commandes Discord (/inventaire
 // ajouter, etc.), et inversement. Les quantités par personnage (collection
-// "inv"), elles, sont déjà partagées avec le bot — pas de souci de ce côté.
+// "inv"), elles, sont déjà partagées avec le bot  pas de souci de ce côté.
 // -----------------------------------------------------------------------
 
 const { getInvCollection, getItemCatalogCollection } = require('./mongo.js');
 
 // Catalogue de départ, utilisé pour "amorcer" la collection Mongo la toute
-// première fois (si elle est vide) — ensuite, tout passe par Mongo.
+// première fois (si elle est vide)  ensuite, tout passe par Mongo.
 const DEFAULT_CATALOG = [
   { id: 'sabre_laser', name: 'Sabre laser', emoji: '🗡️', category: 'Arme', description: 'Arme rituelle forgée avec un cristal kyber.' },
   { id: 'blaster', name: 'Pistolet blaster', emoji: '🔫', category: 'Arme', description: 'Arme de poing standard, à énergie.' },
@@ -100,7 +100,7 @@ async function updateCatalogItem(itemId, { name, emoji, category, description })
 /**
  * Supprime un objet du catalogue. Les personnages qui en possédaient gardent
  * l'entrée dans leur inventaire (avec une quantité), juste affichée avec un
- * nom générique — pas de suppression en cascade pour ne rien perdre en silence.
+ * nom générique  pas de suppression en cascade pour ne rien perdre en silence.
  */
 async function removeCatalogItem(itemId) {
   const col = await getItemCatalogCollection();

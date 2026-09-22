@@ -1,4 +1,4 @@
-// Copié depuis Data/config.js du bot (TITRES / REGIONS / MAISONS) — sert à peupler
+// Copié depuis Data/config.js du bot (TITRES / REGIONS / MAISONS)  sert à peupler
 // les listes déroulantes du site pour les champs identité d'un profil (Maison,
 // Région, Rôle). Si tu ajoutes/renommes un rôle ou une maison côté Discord dans
 // config.js, reporte le changement ici aussi pour que les deux restent alignés.

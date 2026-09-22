@@ -137,7 +137,7 @@ module.exports = {
   RELATION_LEVELS: ['Atroce', 'Médiocre', 'Neutre', 'Bonne', 'Excellente'],
 
   // ==========================================
-  // RÔLES STAR WARS (FACTIONS & GRADES) — ère 9 ABY
+  // RÔLES STAR WARS (FACTIONS & GRADES)  ère 9 ABY
   // ==========================================
   // `categoryRoleId` = rôle "en-tête" de la catégorie (celui qui commence par
   // ".　 ۫ ·" côté Discord), attribué automatiquement en plus du grade choisi.

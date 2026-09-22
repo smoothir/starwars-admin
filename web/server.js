@@ -30,7 +30,7 @@ const {
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
-// en base64 dans le corps JSON — une photo fait facilement 1-4 Mo encodée.
+// en base64 dans le corps JSON  une photo fait facilement 1-4 Mo encodée.
 app.use(express.json({ limit: '10mb' }));
 
 // --- Authentification basique (identifiants dans .env, jamais dans le code) ---
@@ -38,13 +38,13 @@ const ADMIN_USER = process.env.ADMIN_USER;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 if (!ADMIN_USER || !ADMIN_PASSWORD) {
-  console.error('❌ ADMIN_USER / ADMIN_PASSWORD manquants dans le .env — le site ne peut pas démarrer sans ça.');
+  console.error('❌ ADMIN_USER / ADMIN_PASSWORD manquants dans le .env  le site ne peut pas démarrer sans ça.');
   process.exit(1);
 }
 
 // Le site (HTML/CSS/JS/logo) reste public : c'est l'écran de connexion custom
 // de la page elle-même qui gère l'authentification, pas le navigateur. Seules
-// les routes /api/* sont protégées, et sans en-tête WWW-Authenticate — pour ne
+// les routes /api/* sont protégées, et sans en-tête WWW-Authenticate  pour ne
 // jamais déclencher la popup native du navigateur par-dessus notre écran.
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -84,7 +84,7 @@ app.patch('/api/profils/:id', async (req, res) => {
     const b = req.body || {};
 
     // Identité (nom, surnom, âge, faceclaim, rôle/faction) : éditable depuis
-    // le site. ⚠️ Ceci ne change QUE ce qui est affiché ici — ça n'attribue
+    // le site. ⚠️ Ceci ne change QUE ce qui est affiché ici  ça n'attribue
     // ni ne retire le rôle Discord réel du joueur, à faire en plus côté
     // Discord si besoin.
     ['nomPrenom', 'surnom', 'age', 'faceclaim'].forEach((key) => {
@@ -172,7 +172,7 @@ app.patch('/api/profils/:id', async (req, res) => {
 app.get('/api/statuts', (req, res) => res.json(STATUTS));
 
 // Données de référence (factions/rôles/relations/stats) pour construire le
-// panneau d'édition d'un profil côté site — copiées depuis Data/config.js et
+// panneau d'édition d'un profil côté site  copiées depuis Data/config.js et
 // Data/profileStore.js pour rester exactement alignées avec le bot.
 app.get('/api/lists', (req, res) => {
   res.json({
@@ -185,7 +185,7 @@ app.get('/api/lists', (req, res) => {
 });
 
 // Portrait (faceclaim) d'un personnage, servi à la volée depuis Mongo (avatars
-// stockés en base64) — pas chargé dans la liste des profils pour rester léger.
+// stockés en base64)  pas chargé dans la liste des profils pour rester léger.
 app.get('/api/profils/:id/avatar', async (req, res) => {
   try {
     const profile = await getProfile(req.params.id);
@@ -204,7 +204,7 @@ app.get('/api/profils/:id/avatar', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// INVENTAIRE — catalogue d'objets + inventaires par personnage
+// INVENTAIRE catalogue d'objets + inventaires par personnage
 // ---------------------------------------------------------------------------
 
 app.get('/api/inventaire/catalogue', async (req, res) => {

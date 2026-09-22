@@ -1,7 +1,3 @@
-/* =========================================================================
-   RP Admin — thème noir / blanc sobre, sans effets de fond.
-   ========================================================================= */
-
 @font-face {
   font-family: 'StarJedi';
   src: url('fonts/Starjedi.ttf') format('truetype');
@@ -357,7 +353,7 @@ h1, h2, h3, h4 {
 }
 
 /* =========================================================================
-   Contenu — listes & cartes
+   Contenu - listes & cartes
    ========================================================================= */
 .contenu {
   display: flex;
@@ -388,7 +384,7 @@ h1, h2, h3, h4 {
 .etat-vide p { font-size: 1rem; color: var(--text-secondary); margin: 0 0 4px; }
 .etat-vide-sub { font-size: 0.8rem; }
 
-/* ---------- Carte "héro" — section Inventaire (juste un bouton) ---------- */
+/* ---------- Carte "héro" - section Inventaire (juste un bouton) ---------- */
 .hero-inventaire {
   display: flex;
   flex-direction: column;

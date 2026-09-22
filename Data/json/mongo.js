@@ -87,7 +87,7 @@ async function getTuppersCollection() {
 
 /**
  * Collection "tupper_messages" : pour chaque message envoyé via un tupper, garde
- * l'auteur réel, le tupper utilisé et le contenu — pour permettre l'édition/suppression
+ * l'auteur réel, le tupper utilisé et le contenu pour permettre l'édition/suppression
  * via réaction (✏️ / ❌) et la modération.
  */
 async function getTupperMessagesCollection() {

@@ -29,7 +29,7 @@ function buildProfileId(userId, nomPrenom) {
  * Crée (ou met à jour) le profil d'un personnage à partir des infos de son ticket
  * de fiche, une fois celle-ci validée. Ne touche jamais aux champs modifiables
  * par le joueur (statut, garde personnelle, bourse, alliés, rivaux, renommée, notes)
- * s'ils existent déjà — seules les infos issues de la fiche sont (re)synchronisées.
+ * s'ils existent déjà seules les infos issues de la fiche sont (re)synchronisées.
  */
 async function upsertProfileFromTicket(ticket) {
   const col = await getProfilsCollection();

@@ -108,7 +108,7 @@ async function getTuppersCollection() {
 
 /**
  * Collection "tupper_messages" : pour chaque message envoyé via un tupper, garde
- * l'auteur réel, le tupper utilisé et le contenu — pour permettre l'édition/suppression
+ * l'auteur réel, le tupper utilisé et le contenu  pour permettre l'édition/suppression
  * via réaction (✏️ / ❌) et la modération.
  */
 async function getTupperMessagesCollection() {
@@ -197,7 +197,7 @@ async function getInvCollection() {
 
 /**
  * Collection "item_catalog" : le catalogue des objets (nom, emoji, catégorie,
- * description) — en base MongoDB (pas dans Data/inv.json), pour que le site
+ * description)  en base MongoDB (pas dans Data/inv.json), pour que le site
  * puisse le modifier de façon durable, y compris entre deux redéploiements.
  * ⚠️ Le bot Discord lit encore Data/inv.json de son côté : voir la note dans
  * Data/invStore.js pour synchroniser les deux si besoin.
