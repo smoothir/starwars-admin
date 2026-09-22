@@ -5,6 +5,8 @@
 require('dotenv').config();
 const path = require('path');
 const express = require('express');
+const session = require('express-session');
+const crypto = require('crypto');
 
 const {
   listAllProfiles,
@@ -38,17 +40,50 @@ const ADMIN_USER = process.env.ADMIN_USER;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 if (!ADMIN_USER || !ADMIN_PASSWORD) {
-  console.error('❌ ADMIN_USER / ADMIN_PASSWORD manquants dans le .env  le site ne peut pas démarrer sans ça.');
+  console.error('❌ ADMIN_USER / ADMIN_PASSWORD manquants dans le .env : le site ne peut pas démarrer sans ça.');
   process.exit(1);
 }
 
-// Le site (HTML/CSS/JS/logo) reste public : c'est l'écran de connexion custom
-// de la page elle-même qui gère l'authentification, pas le navigateur. Seules
-// les routes /api/* sont protégées, et sans en-tête WWW-Authenticate  pour ne
-// jamais déclencher la popup native du navigateur par-dessus notre écran.
+// --- Connexion Discord (OAuth2) — en plus du mot de passe, pas à la place ---
+const {
+  CLIENT_ID: DISCORD_CLIENT_ID,
+  CLIENT_SECRET: DISCORD_CLIENT_SECRET,
+  DISCORD_REDIRECT_URI,
+  GUILD_ID,
+  SESSION_SECRET,
+} = process.env;
+const DISCORD_OAUTH_READY = Boolean(DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_REDIRECT_URI && GUILD_ID);
+if (!DISCORD_OAUTH_READY) {
+  console.warn('Connexion Discord desactivee : CLIENT_SECRET / DISCORD_REDIRECT_URI manquant(s) dans le .env. Le mot de passe classique reste disponible.');
+}
+
+// Necessaire sur Render (et tout hebergeur derriere un proxy HTTPS) pour que
+// les cookies "secure" fonctionnent correctement.
+app.set('trust proxy', 1);
+
+app.use(session({
+  name: 'rpadmin.sid',
+  secret: SESSION_SECRET || ADMIN_PASSWORD, // repli sur ADMIN_PASSWORD si SESSION_SECRET pas encore rempli
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  },
+}));
+
+// Le site (HTML/CSS/JS/logo) reste public : c'est l'ecran de connexion custom
+// de la page elle-meme qui gere l'authentification, pas le navigateur. Seules
+// les routes /api/* sont protegees, et sans en-tete WWW-Authenticate, pour ne
+// jamais declencher la popup native du navigateur par-dessus notre ecran.
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Acces autorise si mot de passe (en-tete Basic) OU session Discord valide.
 app.use('/api', (req, res, next) => {
+  if (req.session.user) return next();
+
   const header = req.headers.authorization;
   if (header) {
     const [scheme, encoded] = header.split(' ');
@@ -60,6 +95,96 @@ app.use('/api', (req, res, next) => {
     }
   }
   return res.status(401).json({ error: 'Authentification requise.' });
+});
+
+// Qui est connecte (utilise par le site au chargement pour savoir si une
+// session Discord est deja ouverte et sauter l'ecran de connexion).
+app.get('/api/me', (req, res) => {
+  if (req.session.user) return res.json({ authenticated: true, via: 'discord', ...req.session.user });
+  res.json({ authenticated: false });
+});
+
+// ---------------------------------------------------------------------------
+// CONNEXION DISCORD (OAuth2)
+// ---------------------------------------------------------------------------
+
+app.get('/auth/discord', (req, res) => {
+  if (!DISCORD_OAUTH_READY) {
+    return res.status(503).send("Connexion Discord non configuree : CLIENT_SECRET, DISCORD_REDIRECT_URI et/ou GUILD_ID manquent dans le .env du site.");
+  }
+
+  // Anti-CSRF : valeur aleatoire verifiee au retour, avant d'accepter le "code".
+  const state = crypto.randomBytes(16).toString('hex');
+  req.session.oauthState = state;
+
+  const url = new URL('https://discord.com/oauth2/authorize');
+  url.searchParams.set('client_id', DISCORD_CLIENT_ID);
+  url.searchParams.set('redirect_uri', DISCORD_REDIRECT_URI);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'identify guilds.members.read');
+  url.searchParams.set('state', state);
+  res.redirect(url.toString());
+});
+
+app.get('/auth/discord/callback', async (req, res) => {
+  if (!DISCORD_OAUTH_READY) return res.status(503).send('Connexion Discord non configuree.');
+
+  const { code, state } = req.query;
+  if (!code || !state || state !== req.session.oauthState) {
+    return res.status(400).send("Requete invalide ou expiree, reviens en arriere et reessaie de te connecter.");
+  }
+  delete req.session.oauthState;
+
+  try {
+    const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: DISCORD_CLIENT_ID,
+        client_secret: DISCORD_CLIENT_SECRET,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: DISCORD_REDIRECT_URI,
+      }),
+    });
+    if (!tokenRes.ok) throw new Error(`Echange du token refuse par Discord (HTTP ${tokenRes.status}).`);
+    const token = await tokenRes.json();
+
+    const meRes = await fetch('https://discord.com/api/users/@me', {
+      headers: { Authorization: `Bearer ${token.access_token}` },
+    });
+    if (!meRes.ok) throw new Error("Impossible de recuperer l'identite Discord.");
+    const me = await meRes.json();
+
+    // Appartenance + roles sur LE serveur du bot : c'est ca qui determine si
+    // la personne est staff, pas juste le fait d'avoir un compte Discord.
+    const memberRes = await fetch(`https://discord.com/api/users/@me/guilds/${GUILD_ID}/member`, {
+      headers: { Authorization: `Bearer ${token.access_token}` },
+    });
+    if (memberRes.status === 404) {
+      return res.status(403).send("Tu n'es pas membre du serveur Discord du bot, connexion refusee.");
+    }
+    if (!memberRes.ok) throw new Error('Impossible de recuperer tes roles sur le serveur.');
+    const member = await memberRes.json();
+
+    if (!config.STAFF_ROLE_ID || !member.roles?.includes(config.STAFF_ROLE_ID)) {
+      return res.status(403).send("Tu n'as pas le role staff requis sur le serveur Discord, connexion refusee.");
+    }
+
+    req.session.user = {
+      id: me.id,
+      username: me.global_name || me.username,
+      avatar: me.avatar ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=64` : null,
+    };
+    res.redirect('/');
+  } catch (err) {
+    console.error('Erreur OAuth Discord :', err);
+    res.status(500).send('Erreur pendant la connexion Discord, regarde les logs du serveur.');
+  }
+});
+
+app.post('/auth/logout', (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
 });
 
 // ---------------------------------------------------------------------------

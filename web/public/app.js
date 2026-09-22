@@ -26,16 +26,28 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('form-connexion').addEventListener('submit', onSubmitConnexion);
   document.getElementById('btn-deconnexion').addEventListener('click', deconnexion);
 
-  // Session déjà ouverte dans cet onglet (sessionStorage) ? On revérifie
-  // qu'elle est toujours valide côté serveur avant de sauter l'écran de connexion.
-  const sauvegarde = sessionStorage.getItem(AUTH_STORAGE_KEY);
-  if (sauvegarde) {
-    state.auth = sauvegarde;
-    verifierSessionExistante();
-  }
+  // Deux façons d'être déjà connecté en arrivant sur la page :
+  // 1. Un cookie de session Discord valide (connexion via /auth/discord).
+  // 2. Un identifiant/mot de passe encore mémorisé dans cet onglet (sessionStorage).
+  verifierSessionExistante();
 });
 
 async function verifierSessionExistante() {
+  try {
+    const meRes = await fetch('/api/me');
+    const me = await meRes.json();
+    if (me.authenticated) {
+      afficherUtilisateurConnecte(me);
+      afficherApplication();
+      demarrerApplication();
+      return;
+    }
+  } catch { /* on retombe sur la vérification par mot de passe ci-dessous */ }
+
+  const sauvegarde = sessionStorage.getItem(AUTH_STORAGE_KEY);
+  if (!sauvegarde) return;
+
+  state.auth = sauvegarde;
   try {
     const r = await apiFetch('/api/statuts');
     if (!r.ok) throw new Error('non autorisé');
@@ -45,6 +57,15 @@ async function verifierSessionExistante() {
     state.auth = null;
     sessionStorage.removeItem(AUTH_STORAGE_KEY);
   }
+}
+
+function afficherUtilisateurConnecte(me) {
+  const badge = document.getElementById('topbar-user');
+  if (!me.username) { badge.hidden = true; return; }
+  document.getElementById('user-nom').textContent = me.username;
+  const avatar = document.getElementById('user-avatar');
+  if (me.avatar) { avatar.src = me.avatar; avatar.hidden = false; } else { avatar.hidden = true; }
+  badge.hidden = false;
 }
 
 // -----------------------------------------------------------------------
@@ -79,8 +100,10 @@ async function onSubmitConnexion(e) {
 }
 
 function deconnexion() {
+  fetch('/auth/logout', { method: 'POST' }).catch(() => {});
   state.auth = null;
   sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  document.getElementById('topbar-user').hidden = true;
   fermerPanneau();
   document.getElementById('app-shell').hidden = true;
   document.getElementById('ecran-connexion').hidden = false;

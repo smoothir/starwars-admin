@@ -145,6 +145,53 @@ h1, h2, h3, h4 {
 }
 .btn-connexion { width: 100%; margin-top: 6px; }
 
+.btn-discord {
+  display: block;
+  width: 100%;
+  text-align: center;
+  text-decoration: none;
+  background: #5865f2;
+  color: #ffffff !important;
+  box-shadow: none;
+}
+.btn-discord:hover { background: #4752c4; }
+.connexion-separateur {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.connexion-separateur::before,
+.connexion-separateur::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.topbar-right {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.topbar-user {
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+.user-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border-soft);
+}
+
 /* =========================================================================
    Layout général
    ========================================================================= */
@@ -182,7 +229,6 @@ h1, h2, h3, h4 {
 }
 .topbar-statut { justify-content: flex-start; cursor: default; }
 .btn-deconnexion {
-  justify-self: end; /* C'est la ligne magique : garde le bouton à droite à sa taille normale */
   cursor: pointer;
   padding: 9px 16px;
   border: 1px solid var(--border-subtle);

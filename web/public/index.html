@@ -16,6 +16,9 @@
       <h1 class="connexion-titre">Panel<br><span>ADMIN</span></h1>
       <p class="connexion-sub">Identifiez-vous</p>
 
+      <a href="/auth/discord" class="btn-principal btn-discord" id="btn-discord">🔐 Se connecter avec Discord</a>
+      <div class="connexion-separateur"><span>ou</span></div>
+
       <form id="form-connexion" class="connexion-form" autocomplete="off">
         <div class="champ">
           <label for="c-user">Identifiant</label>
@@ -49,7 +52,13 @@
           </div>
         </div>
 
-        <button class="topbar-side btn-deconnexion" id="btn-deconnexion" title="Se déconnecter">Déconnexion</button>
+        <div class="topbar-right">
+          <div class="topbar-side topbar-user" id="topbar-user" hidden>
+            <img id="user-avatar" class="user-avatar" alt="">
+            <span id="user-nom"></span>
+          </div>
+          <button class="topbar-side btn-deconnexion" id="btn-deconnexion" title="Se déconnecter">Déconnexion</button>
+        </div>
       </div>
 
       <nav class="topbar-nav">
