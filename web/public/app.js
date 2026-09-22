@@ -5,11 +5,12 @@
 // =============================================================================
 
 const state = {
-  cache: { profils: [] },
+  cache: { profils: [], inventaires: [] },
+  catalogue: [],
   statuts: [],
   listes: { relationFactions: [], relationLevels: [], defaultStats: [], statMax: 10 },
   collectionActuelle: null,
-  itemActuel: null, // { collection, id }
+  itemActuel: null, // { type: 'profil' | 'catalogue' | 'inventaire', id }
 };
 
 // -----------------------------------------------------------------------
@@ -52,15 +53,11 @@ function majCompteur(collection, n) {
 }
 
 // -----------------------------------------------------------------------
-// Chargement d'une catégorie (seule "profils" existe pour l'instant)
+// Chargement d'une catégorie : "Profils RP" ou "Inventaire"
 // -----------------------------------------------------------------------
 async function chargerDonnees(collection) {
   state.collectionActuelle = collection;
-
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.collection === collection));
-
-  document.getElementById('titre-section').textContent = 'Profils RP';
-  document.getElementById('sous-titre').textContent = 'Personnages joués sur le serveur.';
 
   const searchWrap = document.getElementById('search-wrap');
   searchWrap.hidden = false;
@@ -68,16 +65,28 @@ async function chargerDonnees(collection) {
   rechercheInput.value = '';
   rechercheInput.placeholder = 'Rechercher un personnage...';
 
+  if (collection === 'profils') {
+    document.getElementById('titre-section').textContent = 'Profils RP';
+    document.getElementById('sous-titre').textContent = 'Personnages joués sur le serveur.';
+    await chargerProfils();
+  } else if (collection === 'inventaire') {
+    document.getElementById('titre-section').textContent = 'Inventaire';
+    document.getElementById('sous-titre').textContent = "Catalogue d'objets et inventaires des personnages.";
+    await chargerInventairePage();
+  }
+}
+
+async function chargerProfils() {
   const contenuDiv = document.getElementById('contenu');
   contenuDiv.innerHTML = Array.from({ length: 5 }).map(() => '<div class="squelette"></div>').join('');
 
   try {
-    const response = await fetch(`/api/${collection}`);
+    const response = await fetch('/api/profils');
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    state.cache[collection] = data;
-    majCompteur(collection, data.length);
-    renderListe(collection, data);
+    state.cache.profils = data;
+    majCompteur('profils', data.length);
+    renderListeProfils(data);
     setStatutConnexion(true);
   } catch (error) {
     contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de connexion à l'API</p><span class="etat-vide-sub">${escapeHtml(error.message)} — vérifie que le serveur (web/server.js) tourne et que tu es bien authentifié.</span></div>`;
@@ -86,7 +95,7 @@ async function chargerDonnees(collection) {
   }
 }
 
-function renderListe(collection, data) {
+function renderListeProfils(data) {
   const contenuDiv = document.getElementById('contenu');
   if (!data || data.length === 0) {
     contenuDiv.innerHTML = "<div class='etat-vide'><div class='etat-vide-icone'>🕸️</div><p>Aucune donnée trouvée</p></div>";
@@ -110,7 +119,76 @@ function ligneHTML(item, index) {
           <span class="badge badge-defaut">${escapeHtml(item.roleName || 'Sans rôle')}${item.categoryName ? ` — ${escapeHtml(item.categoryName)}` : ''}</span>
         </div>
       </div>
-      <button class="btn-modifier" onclick="ouvrirEditeur('profils', '${jsAttr(item._id)}')">Modifier</button>
+      <button class="btn-modifier" onclick="ouvrirEditeur('${jsAttr(item._id)}')">Modifier</button>
+    </div>`;
+}
+
+// -----------------------------------------------------------------------
+// Inventaire : catalogue d'objets (haut de page) + inventaire par personnage
+// -----------------------------------------------------------------------
+async function chargerInventairePage() {
+  const contenuDiv = document.getElementById('contenu');
+  contenuDiv.innerHTML = Array.from({ length: 3 }).map(() => '<div class="squelette"></div>').join('');
+
+  try {
+    const [catalogue, inventaires, profils] = await Promise.all([
+      fetch('/api/inventaire/catalogue').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      fetch('/api/inventaire').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      state.cache.profils.length ? Promise.resolve(state.cache.profils) : fetch('/api/profils').then(r => r.json()),
+    ]);
+    state.catalogue = catalogue;
+    state.cache.inventaires = inventaires;
+    state.cache.profils = profils;
+    majCompteur('inventaire', profils.length);
+
+    const quantiteParProfil = new Map(
+      inventaires.map(inv => [inv._id, Object.values(inv.items || {}).reduce((a, b) => a + b, 0)])
+    );
+
+    contenuDiv.innerHTML = `
+      <div class="section-titre">📦 Catalogue d'objets</div>
+      <div id="catalogue-liste">${catalogue.map(catalogueItemHTML).join('') || '<p class="section-note">Catalogue vide.</p>'}</div>
+      <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue(null)">+ Ajouter un objet</button>
+
+      <div class="section-titre" style="margin-top:34px">👤 Inventaires par personnage</div>
+      <div id="liste-personnages">
+        ${profils.map((p, i) => ligneInventaireHTML(p, quantiteParProfil.get(p._id) || 0, i)).join('') || "<div class='etat-vide'><p>Aucun personnage.</p></div>"}
+      </div>
+      <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>
+    `;
+    setStatutConnexion(true);
+  } catch (error) {
+    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de connexion à l'API</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    setStatutConnexion(false);
+    console.error('Erreur Fetch:', error);
+  }
+}
+
+function catalogueItemHTML(item) {
+  return `
+    <div class="item-row">
+      <span class="item-emoji">${item.emoji || '❔'}</span>
+      <div class="item-corps">
+        <div class="item-nom">${escapeHtml(item.name)}</div>
+        <div class="item-meta"><span class="badge badge-defaut">${escapeHtml(item.category || 'Divers')}</span></div>
+      </div>
+      <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue('${jsAttr(item.id)}')">Modifier</button>
+      <button class="btn-secondaire btn-danger" onclick="supprimerCatalogueItem('${jsAttr(item.id)}')">Supprimer</button>
+    </div>`;
+}
+
+function ligneInventaireHTML(profile, quantiteTotale, index) {
+  const delay = `${Math.min(index, 14) * 35}ms`;
+  return `
+    <div class="ligne" style="--i:${delay}" data-nom="${escapeAttr((profile.nomPrenom || profile._id).toLowerCase())}">
+      <div class="ligne-sigil">🎒</div>
+      <div class="ligne-corps">
+        <div class="ligne-nom">${escapeHtml(profile.nomPrenom || profile._id)}</div>
+        <div class="ligne-meta">
+          <span class="badge badge-defaut">${quantiteTotale} objet${quantiteTotale > 1 ? 's' : ''}</span>
+        </div>
+      </div>
+      <button class="btn-modifier" onclick="ouvrirInventairePersonnage('${jsAttr(profile._id)}')">Voir l'inventaire</button>
     </div>`;
 }
 
@@ -119,7 +197,7 @@ function filtrerListe() {
   const lignes = document.querySelectorAll('.ligne');
   let visibles = 0;
   lignes.forEach(l => {
-    const correspond = !q || l.dataset.nom.includes(q);
+    const correspond = !q || (l.dataset.nom || '').includes(q);
     l.classList.toggle('masquee', !correspond);
     if (correspond) visibles += 1;
   });
@@ -128,13 +206,13 @@ function filtrerListe() {
 }
 
 // -----------------------------------------------------------------------
-// Panneau d'édition
+// Panneau d'édition — profil
 // -----------------------------------------------------------------------
-function ouvrirEditeur(collection, id) {
+function ouvrirEditeur(id) {
   const item = state.cache.profils.find(x => x._id === id);
   if (!item) return;
 
-  state.itemActuel = { collection, id };
+  state.itemActuel = { type: 'profil', id };
   state.pendingPortraitDataUrl = null;
   document.getElementById('panneau-eyebrow').textContent = 'Profil';
   document.getElementById('panneau-titre').textContent = item.nomPrenom || item._id;
@@ -255,7 +333,166 @@ function previewPortrait(input) {
 }
 
 // -----------------------------------------------------------------------
-// Sauvegarde
+// Panneau d'édition — objet du catalogue (ajout ou modification)
+// -----------------------------------------------------------------------
+function ouvrirEditeurCatalogue(itemId) {
+  const item = itemId ? state.catalogue.find(it => it.id === itemId) : null;
+  state.itemActuel = { type: 'catalogue', id: itemId };
+
+  document.getElementById('panneau-eyebrow').textContent = 'Catalogue';
+  document.getElementById('panneau-titre').textContent = item ? item.name : 'Nouvel objet';
+  document.getElementById('panneau-corps').innerHTML = panneauCatalogueItem(item);
+
+  document.getElementById('overlay').classList.add('visible');
+  document.getElementById('panneau-edition').classList.add('ouvert');
+}
+
+function panneauCatalogueItem(item) {
+  const isNew = !item;
+  return `
+    <div class="section-titre">${isNew ? '➕ Nouvel objet' : "✏️ Modifier l'objet"}</div>
+    <div class="grille-champs">
+      <div class="champ"><label for="f-item-name">Nom</label><input type="text" id="f-item-name" value="${escapeAttr(item?.name || '')}"></div>
+      <div class="champ"><label for="f-item-emoji">Emoji</label><input type="text" id="f-item-emoji" value="${escapeAttr(item?.emoji || '')}" maxlength="4"></div>
+      <div class="champ"><label for="f-item-category">Catégorie</label><input type="text" id="f-item-category" value="${escapeAttr(item?.category || '')}" placeholder="Arme, Équipement, Ressource..."></div>
+    </div>
+    <div class="champ"><label for="f-item-description">Description</label><textarea id="f-item-description">${escapeHtml(item?.description || '')}</textarea></div>
+
+    <div class="actions-panneau">
+      <button class="btn-principal" id="btn-enregistrer" onclick="sauvegarderCatalogueItem(${isNew ? 'null' : `'${jsAttr(item.id)}'`})">${isNew ? "Créer l'objet" : 'Enregistrer les modifications'}</button>
+    </div>`;
+}
+
+async function sauvegarderCatalogueItem(itemId) {
+  const btn = document.getElementById('btn-enregistrer');
+  const texteOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>Enregistrement...';
+
+  try {
+    const payload = {
+      name: val('f-item-name'),
+      emoji: val('f-item-emoji'),
+      category: val('f-item-category'),
+      description: val('f-item-description'),
+    };
+    if (itemId) {
+      await fetchJSON(`/api/inventaire/catalogue/${encodeURIComponent(itemId)}`, payload, 'PATCH');
+    } else {
+      await fetchJSON('/api/inventaire/catalogue', payload, 'POST');
+    }
+    toast('Objet enregistré avec succès.', 'succes');
+    fermerPanneau();
+    await chargerInventairePage();
+  } catch (error) {
+    toast(`Échec de la sauvegarde : ${error.message}`, 'erreur');
+    console.error(error);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = texteOriginal;
+  }
+}
+
+async function supprimerCatalogueItem(itemId) {
+  if (!confirm('Supprimer cet objet du catalogue ? Les personnages qui le possèdent garderont son entrée (avec sa quantité), affichée avec un nom générique.')) return;
+  try {
+    await fetchJSON(`/api/inventaire/catalogue/${encodeURIComponent(itemId)}`, null, 'DELETE');
+    toast('Objet supprimé du catalogue.', 'succes');
+    await chargerInventairePage();
+  } catch (error) {
+    toast(`Échec de la suppression : ${error.message}`, 'erreur');
+  }
+}
+
+// -----------------------------------------------------------------------
+// Panneau d'édition — inventaire d'un personnage
+// -----------------------------------------------------------------------
+function ouvrirInventairePersonnage(profileId) {
+  const profile = state.cache.profils.find(p => p._id === profileId);
+  if (!profile) return;
+  const inventoryDoc = (state.cache.inventaires || []).find(inv => inv._id === profileId);
+
+  state.itemActuel = { type: 'inventaire', id: profileId };
+  document.getElementById('panneau-eyebrow').textContent = 'Inventaire';
+  document.getElementById('panneau-titre').textContent = profile.nomPrenom || profile._id;
+  document.getElementById('panneau-corps').innerHTML = panneauInventairePersonnage(profile, inventoryDoc);
+
+  document.getElementById('overlay').classList.add('visible');
+  document.getElementById('panneau-edition').classList.add('ouvert');
+}
+
+function panneauInventairePersonnage(profile, inventoryDoc) {
+  const items = inventoryDoc?.items || {};
+  const entrees = Object.entries(items);
+
+  const lignes = entrees.map(([itemId, qty]) => {
+    const catalogItem = state.catalogue.find(it => it.id === itemId) || { id: itemId, name: itemId, emoji: '❔' };
+    return `
+      <div class="item-row">
+        <span class="item-emoji">${catalogItem.emoji || '❔'}</span>
+        <div class="item-corps"><div class="item-nom">${escapeHtml(catalogItem.name)}</div></div>
+        <input type="number" min="0" class="qte-input" id="qte-${escapeAttr(itemId)}" value="${qty}">
+        <button class="btn-secondaire" onclick="modifierQuantiteItem('${jsAttr(profile._id)}', '${jsAttr(itemId)}')">OK</button>
+        <button class="btn-secondaire btn-danger" onclick="supprimerItemPersonnage('${jsAttr(profile._id)}', '${jsAttr(itemId)}')">✕</button>
+      </div>`;
+  }).join('');
+
+  const optionsCatalogue = state.catalogue.map(it => `<option value="${escapeAttr(it.id)}">${escapeHtml(it.emoji || '')} ${escapeHtml(it.name)}</option>`).join('');
+
+  return `
+    <div class="section-titre">🎒 Objets possédés</div>
+    <div id="inv-items-liste">${lignes || '<p class="section-note">Inventaire vide.</p>'}</div>
+
+    <div class="section-titre" style="margin-top:26px">➕ Ajouter un objet</div>
+    <div class="ligne-ajout">
+      <select id="f-ajout-item">${optionsCatalogue || '<option value="">Catalogue vide</option>'}</select>
+      <input type="number" id="f-ajout-qte" min="1" value="1" style="flex:0 0 70px">
+      <button class="btn-secondaire" onclick="ajouterItemPersonnage('${jsAttr(profile._id)}')">Ajouter</button>
+    </div>`;
+}
+
+async function rafraichirInventairePersonnage(profileId) {
+  await chargerInventairePage();
+  ouvrirInventairePersonnage(profileId);
+}
+
+async function modifierQuantiteItem(profileId, itemId) {
+  const input = document.getElementById(`qte-${itemId}`);
+  const quantity = Number(input.value);
+  try {
+    await fetchJSON(`/api/inventaire/${encodeURIComponent(profileId)}/items/${encodeURIComponent(itemId)}`, { quantity }, 'PATCH');
+    toast('Quantité mise à jour.', 'succes');
+    await rafraichirInventairePersonnage(profileId);
+  } catch (error) {
+    toast(`Échec : ${error.message}`, 'erreur');
+  }
+}
+
+async function supprimerItemPersonnage(profileId, itemId) {
+  try {
+    await fetchJSON(`/api/inventaire/${encodeURIComponent(profileId)}/items/${encodeURIComponent(itemId)}`, null, 'DELETE');
+    toast('Objet retiré.', 'succes');
+    await rafraichirInventairePersonnage(profileId);
+  } catch (error) {
+    toast(`Échec : ${error.message}`, 'erreur');
+  }
+}
+
+async function ajouterItemPersonnage(profileId) {
+  const itemId = val('f-ajout-item');
+  const quantity = Number(val('f-ajout-qte')) || 1;
+  if (!itemId) { toast('Choisis un objet dans le catalogue.', 'erreur'); return; }
+  try {
+    await fetchJSON(`/api/inventaire/${encodeURIComponent(profileId)}/items`, { itemId, quantity }, 'POST');
+    toast('Objet ajouté.', 'succes');
+    await rafraichirInventairePersonnage(profileId);
+  } catch (error) {
+    toast(`Échec : ${error.message}`, 'erreur');
+  }
+}
+
+// -----------------------------------------------------------------------
+// Sauvegarde — profil
 // -----------------------------------------------------------------------
 function val(id) { const el = document.getElementById(id); return el ? el.value : undefined; }
 
@@ -303,13 +540,10 @@ async function sauvegarder() {
 }
 
 async function rafraichirEtRouvrir() {
-  const { collection, id } = state.itemActuel;
-  const response = await fetch(`/api/${collection}`);
-  const data = await response.json();
-  state.cache[collection] = data;
-  renderListe(collection, data);
+  const { id } = state.itemActuel;
+  await chargerProfils();
   filtrerListe();
-  ouvrirEditeur(collection, id);
+  ouvrirEditeur(id);
 }
 
 async function fetchJSON(url, body, method = 'PATCH') {

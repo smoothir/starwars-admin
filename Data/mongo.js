@@ -15,6 +15,7 @@ const COLLECTION_XP = 'xp';
 const COLLECTION_PROFILS = 'profils';
 const COLLECTION_CHARLIST_INDEX = 'charlist_index';
 const COLLECTION_INV = 'inv';
+const COLLECTION_ITEM_CATALOG = 'item_catalog';
 
 let client = null;
 let db = null;
@@ -187,12 +188,23 @@ async function getCharlistIndexCollection() {
 
 /**
  * Collection "inv" : l'inventaire de chaque profil (un document par personnage,
- * _id = profileId, { items: { itemId: quantite } }). Le catalogue des objets
- * (nom, emoji, description) vit lui dans Data/inv.json, pas en base.
+ * _id = profileId, { items: { itemId: quantite } }).
  */
 async function getInvCollection() {
   const database = await connect();
   return database.collection(COLLECTION_INV);
+}
+
+/**
+ * Collection "item_catalog" : le catalogue des objets (nom, emoji, catégorie,
+ * description) — en base MongoDB (pas dans Data/inv.json), pour que le site
+ * puisse le modifier de façon durable, y compris entre deux redéploiements.
+ * ⚠️ Le bot Discord lit encore Data/inv.json de son côté : voir la note dans
+ * Data/invStore.js pour synchroniser les deux si besoin.
+ */
+async function getItemCatalogCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_ITEM_CATALOG);
 }
 
 module.exports = {
@@ -212,4 +224,5 @@ module.exports = {
   getRegionsStateCollection,
   getCharlistIndexCollection,
   getInvCollection,
+  getItemCatalogCollection,
 };

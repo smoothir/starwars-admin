@@ -17,6 +17,16 @@ const {
 const config = require('../Data/config.js');
 const { getFactions, findGradeByRoleId } = require('../Data/factionHelper.js');
 const { findAvatar, upsertAvatarImage } = require('../Data/avatarStore.js');
+const {
+  getCatalog,
+  addCatalogItem,
+  updateCatalogItem,
+  removeCatalogItem,
+  listAllInventories,
+  addItem,
+  removeItem,
+  setItemQuantity,
+} = require('../Data/invStore.js');
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
@@ -187,6 +197,94 @@ app.get('/api/profils/:id/avatar', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).end();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// INVENTAIRE — catalogue d'objets + inventaires par personnage
+// ---------------------------------------------------------------------------
+
+app.get('/api/inventaire/catalogue', async (req, res) => {
+  try {
+    res.json(await getCatalog());
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/inventaire/catalogue', async (req, res) => {
+  try {
+    const { id, name, emoji, category, description } = req.body || {};
+    res.status(201).json(await addCatalogItem({ id, name, emoji, category, description }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/inventaire/catalogue/:itemId', async (req, res) => {
+  try {
+    const { name, emoji, category, description } = req.body || {};
+    res.json(await updateCatalogItem(req.params.itemId, { name, emoji, category, description }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/inventaire/catalogue/:itemId', async (req, res) => {
+  try {
+    const ok = await removeCatalogItem(req.params.itemId);
+    if (!ok) return res.status(404).json({ error: 'Objet introuvable.' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Inventaires de TOUS les personnages d'un coup (le site croise ensuite avec
+// la liste des profils, déjà chargée, pour afficher les noms).
+app.get('/api/inventaire', async (req, res) => {
+  try {
+    res.json(await listAllInventories());
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/inventaire/:profileId/items', async (req, res) => {
+  try {
+    const { itemId, quantity } = req.body || {};
+    const result = await addItem(req.params.profileId, itemId, Number(quantity) || 1);
+    if (!result.ok) return res.status(400).json({ error: `Objet inconnu (${itemId}).` });
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Fixe directement la quantité d'un objet (plutôt qu'ajouter/retirer un delta).
+app.patch('/api/inventaire/:profileId/items/:itemId', async (req, res) => {
+  try {
+    const { quantity } = req.body || {};
+    const result = await setItemQuantity(req.params.profileId, req.params.itemId, Number(quantity));
+    if (!result.ok) return res.status(400).json({ error: `Objet inconnu (${req.params.itemId}).` });
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/inventaire/:profileId/items/:itemId', async (req, res) => {
+  try {
+    const result = await removeItem(req.params.profileId, req.params.itemId, 999999);
+    if (!result.ok && result.reason === 'unknown_item') return res.status(400).json({ error: 'Objet inconnu.' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 

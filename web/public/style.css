@@ -678,6 +678,35 @@ h1, h2, h3, h4 {
   cursor: pointer;
 }
 .champ-image { margin-top: -4px; margin-bottom: 22px; }
+
+/* Lignes du catalogue d'objets et de l'inventaire d'un personnage */
+.item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 8px;
+}
+.item-emoji { font-size: 1.3rem; flex-shrink: 0; width: 26px; text-align: center; }
+.item-corps { flex: 1; min-width: 0; }
+.item-nom { font-weight: 700; font-size: 0.92rem; color: var(--text-primary); }
+.item-meta { margin-top: 3px; }
+.qte-input {
+  width: 62px;
+  flex-shrink: 0;
+  padding: 7px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  text-align: center;
+}
+.btn-danger { color: #ff6b7d; border-color: rgba(255,59,72,0.35); }
+.btn-danger:hover { border-color: var(--crimson-bright); color: var(--crimson-bright); }
+.ligne-ajout select { flex: 1; }
 .champ input:focus, .champ select:focus, .champ textarea:focus {
   outline: none;
   border-color: var(--border-gold);
