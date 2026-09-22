@@ -905,7 +905,36 @@ h1, h2, h3, h4 {
   display: flex;
   gap: 8px;
 }
-.ligne-ajout input { flex: 1; }
+/* Styliser les champs de la ligne d'ajout (Menu déroulant et Quantité) */
+.ligne-ajout select,
+.ligne-ajout input {
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  font-family: var(--font-text);
+  font-size: 0.88rem;
+  transition: border-color var(--dur) var(--ease);
+}
+
+/* Effet au clic (focus) */
+.ligne-ajout select:focus,
+.ligne-ajout input:focus {
+  outline: none;
+  border-color: var(--border-gold);
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.14);
+}
+
+/* Ajustements de taille spécifiques */
+.ligne-ajout select {
+  flex: 1;
+}
+
+.ligne-ajout input {
+  width: 65px;
+  text-align: center;
+}
 .btn-secondaire {
   padding: 0 16px;
   background: var(--bg-card);
@@ -996,6 +1025,14 @@ h1, h2, h3, h4 {
 }
 @keyframes toastSortie {
   to { opacity: 0; transform: translateX(40px) scale(0.95); }
+}
+
+/* Masquer la scrollbar de la navigation */
+.topbar-nav {
+  scrollbar-width: none; /* Pour Firefox */
+}
+.topbar-nav::-webkit-scrollbar {
+  display: none; /* Pour Chrome, Safari et Edge */
 }
 
 /* =========================================================================
