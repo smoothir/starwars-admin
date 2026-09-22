@@ -245,6 +245,8 @@ h1, h2, h3, h4 {
   align-items: center;
   gap: 8px;
   padding: 14px 2px 13px;
+  background: transparent; /* Retire le fond blanc par défaut du navigateur */
+  border: none;            /* Retire la bordure par défaut */
   color: var(--text-secondary);
   font-family: var(--font-text);
   font-size: 0.82rem;
