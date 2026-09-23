@@ -35,16 +35,8 @@ const app = express();
 // en base64 dans le corps JSON  une photo fait facilement 1-4 Mo encodée.
 app.use(express.json({ limit: '10mb' }));
 
-// --- Authentification basique (identifiants dans .env, jamais dans le code) ---
-const ADMIN_USER = process.env.ADMIN_USER;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-
-if (!ADMIN_USER || !ADMIN_PASSWORD) {
-  console.error('❌ ADMIN_USER / ADMIN_PASSWORD manquants dans le .env : le site ne peut pas démarrer sans ça.');
-  process.exit(1);
-}
-
-// --- Connexion Discord (OAuth2) — en plus du mot de passe, pas à la place ---
+// --- Connexion Discord (OAuth2) : SEUL moyen d'accéder au site, réservé aux
+// membres du serveur Discord qui ont le rôle Staff (Data/config.js). ---
 const {
   CLIENT_ID: DISCORD_CLIENT_ID,
   CLIENT_SECRET: DISCORD_CLIENT_SECRET,
@@ -54,7 +46,12 @@ const {
 } = process.env;
 const DISCORD_OAUTH_READY = Boolean(DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_REDIRECT_URI && GUILD_ID);
 if (!DISCORD_OAUTH_READY) {
-  console.warn('Connexion Discord desactivee : CLIENT_SECRET / DISCORD_REDIRECT_URI manquant(s) dans le .env. Le mot de passe classique reste disponible.');
+  console.error('❌ CLIENT_ID / CLIENT_SECRET / DISCORD_REDIRECT_URI / GUILD_ID manquant(s) dans le .env : la connexion Discord est le SEUL moyen d\'accéder au site, il ne peut pas démarrer sans ça.');
+  process.exit(1);
+}
+if (!SESSION_SECRET) {
+  console.error('❌ SESSION_SECRET manquant dans le .env : nécessaire pour signer les sessions (seul mécanisme d\'authentification restant).');
+  process.exit(1);
 }
 
 // Necessaire sur Render (et tout hebergeur derriere un proxy HTTPS) pour que
@@ -63,7 +60,7 @@ app.set('trust proxy', 1);
 
 app.use(session({
   name: 'rpadmin.sid',
-  secret: SESSION_SECRET || ADMIN_PASSWORD, // repli sur ADMIN_PASSWORD si SESSION_SECRET pas encore rempli
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -80,28 +77,21 @@ app.use(session({
 // jamais declencher la popup native du navigateur par-dessus notre ecran.
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Acces autorise si mot de passe (en-tete Basic) OU session Discord valide.
-app.use('/api', (req, res, next) => {
-  if (req.session.user) return next();
-
-  const header = req.headers.authorization;
-  if (header) {
-    const [scheme, encoded] = header.split(' ');
-    if (scheme === 'Basic' && encoded) {
-      const [user, pass] = Buffer.from(encoded, 'base64').toString('utf-8').split(':');
-      if (user === ADMIN_USER && pass === ADMIN_PASSWORD) {
-        return next();
-      }
-    }
-  }
-  return res.status(401).json({ error: 'Authentification requise.' });
-});
-
 // Qui est connecte (utilise par le site au chargement pour savoir si une
-// session Discord est deja ouverte et sauter l'ecran de connexion).
+// session Discord est deja ouverte et sauter l'ecran de connexion). Doit
+// rester déclarée AVANT le middleware d'auth ci-dessous : sinon ce dernier
+// bloque /api/me lui-même (401 permanent), et plus personne — même avec une
+// session Discord parfaitement valide — ne peut jamais passer l'écran de
+// connexion, puisque le site ne saurait plus jamais lui dire qu'il est connecté.
 app.get('/api/me', (req, res) => {
   if (req.session.user) return res.json({ authenticated: true, via: 'discord', ...req.session.user });
   res.json({ authenticated: false });
+});
+
+// Seule une session Discord valide (rôle Staff vérifié à la connexion) donne accès.
+app.use('/api', (req, res, next) => {
+  if (req.session.user) return next();
+  return res.status(401).json({ error: 'Authentification requise.' });
 });
 
 // ---------------------------------------------------------------------------
@@ -109,10 +99,6 @@ app.get('/api/me', (req, res) => {
 // ---------------------------------------------------------------------------
 
 app.get('/auth/discord', (req, res) => {
-  if (!DISCORD_OAUTH_READY) {
-    return res.status(503).send("Connexion Discord non configuree : CLIENT_SECRET, DISCORD_REDIRECT_URI et/ou GUILD_ID manquent dans le .env du site.");
-  }
-
   // Anti-CSRF : valeur aleatoire verifiee au retour, avant d'accepter le "code".
   const state = crypto.randomBytes(16).toString('hex');
   req.session.oauthState = state;
@@ -127,11 +113,9 @@ app.get('/auth/discord', (req, res) => {
 });
 
 app.get('/auth/discord/callback', async (req, res) => {
-  if (!DISCORD_OAUTH_READY) return res.status(503).send('Connexion Discord non configuree.');
-
   const { code, state } = req.query;
   if (!code || !state || state !== req.session.oauthState) {
-    return res.status(400).send("Requete invalide ou expiree, reviens en arriere et reessaie de te connecter.");
+    return res.redirect('/?auth_error=' + encodeURIComponent('Requete invalide ou expiree, reessaie de te connecter.'));
   }
   delete req.session.oauthState;
 
@@ -162,13 +146,13 @@ app.get('/auth/discord/callback', async (req, res) => {
       headers: { Authorization: `Bearer ${token.access_token}` },
     });
     if (memberRes.status === 404) {
-      return res.status(403).send("Tu n'es pas membre du serveur Discord du bot, connexion refusee.");
+      return res.redirect('/?auth_error=' + encodeURIComponent("Tu n'es pas membre du serveur Discord, connexion refusee."));
     }
     if (!memberRes.ok) throw new Error('Impossible de recuperer tes roles sur le serveur.');
     const member = await memberRes.json();
 
     if (!config.STAFF_ROLE_ID || !member.roles?.includes(config.STAFF_ROLE_ID)) {
-      return res.status(403).send("Tu n'as pas le role staff requis sur le serveur Discord, connexion refusee.");
+      return res.redirect('/?auth_error=' + encodeURIComponent("Tu n'as pas le role Staff requis sur le serveur Discord, connexion refusee."));
     }
 
     req.session.user = {
@@ -179,7 +163,7 @@ app.get('/auth/discord/callback', async (req, res) => {
     res.redirect('/');
   } catch (err) {
     console.error('Erreur OAuth Discord :', err);
-    res.status(500).send('Erreur pendant la connexion Discord, regarde les logs du serveur.');
+    res.redirect('/?auth_error=' + encodeURIComponent('Erreur pendant la connexion Discord, reessaie.'));
   }
 });
 

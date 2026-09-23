@@ -136,42 +136,31 @@ h1, h2, h3, h4 {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-.connexion-form { text-align: left; }
 .connexion-erreur {
-  margin: -6px 0 16px;
+  margin: 16px 0 0;
   font-size: 0.8rem;
   color: #ffffff;
   text-align: center;
 }
-.btn-connexion { width: 100%; margin-top: 6px; }
+.connexion-note {
+  margin: 14px 0 0;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.5;
+}
 
 .btn-discord {
   display: block;
   width: 100%;
   text-align: center;
   text-decoration: none;
-  background: #5865f2;
+  background: #5865f2 !important;
   color: #ffffff !important;
+  border-color: #5865f2 !important;
   box-shadow: none;
 }
-.btn-discord:hover { background: #4752c4; }
-.connexion-separateur {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 18px 0;
-  color: var(--text-muted);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-.connexion-separateur::before,
-.connexion-separateur::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--border-subtle);
-}
+.btn-discord:hover { background: #4752c4 !important; border-color: #4752c4 !important; }
 
 .topbar-right {
   justify-self: end;

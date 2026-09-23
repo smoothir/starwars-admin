@@ -1,5 +1,3 @@
-const AUTH_STORAGE_KEY = 'rpadmin_auth';
-
 const state = {
   cache: { profils: [], inventaires: [] },
   catalogue: [],
@@ -7,7 +5,6 @@ const state = {
   listes: { relationFactions: [], relationLevels: [], defaultStats: [], statMax: 10 },
   collectionActuelle: null,
   itemActuel: null, // { type: 'profil' | 'catalogue' | 'inventaire', id }
-  auth: null, // "user:pass" encodé en base64 une fois connecté
 };
 
 // -----------------------------------------------------------------------
@@ -23,15 +20,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  document.getElementById('form-connexion').addEventListener('submit', onSubmitConnexion);
   document.getElementById('btn-deconnexion').addEventListener('click', deconnexion);
 
-  // Deux façons d'être déjà connecté en arrivant sur la page :
-  // 1. Un cookie de session Discord valide (connexion via /auth/discord).
-  // 2. Un identifiant/mot de passe encore mémorisé dans cet onglet (sessionStorage).
+  afficherErreurAuthEventuelle();
   verifierSessionExistante();
 });
 
+// Si on revient d'un /auth/discord/callback qui a échoué (pas membre, pas le
+// rôle Staff, requête expirée...), le serveur nous redirige vers "/?auth_error=...".
+function afficherErreurAuthEventuelle() {
+  const params = new URLSearchParams(window.location.search);
+  const message = params.get('auth_error');
+  if (!message) return;
+  const erreurEl = document.getElementById('connexion-erreur');
+  erreurEl.textContent = message;
+  erreurEl.hidden = false;
+  window.history.replaceState({}, '', window.location.pathname);
+}
+
+// Seule façon d'être déjà connecté en arrivant sur la page : un cookie de
+// session Discord valide (connexion via /auth/discord), avec le rôle Staff.
 async function verifierSessionExistante() {
   try {
     const meRes = await fetch('/api/me');
@@ -40,23 +48,8 @@ async function verifierSessionExistante() {
       afficherUtilisateurConnecte(me);
       afficherApplication();
       demarrerApplication();
-      return;
     }
-  } catch { /* on retombe sur la vérification par mot de passe ci-dessous */ }
-
-  const sauvegarde = sessionStorage.getItem(AUTH_STORAGE_KEY);
-  if (!sauvegarde) return;
-
-  state.auth = sauvegarde;
-  try {
-    const r = await apiFetch('/api/statuts');
-    if (!r.ok) throw new Error('non autorisé');
-    afficherApplication();
-    demarrerApplication();
-  } catch {
-    state.auth = null;
-    sessionStorage.removeItem(AUTH_STORAGE_KEY);
-  }
+  } catch { /* pas connecté : l'écran de connexion reste affiché */ }
 }
 
 function afficherUtilisateurConnecte(me) {
@@ -69,46 +62,12 @@ function afficherUtilisateurConnecte(me) {
 }
 
 // -----------------------------------------------------------------------
-// Écran de connexion
+// Écran de connexion — Discord uniquement (rôle Staff vérifié côté serveur)
 // -----------------------------------------------------------------------
-async function onSubmitConnexion(e) {
-  e.preventDefault();
-  const btn = document.getElementById('btn-connexion');
-  const erreurEl = document.getElementById('connexion-erreur');
-  erreurEl.hidden = true;
-
-  const user = val('c-user');
-  const pass = val('c-pass');
-  const texteOriginal = btn.textContent;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>Connexion...';
-
-  const encoded = btoa(unescape(encodeURIComponent(`${user}:${pass}`)));
-  try {
-    const r = await fetch('/api/statuts', { headers: { Authorization: `Basic ${encoded}` } });
-    if (!r.ok) throw new Error('non autorisé');
-    state.auth = encoded;
-    sessionStorage.setItem(AUTH_STORAGE_KEY, encoded);
-    afficherApplication();
-    demarrerApplication();
-  } catch {
-    erreurEl.hidden = false;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = texteOriginal;
-  }
-}
-
 function deconnexion() {
-  fetch('/auth/logout', { method: 'POST' }).catch(() => {});
-  state.auth = null;
-  sessionStorage.removeItem(AUTH_STORAGE_KEY);
-  document.getElementById('topbar-user').hidden = true;
-  fermerPanneau();
-  document.getElementById('app-shell').hidden = true;
-  document.getElementById('ecran-connexion').hidden = false;
-  document.getElementById('c-pass').value = '';
-  document.getElementById('c-user').focus();
+  fetch('/auth/logout', { method: 'POST' })
+    .catch(() => {})
+    .finally(() => window.location.reload());
 }
 
 function afficherApplication() {
@@ -116,10 +75,10 @@ function afficherApplication() {
   document.getElementById('app-shell').hidden = false;
 }
 
-// Ajoute automatiquement l'en-tête d'authentification à chaque appel API.
+// La session Discord vit dans un cookie envoyé automatiquement par le
+// navigateur sur chaque requête same-origin : pas d'en-tête à ajouter.
 function apiFetch(url, options = {}) {
-  const headers = Object.assign({}, options.headers, state.auth ? { Authorization: `Basic ${state.auth}` } : {});
-  return fetch(url, { ...options, headers });
+  return fetch(url, options);
 }
 
 function demarrerApplication() {

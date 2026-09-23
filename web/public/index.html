@@ -17,20 +17,8 @@
       <p class="connexion-sub">Identifiez-vous</p>
 
       <a href="/auth/discord" class="btn-principal btn-discord" id="btn-discord">🔐 Se connecter avec Discord</a>
-      <div class="connexion-separateur"><span>ou</span></div>
-
-      <form id="form-connexion" class="connexion-form" autocomplete="off">
-        <div class="champ">
-          <label for="c-user">Identifiant</label>
-          <input type="text" id="c-user" name="username" autocomplete="username" required>
-        </div>
-        <div class="champ">
-          <label for="c-pass">Mot de passe</label>
-          <input type="password" id="c-pass" name="password" autocomplete="current-password" required>
-        </div>
-        <p id="connexion-erreur" class="connexion-erreur" hidden>Identifiants incorrects.</p>
-        <button type="submit" class="btn-principal btn-connexion" id="btn-connexion">Se connecter</button>
-      </form>
+      <p id="connexion-erreur" class="connexion-erreur" hidden>Accès refusé — le rôle Staff Discord est requis.</p>
+      <p class="connexion-note">Seuls les membres du serveur Discord avec le rôle Staff peuvent accéder au site.</p>
     </div>
   </div>
 
