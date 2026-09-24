@@ -117,10 +117,13 @@ async function chargerDonnees(collection) {
     document.getElementById('sous-titre').textContent = 'Personnages joués sur le serveur.';
     await chargerProfils();
   } else if (collection === 'inventaire') {
-    searchWrap.hidden = true; // la recherche vit désormais dans le panneau d'inventaire
+    searchWrap.hidden = false;
+    const rechercheInput = document.getElementById('recherche');
+    rechercheInput.value = '';
+    rechercheInput.placeholder = 'Rechercher un personnage...';
     document.getElementById('titre-section').textContent = 'Inventaire';
     document.getElementById('sous-titre').textContent = "Catalogue d'objets et inventaires des personnages.";
-    afficherAccueilInventaire();
+    await chargerInventairePage();
   }
 }
 
@@ -173,27 +176,13 @@ function ligneHTML(item, index) {
 }
 
 // -----------------------------------------------------------------------
-// Inventaire : au lieu d'afficher tout de suite le catalogue et les
-// personnages, la page n'affiche qu'un bouton. Le contenu (catalogue +
-// inventaires par personnage) s'ouvre dans le panneau coulissant.
+// Inventaire : les inventaires des personnages s'affichent directement dans
+// la page (comme "Profils RP"). Le catalogue d'objets, lui, reste à part :
+// un bouton en haut de la liste l'ouvre dans son propre panneau à droite.
 // -----------------------------------------------------------------------
-function afficherAccueilInventaire() {
+async function chargerInventairePage() {
   const contenuDiv = document.getElementById('contenu');
-  contenuDiv.innerHTML = `
-    <div class="hero-inventaire">
-      <div class="hero-icone">🎒</div>
-      <p>Consulte le catalogue d'objets et gère l'inventaire de chaque personnage depuis un seul panneau.</p>
-      <button class="btn-hero" onclick="ouvrirInventaireGlobal()">Ouvrir l'inventaire</button>
-    </div>`;
-}
-
-async function ouvrirInventaireGlobal() {
-  state.itemActuel = { type: 'inventaire-global' };
-  document.getElementById('panneau-eyebrow').textContent = 'Inventaire';
-  document.getElementById('panneau-titre').textContent = 'Catalogue & personnages';
-  document.getElementById('panneau-corps').innerHTML = Array.from({ length: 3 }).map(() => '<div class="squelette"></div>').join('');
-  document.getElementById('overlay').classList.add('visible');
-  document.getElementById('panneau-edition').classList.add('ouvert');
+  contenuDiv.innerHTML = Array.from({ length: 4 }).map(() => '<div class="squelette"></div>').join('');
 
   try {
     const [catalogue, inventaires, profils] = await Promise.all([
@@ -205,44 +194,36 @@ async function ouvrirInventaireGlobal() {
     state.cache.inventaires = inventaires;
     state.cache.profils = profils;
     majCompteur('inventaire', profils.length);
-    renderVueCatalogueGlobal();
+    renderInventairePage();
+    setStatutConnexion(true);
   } catch (error) {
-    document.getElementById('panneau-corps').innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de connexion à l'API</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de connexion à l'API</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    setStatutConnexion(false);
     console.error('Erreur Fetch:', error);
   }
 }
 
-// Vue "accueil" du panneau d'inventaire : bouton catalogue + liste des personnages.
-// Le catalogue lui-même ne s'affiche plus ici : il faut cliquer sur le bouton
-// pour l'ouvrir dans son propre panneau, qui glisse depuis la droite.
-function renderVueCatalogueGlobal() {
-  state.itemActuel = { type: 'inventaire-global' };
+function renderInventairePage() {
   const quantiteParProfil = new Map(
     (state.cache.inventaires || []).map(inv => [inv._id, Object.values(inv.items || {}).reduce((a, b) => a + b, 0)])
   );
 
-  document.getElementById('panneau-eyebrow').textContent = 'Inventaire';
-  document.getElementById('panneau-titre').textContent = 'Catalogue & personnages';
-  document.getElementById('panneau-corps').innerHTML = `
+  document.getElementById('contenu').innerHTML = `
     <button class="btn-catalogue-ouvrir" onclick="ouvrirCataloguePanel()">
       <span>📦 Catalogue d'objets</span>
       <span class="nav-count">${state.catalogue.length}</span>
       <span class="fleche">→</span>
     </button>
-
-    <div class="section-titre" style="margin-top:30px">👤 Inventaires par personnage</div>
-    <div class="champ" style="margin-bottom:14px">
-      <input type="text" id="recherche-inv-panel" placeholder="Rechercher un personnage..." oninput="filtrerListeInventairePanel()" autocomplete="off">
-    </div>
-    <div id="liste-personnages">
+    <div style="margin-top:22px; display:flex; flex-direction:column; gap:10px;">
       ${state.cache.profils.map((p, i) => ligneInventaireHTML(p, quantiteParProfil.get(p._id) || 0, i)).join('') || "<div class='etat-vide'><p>Aucun personnage.</p></div>"}
     </div>
+    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>
   `;
 }
 
 // -----------------------------------------------------------------------
 // Panneau "Catalogue d'objets" : s'ouvre à droite au clic sur le bouton
-// dans le panneau d'inventaire principal.
+// en haut de la page Inventaire.
 // -----------------------------------------------------------------------
 function ouvrirCataloguePanel() {
   document.getElementById('overlay-catalogue').classList.add('visible');
@@ -263,27 +244,8 @@ function renderCataloguePanelListe() {
   `;
 }
 
-function filtrerListeInventairePanel() {
-  const q = (val('recherche-inv-panel') || '').trim().toLowerCase();
-  document.querySelectorAll('#panneau-corps .ligne').forEach(l => {
-    l.classList.toggle('masquee', !(!q || (l.dataset.nom || '').includes(q)));
-  });
-}
-
-// Recharge uniquement catalogue + inventaires (pas les profils, inchangés) et
-// revient à la vue d'accueil du panneau.
-async function rafraichirInventaireGlobal() {
-  const [catalogue, inventaires] = await Promise.all([
-    apiFetch('/api/inventaire/catalogue').then(r => r.json()),
-    apiFetch('/api/inventaire').then(r => r.json()),
-  ]);
-  state.catalogue = catalogue;
-  state.cache.inventaires = inventaires;
-  renderVueCatalogueGlobal();
-}
-
-// Même chose, mais reste dans le panneau catalogue (utilisé après avoir
-// ajouté/modifié/supprimé un objet depuis ce panneau-là).
+// Recharge catalogue + inventaires et rafraîchit à la fois la page principale
+// (compteurs, quantités) et le panneau catalogue actuellement ouvert.
 async function rafraichirCataloguePanel() {
   const [catalogue, inventaires] = await Promise.all([
     apiFetch('/api/inventaire/catalogue').then(r => r.json()),
@@ -291,6 +253,7 @@ async function rafraichirCataloguePanel() {
   ]);
   state.catalogue = catalogue;
   state.cache.inventaires = inventaires;
+  if (state.collectionActuelle === 'inventaire') renderInventairePage();
   renderCataloguePanelListe();
 }
 
@@ -310,7 +273,7 @@ function catalogueItemHTML(item) {
 function ligneInventaireHTML(profile, quantiteTotale, index) {
   const delay = `${Math.min(index, 14) * 35}ms`;
   return `
-    <div class="ligne" style="--i:${delay}" data-nom="${escapeAttr((profile.nomPrenom || profile._id).toLowerCase())}">
+    <div class="ligne ligne-personnage" style="--i:${delay}" data-id="${escapeAttr(profile._id)}" data-nom="${escapeAttr((profile.nomPrenom || profile._id).toLowerCase())}">
       <div class="ligne-sigil">🎒</div>
       <div class="ligne-corps">
         <div class="ligne-nom">${escapeHtml(profile.nomPrenom || profile._id)}</div>
@@ -584,7 +547,6 @@ function panneauInventairePersonnage(profile, inventoryDoc) {
   const optionsCatalogue = state.catalogue.map(it => `<option value="${escapeAttr(it.id)}">${escapeHtml(it.emoji || '')} ${escapeHtml(it.name)}</option>`).join('');
 
   return `
-    <button class="btn-retour" onclick="renderVueCatalogueGlobal()">← Retour au catalogue</button>
     <div class="section-titre">🎒 Objets possédés</div>
     <div id="inv-items-liste">${lignes || '<p class="section-note">Inventaire vide.</p>'}</div>
 
@@ -599,7 +561,23 @@ function panneauInventairePersonnage(profile, inventoryDoc) {
 async function rafraichirInventairePersonnage(profileId) {
   const inventaires = await apiFetch('/api/inventaire').then(r => r.json());
   state.cache.inventaires = inventaires;
+  majBadgeQuantitePersonnage(profileId);
   ouvrirInventairePersonnage(profileId);
+}
+
+// Met à jour le badge "X objets" de la ligne du personnage sur la page
+// principale, sans recharger toute la liste (le panneau reste ouvert à côté).
+function majBadgeQuantitePersonnage(profileId) {
+  const ligne = document.querySelector(`.ligne-personnage[data-id="${cssAttrEscape(profileId)}"]`);
+  if (!ligne) return;
+  const inv = (state.cache.inventaires || []).find(i => i._id === profileId);
+  const total = inv ? Object.values(inv.items || {}).reduce((a, b) => a + b, 0) : 0;
+  const badge = ligne.querySelector('.badge');
+  if (badge) badge.textContent = `${total} objet${total > 1 ? 's' : ''}`;
+}
+
+function cssAttrEscape(str) {
+  return String(str ?? '').replace(/["\\]/g, '\\$&');
 }
 
 async function modifierQuantiteItem(profileId, itemId) {
