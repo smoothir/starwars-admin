@@ -299,6 +299,7 @@ h1, h2, h3, h4 {
   transition: transform var(--dur) var(--ease);
 }
 .nav-btn:hover { color: #fff; }
+.nav-btn[hidden] { display: none; }
 .nav-btn.active { color: #fff; }
 .nav-btn.active::after { transform: scaleX(1); }
 .nav-count {
@@ -515,6 +516,13 @@ h1, h2, h3, h4 {
   background: linear-gradient(145deg, rgba(255,255,255,0.14), rgba(255,255,255,0.05));
   border: 1px solid var(--border-subtle);
 }
+.ligne-avatar {
+  width: 44px; height: 44px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 1px solid var(--border-subtle);
+}
 .ligne-corps { flex: 1; min-width: 0; }
 .ligne-nom {
   font-weight: 700;
@@ -571,6 +579,38 @@ h1, h2, h3, h4 {
   padding: 50px 20px;
   color: var(--text-muted);
   font-size: 0.9rem;
+}
+
+/* Panel Admin : journal des actions */
+.log-liste {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.log-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 11px 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.log-entry:last-child { border-bottom: none; }
+.log-icone { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+.log-corps { flex: 1; min-width: 0; }
+.log-details {
+  font-size: 0.86rem;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+.log-details strong { color: #ffffff; }
+.log-date {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
 /* Bouton "Retour" à l'intérieur du panneau (navigation catalogue ↔ personnage) */

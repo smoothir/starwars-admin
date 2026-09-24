@@ -15,6 +15,9 @@ module.exports = {
   VALIDATION_PING_ROLE_ID: '1545274332941385832',
   VALIDATION_ROLE_ID: '1545274332941385832',
   STAFF_ROLE_ID: '1545274332941385831',
+  // ID Discord du créateur du bot/site : seul compte autorisé à voir le panel
+  // "Admin" (qui se connecte, combien de fois, journal des actions).
+  SUPER_ADMIN_ID: '391515665271357441',
   REMINDER_PING_ROLE_ID: '1545274332941385832',
   DEPOT_FICHE_PING_ROLE_ID: '1545274332941385832',
   LOGS_IMG_CHANNEL_ID: '1545697604585660476',

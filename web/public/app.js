@@ -59,6 +59,7 @@ function afficherUtilisateurConnecte(me) {
   const avatar = document.getElementById('user-avatar');
   if (me.avatar) { avatar.src = me.avatar; avatar.hidden = false; } else { avatar.hidden = true; }
   badge.hidden = false;
+  document.getElementById('nav-admin').hidden = !me.isSuperAdmin;
 }
 
 // -----------------------------------------------------------------------
@@ -124,6 +125,11 @@ async function chargerDonnees(collection) {
     document.getElementById('titre-section').textContent = 'Inventaire';
     document.getElementById('sous-titre').textContent = "Catalogue d'objets et inventaires des personnages.";
     await chargerInventairePage();
+  } else if (collection === 'admin') {
+    searchWrap.hidden = true;
+    document.getElementById('titre-section').textContent = 'Admin';
+    document.getElementById('sous-titre').textContent = 'Connexions et journal des actions — visible par le créateur uniquement.';
+    await chargerAdminPage();
   }
 }
 
@@ -295,6 +301,84 @@ function filtrerListe() {
   });
   const aucun = document.getElementById('aucun-resultat');
   if (aucun) aucun.hidden = visibles !== 0;
+}
+
+// -----------------------------------------------------------------------
+// Panel Admin (créateur uniquement) : qui se connecte, combien de fois, et
+// journal des actions faites sur le site.
+// -----------------------------------------------------------------------
+async function chargerAdminPage() {
+  const contenuDiv = document.getElementById('contenu');
+  contenuDiv.innerHTML = Array.from({ length: 4 }).map(() => '<div class="squelette"></div>').join('');
+
+  try {
+    const [connexions, logs] = await Promise.all([
+      apiFetch('/api/admin/connexions').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      apiFetch('/api/admin/logs').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+    ]);
+
+    contenuDiv.innerHTML = `
+      <div class="section-titre">👥 Connexions (${connexions.length})</div>
+      <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:34px;">
+        ${connexions.map(connexionLigneHTML).join('') || "<div class='etat-vide'><p>Personne ne s'est encore connecté.</p></div>"}
+      </div>
+
+      <div class="section-titre">📜 Journal des actions</div>
+      <div class="log-liste">
+        ${logs.map(logLigneHTML).join('') || "<p class='section-note'>Aucune action enregistrée pour le moment.</p>"}
+      </div>
+    `;
+    setStatutConnexion(true);
+  } catch (error) {
+    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de connexion à l'API</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    setStatutConnexion(false);
+    console.error('Erreur Fetch:', error);
+  }
+}
+
+function connexionLigneHTML(c) {
+  return `
+    <div class="ligne">
+      ${c.avatar ? `<img src="${escapeAttr(c.avatar)}" class="ligne-avatar" alt="">` : '<div class="ligne-sigil">👤</div>'}
+      <div class="ligne-corps">
+        <div class="ligne-nom">${escapeHtml(c.username || c._id)}</div>
+        <div class="ligne-meta">
+          <span class="badge badge-defaut">${c.count || 0} connexion${(c.count || 0) > 1 ? 's' : ''}</span>
+          <span class="badge badge-defaut">Dernière : ${formatDateLog(c.lastLogin)}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+const LOG_ICONES = {
+  login: '🔓',
+  logout: '🔒',
+  profil_modifie: '✏️',
+  objet_cree: '➕',
+  objet_modifie: '✏️',
+  objet_supprime: '🗑️',
+  inventaire_ajout: '📥',
+  inventaire_quantite: '🔢',
+  inventaire_retrait: '📤',
+};
+
+function logLigneHTML(entry) {
+  const icone = LOG_ICONES[entry.action] || '•';
+  return `
+    <div class="log-entry">
+      <span class="log-icone">${icone}</span>
+      <div class="log-corps">
+        <div class="log-details"><strong>${escapeHtml(entry.username || 'Inconnu')}</strong> ${escapeHtml(entry.details || entry.action)}</div>
+        <div class="log-date">${formatDateLog(entry.timestamp)}</div>
+      </div>
+    </div>`;
+}
+
+function formatDateLog(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 // -----------------------------------------------------------------------

@@ -29,6 +29,7 @@ const {
   removeItem,
   setItemQuantity,
 } = require('../Data/invStore.js');
+const { recordConnexion, listConnexions, logAction, listLogs } = require('../Data/adminStore.js');
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
@@ -84,7 +85,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 // session Discord parfaitement valide — ne peut jamais passer l'écran de
 // connexion, puisque le site ne saurait plus jamais lui dire qu'il est connecté.
 app.get('/api/me', (req, res) => {
-  if (req.session.user) return res.json({ authenticated: true, via: 'discord', ...req.session.user });
+  if (req.session.user) {
+    return res.json({
+      authenticated: true,
+      via: 'discord',
+      ...req.session.user,
+      isSuperAdmin: req.session.user.id === config.SUPER_ADMIN_ID,
+    });
+  }
   res.json({ authenticated: false });
 });
 
@@ -92,6 +100,39 @@ app.get('/api/me', (req, res) => {
 app.use('/api', (req, res, next) => {
   if (req.session.user) return next();
   return res.status(401).json({ error: 'Authentification requise.' });
+});
+
+// Petit raccourci pour journaliser une action depuis une route : reprend
+// automatiquement l'identité de la personne connectée (req.session.user).
+function logFromReq(req, action, details) {
+  logAction({ ...req.session.user, action, details }).catch((err) => console.error('logAction échoué :', err.message));
+}
+
+// ---------------------------------------------------------------------------
+// PANEL ADMIN (créateur uniquement) : qui se connecte, combien de fois, et
+// journal de toutes les actions faites sur le site.
+// ---------------------------------------------------------------------------
+app.use('/api/admin', (req, res, next) => {
+  if (req.session.user?.id === config.SUPER_ADMIN_ID) return next();
+  return res.status(403).json({ error: 'Réservé au créateur du site.' });
+});
+
+app.get('/api/admin/connexions', async (req, res) => {
+  try {
+    res.json(await listConnexions());
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/logs', async (req, res) => {
+  try {
+    res.json(await listLogs());
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -160,6 +201,13 @@ app.get('/auth/discord/callback', async (req, res) => {
       username: me.global_name || me.username,
       avatar: me.avatar ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=64` : null,
     };
+
+    // Suivi des connexions + journal, pour le panel Admin (créateur uniquement).
+    // Ne doit jamais empêcher la connexion elle-même si Mongo a un souci passager.
+    recordConnexion(req.session.user).catch((err) => console.error('recordConnexion échoué :', err.message));
+    logAction({ ...req.session.user, action: 'login', details: 'Connexion au site via Discord.' })
+      .catch((err) => console.error('logAction (login) échoué :', err.message));
+
     res.redirect('/');
   } catch (err) {
     console.error('Erreur OAuth Discord :', err);
@@ -168,6 +216,10 @@ app.get('/auth/discord/callback', async (req, res) => {
 });
 
 app.post('/auth/logout', (req, res) => {
+  if (req.session.user) {
+    logAction({ ...req.session.user, action: 'logout', details: 'Déconnexion du site.' })
+      .catch((err) => console.error('logAction (logout) échoué :', err.message));
+  }
   req.session.destroy(() => res.json({ ok: true }));
 });
 
@@ -271,7 +323,9 @@ app.patch('/api/profils/:id', async (req, res) => {
       });
     }
 
-    res.json(await updateProfileFields(req.params.id, fields));
+    const updated = await updateProfileFields(req.params.id, fields);
+    logFromReq(req, 'profil_modifie', `A modifié le profil de ${profile.nomPrenom || req.params.id}.`);
+    res.json(updated);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -328,7 +382,9 @@ app.get('/api/inventaire/catalogue', async (req, res) => {
 app.post('/api/inventaire/catalogue', async (req, res) => {
   try {
     const { id, name, emoji, category, description } = req.body || {};
-    res.status(201).json(await addCatalogItem({ id, name, emoji, category, description }));
+    const created = await addCatalogItem({ id, name, emoji, category, description });
+    logFromReq(req, 'objet_cree', `A ajouté l'objet "${name}" au catalogue.`);
+    res.status(201).json(created);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -337,7 +393,9 @@ app.post('/api/inventaire/catalogue', async (req, res) => {
 app.patch('/api/inventaire/catalogue/:itemId', async (req, res) => {
   try {
     const { name, emoji, category, description } = req.body || {};
-    res.json(await updateCatalogItem(req.params.itemId, { name, emoji, category, description }));
+    const updated = await updateCatalogItem(req.params.itemId, { name, emoji, category, description });
+    logFromReq(req, 'objet_modifie', `A modifié l'objet "${name || req.params.itemId}" du catalogue.`);
+    res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -347,6 +405,7 @@ app.delete('/api/inventaire/catalogue/:itemId', async (req, res) => {
   try {
     const ok = await removeCatalogItem(req.params.itemId);
     if (!ok) return res.status(404).json({ error: 'Objet introuvable.' });
+    logFromReq(req, 'objet_supprime', `A supprimé l'objet "${req.params.itemId}" du catalogue.`);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -369,6 +428,7 @@ app.post('/api/inventaire/:profileId/items', async (req, res) => {
     const { itemId, quantity } = req.body || {};
     const result = await addItem(req.params.profileId, itemId, Number(quantity) || 1);
     if (!result.ok) return res.status(400).json({ error: `Objet inconnu (${itemId}).` });
+    logFromReq(req, 'inventaire_ajout', `A ajouté ${Number(quantity) || 1}× "${itemId}" à l'inventaire de ${req.params.profileId}.`);
     res.json(result);
   } catch (err) {
     console.error(err);
@@ -382,6 +442,7 @@ app.patch('/api/inventaire/:profileId/items/:itemId', async (req, res) => {
     const { quantity } = req.body || {};
     const result = await setItemQuantity(req.params.profileId, req.params.itemId, Number(quantity));
     if (!result.ok) return res.status(400).json({ error: `Objet inconnu (${req.params.itemId}).` });
+    logFromReq(req, 'inventaire_quantite', `A mis la quantité de "${req.params.itemId}" à ${Number(quantity)} pour ${req.params.profileId}.`);
     res.json(result);
   } catch (err) {
     console.error(err);
@@ -393,6 +454,7 @@ app.delete('/api/inventaire/:profileId/items/:itemId', async (req, res) => {
   try {
     const result = await removeItem(req.params.profileId, req.params.itemId, 999999);
     if (!result.ok && result.reason === 'unknown_item') return res.status(400).json({ error: 'Objet inconnu.' });
+    logFromReq(req, 'inventaire_retrait', `A retiré "${req.params.itemId}" de l'inventaire de ${req.params.profileId}.`);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);

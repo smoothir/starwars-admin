@@ -16,6 +16,8 @@ const COLLECTION_PROFILS = 'profils';
 const COLLECTION_CHARLIST_INDEX = 'charlist_index';
 const COLLECTION_INV = 'inv';
 const COLLECTION_ITEM_CATALOG = 'item_catalog';
+const COLLECTION_SITE_CONNEXIONS = 'site_connexions';
+const COLLECTION_SITE_LOGS = 'site_logs';
 
 let client = null;
 let db = null;
@@ -207,6 +209,28 @@ async function getItemCatalogCollection() {
   return database.collection(COLLECTION_ITEM_CATALOG);
 }
 
+/**
+ * Collection "site_connexions" : un document par utilisateur Discord staff
+ * (_id = discordId), avec son nombre total de connexions au site et la date
+ * de sa première/dernière connexion. Utilisé par le panel Admin (créateur
+ * uniquement) pour voir qui se connecte et combien de fois.
+ */
+async function getSiteConnexionsCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_SITE_CONNEXIONS);
+}
+
+/**
+ * Collection "site_logs" : journal des actions faites sur le site (connexion,
+ * déconnexion, modification de profil, d'objet du catalogue, d'inventaire...).
+ * Chaque document = un évènement horodaté. Lu uniquement par le panel Admin
+ * (créateur uniquement).
+ */
+async function getSiteLogsCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_SITE_LOGS);
+}
+
 module.exports = {
   connect,
   getAvatarsCollection,
@@ -225,4 +249,6 @@ module.exports = {
   getCharlistIndexCollection,
   getInvCollection,
   getItemCatalogCollection,
+  getSiteConnexionsCollection,
+  getSiteLogsCollection,
 };
