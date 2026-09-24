@@ -211,7 +211,6 @@ function renderInventairePage() {
   document.getElementById('contenu').innerHTML = `
     <button class="btn-catalogue-ouvrir" onclick="ouvrirCataloguePanel()">
       <span>📦 Catalogue d'objets</span>
-      <span class="nav-count">${state.catalogue.length}</span>
       <span class="fleche">→</span>
     </button>
     <div style="margin-top:22px; display:flex; flex-direction:column; gap:10px;">
