@@ -6,6 +6,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
+const { MongoStore } = require('connect-mongo');
 const crypto = require('crypto');
 
 const {
@@ -54,6 +55,10 @@ if (!SESSION_SECRET) {
   console.error('❌ SESSION_SECRET manquant dans le .env : nécessaire pour signer les sessions (seul mécanisme d\'authentification restant).');
   process.exit(1);
 }
+if (!process.env.MONGO_URI) {
+  console.error('❌ MONGO_URI manquant dans le .env : nécessaire aussi pour stocker les sessions de façon durable.');
+  process.exit(1);
+}
 
 // Necessaire sur Render (et tout hebergeur derriere un proxy HTTPS) pour que
 // les cookies "secure" fonctionnent correctement.
@@ -64,6 +69,16 @@ app.use(session({
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
+  // Sessions stockées en base (au lieu de la mémoire du process, par défaut
+  // avec express-session) : sinon tout le monde est déconnecté à chaque
+  // redémarrage/redéploiement du serveur (fréquent sur Render), avec une
+  // page qui reste affichée jusqu'à ce qu'une action échoue en 401.
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGO_URI,
+    dbName: 'westerosorigin',
+    collectionName: 'site_sessions',
+    ttl: 7 * 24 * 60 * 60, // 7 jours, en secondes (aligné sur cookie.maxAge)
+  }),
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
