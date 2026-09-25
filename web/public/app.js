@@ -754,11 +754,17 @@ async function rafraichirEtRouvrir() {
 }
 
 async function fetchJSON(url, body, method = 'PATCH') {
-  const response = await apiFetch(url, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  // Pas de corps du tout pour les suppressions (body === null) : envoyer le
+  // texte "null" avec Content-Type: application/json fait échouer le
+  // parseur JSON d'Express (mode strict, qui n'accepte que { ou [ en
+  // premier caractère) avec une page d'erreur HTML brute, pas les 404/400
+  // JSON propres attendus par le code plus bas.
+  const options = { method };
+  if (body !== null && body !== undefined) {
+    options.headers = { 'Content-Type': 'application/json' };
+    options.body = JSON.stringify(body);
+  }
+  const response = await apiFetch(url, options);
   if (!response.ok) {
     const texte = await response.text().catch(() => '');
     throw new Error(`HTTP ${response.status} ${texte}`.trim());
