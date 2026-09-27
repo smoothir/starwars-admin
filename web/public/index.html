@@ -9,7 +9,6 @@
 </head>
 <body>
 
-  <!-- ============ ECRAN DE CONNEXION ============ -->
   <div id="ecran-connexion" class="ecran-connexion">
     <div class="connexion-carte">
       <img class="connexion-logo" src="logoad.jpg" alt="Logo">
@@ -22,10 +21,8 @@
     </div>
   </div>
 
-  <!-- ============ APPLICATION ============ -->
   <div class="app-shell" id="app-shell" hidden>
 
-    <!-- ============ NAVBAR ============ -->
     <header class="topbar">
       <div class="topbar-inner">
         <button class="topbar-side topbar-statut" id="btn-statut" title="Statut de connexion">
@@ -64,7 +61,6 @@
       </nav>
     </header>
 
-    <!-- ============ ZONE PRINCIPALE ============ -->
     <main class="main-area">
       <div class="ambient-glow"></div>
 
@@ -89,7 +85,6 @@
     </main>
   </div>
 
-  <!-- ============ PANNEAU COULISSANT (édition + inventaire) ============ -->
   <div id="overlay" class="overlay" onclick="fermerPanneau()"></div>
   <aside id="panneau-edition" class="panneau-edition">
     <div class="panneau-header">
@@ -102,7 +97,6 @@
     <div id="panneau-corps" class="panneau-corps"></div>
   </aside>
 
-  <!-- ============ PANNEAU CATALOGUE (s'ouvre à droite au clic) ============ -->
   <div id="overlay-catalogue" class="overlay-catalogue" onclick="fermerCataloguePanel()"></div>
   <aside id="panneau-catalogue" class="panneau-catalogue">
     <div class="panneau-header">
@@ -115,7 +109,6 @@
     <div id="panneau-catalogue-corps" class="panneau-corps"></div>
   </aside>
 
-  <!-- Modale de confirmation générique (remplace window.confirm) -->
   <div id="confirm-overlay" class="confirm-overlay" onclick="if(event.target===this) resoudreConfirm(false)">
     <div class="confirm-boite">
       <h4 id="confirm-titre">Confirmer</h4>
@@ -127,7 +120,6 @@
     </div>
   </div>
 
-  <!-- Notifications -->
   <div id="toast-container" class="toast-container"></div>
 
   <script src="app.js"></script>
