@@ -59,12 +59,23 @@ function slugify(str) {
  */
 async function getCatalog() {
   const col = await getItemCatalogCollection();
-  const dejaAmorce = await col.findOne({ _id: SEED_MARKER_ID });
+    const dejaAmorce = await col.findOne({ _id: SEED_MARKER_ID });
   if (!dejaAmorce) {
     if (DEFAULT_CATALOG.length > 0) {
-      await col.insertMany(DEFAULT_CATALOG.map(it => ({ ...it, _id: it.id })));
+      const operations = DEFAULT_CATALOG.map(it => ({
+        updateOne: {
+          filter: { _id: it.id },
+          update: { $setOnInsert: { ...it, _id: it.id } },
+          upsert: true,
+        },
+      }));
+      await col.bulkWrite(operations, { ordered: false });
     }
-    await col.insertOne({ _id: SEED_MARKER_ID, seededAt: new Date() });
+    await col.updateOne(
+      { _id: SEED_MARKER_ID },
+      { $setOnInsert: { seededAt: new Date() } },
+      { upsert: true },
+    );
   }
   const docs = await col.find({ _id: { $ne: SEED_MARKER_ID } }).toArray();
   return docs
