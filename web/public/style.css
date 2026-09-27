@@ -689,6 +689,43 @@ h1, h2, h3, h4 {
   transition: opacity 280ms var(--ease);
 }
 .overlay-catalogue.visible { opacity: 1; pointer-events: auto; }
+
+/* Modale de confirmation générique (remplace window.confirm) */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms var(--ease);
+}
+.confirm-overlay.visible { opacity: 1; pointer-events: auto; }
+.confirm-boite {
+  width: min(420px, 100%);
+  background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg, 14px);
+  padding: 26px 26px 22px;
+  box-shadow: var(--shadow-lg);
+  transform: translateY(8px) scale(0.98);
+  transition: transform 220ms var(--ease);
+}
+.confirm-overlay.visible .confirm-boite { transform: translateY(0) scale(1); }
+.confirm-boite h4 { font-size: 1.1rem; color: #ffffff; margin: 0 0 10px; }
+.confirm-boite p { font-size: 0.88rem; color: var(--text-secondary); line-height: 1.5; margin: 0; }
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+.confirm-actions .btn-secondaire { flex: 1; justify-content: center; }
+.confirm-actions .confirm-valider { flex: 1; }
 .btn-catalogue-ouvrir {
   width: 100%;
   display: flex;

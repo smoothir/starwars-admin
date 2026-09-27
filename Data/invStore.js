@@ -108,6 +108,13 @@ async function removeCatalogItem(itemId) {
   return result.deletedCount > 0;
 }
 
+/** Supprime tout le catalogue d'un coup. Retourne le nombre d'objets supprimés. */
+async function clearCatalog() {
+  const col = await getItemCatalogCollection();
+  const result = await col.deleteMany({});
+  return result.deletedCount || 0;
+}
+
 /** Inventaire brut d'un profil (jamais null : { _id, items: {} } si rien n'existe encore). */
 async function getInventory(profileId) {
   const col = await getInvCollection();
@@ -180,6 +187,7 @@ module.exports = {
   addCatalogItem,
   updateCatalogItem,
   removeCatalogItem,
+  clearCatalog,
   getInventory,
   listAllInventories,
   addItem,

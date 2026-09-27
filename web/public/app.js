@@ -13,7 +13,9 @@ const state = {
 document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (document.getElementById('panneau-catalogue').classList.contains('ouvert')) {
+    if (document.getElementById('confirm-overlay').classList.contains('visible')) {
+      resoudreConfirm(false);
+    } else if (document.getElementById('panneau-catalogue').classList.contains('ouvert')) {
       fermerCataloguePanel();
     } else {
       fermerPanneau();
@@ -245,7 +247,10 @@ function renderCataloguePanelListe() {
   document.getElementById('panneau-catalogue-titre').textContent = "Catalogue d'objets";
   document.getElementById('panneau-catalogue-corps').innerHTML = `
     <div id="catalogue-liste">${state.catalogue.map(catalogueItemHTML).join('') || '<p class="section-note">Catalogue vide.</p>'}</div>
-    <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue(null)">+ Ajouter un objet</button>
+    <div style="display:flex; gap:10px; margin-top:4px;">
+      <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue(null)" style="flex:1">+ Ajouter un objet</button>
+      <button class="btn-secondaire btn-danger" onclick="supprimerTousLesObjets()" ${state.catalogue.length ? '' : 'disabled'}>🗑️ Tout supprimer</button>
+    </div>
   `;
 }
 
@@ -357,6 +362,7 @@ const LOG_ICONES = {
   objet_cree: '➕',
   objet_modifie: '✏️',
   objet_supprime: '🗑️',
+  catalogue_vide: '🧹',
   inventaire_ajout: '📥',
   inventaire_quantite: '🔢',
   inventaire_retrait: '📤',
@@ -584,10 +590,32 @@ async function sauvegarderCatalogueItem(itemId) {
 }
 
 async function supprimerCatalogueItem(itemId) {
-  if (!confirm('Supprimer cet objet du catalogue ? Les personnages qui le possèdent garderont son entrée (avec sa quantité), affichée avec un nom générique.')) return;
+  const ok = await confirmerAction({
+    titre: "Supprimer l'objet",
+    message: 'Supprimer cet objet du catalogue ? Les personnages qui le possèdent garderont son entrée (avec sa quantité), affichée avec un nom générique.',
+    texteValider: 'Supprimer',
+  });
+  if (!ok) return;
   try {
     await fetchJSON(`/api/inventaire/catalogue/${encodeURIComponent(itemId)}`, null, 'DELETE');
     toast('Objet supprimé du catalogue.', 'succes');
+    await rafraichirCataloguePanel();
+  } catch (error) {
+    toast(`Échec de la suppression : ${error.message}`, 'erreur');
+  }
+}
+
+async function supprimerTousLesObjets() {
+  if (!state.catalogue.length) return;
+  const ok = await confirmerAction({
+    titre: 'Vider le catalogue',
+    message: `Supprimer les ${state.catalogue.length} objets du catalogue ? Les personnages qui en possèdent garderont leur quantité, affichée avec un nom générique. Cette action est irréversible.`,
+    texteValider: 'Tout supprimer',
+  });
+  if (!ok) return;
+  try {
+    await fetchJSON('/api/inventaire/catalogue', null, 'DELETE');
+    toast('Catalogue vidé.', 'succes');
     await rafraichirCataloguePanel();
   } catch (error) {
     toast(`Échec de la suppression : ${error.message}`, 'erreur');
@@ -770,6 +798,33 @@ async function fetchJSON(url, body, method = 'PATCH') {
     throw new Error(`HTTP ${response.status} ${texte}`.trim());
   }
   return response.json();
+}
+
+// -----------------------------------------------------------------------
+// Confirmation (remplace window.confirm par une modale du même style que le
+// reste du site). confirmerAction() retourne une Promise<boolean> : true si
+// la personne a cliqué "Valider", false sinon (Annuler, croix, clic dehors,
+// touche Échap) — s'utilise avec await, comme confirm() mais async.
+// -----------------------------------------------------------------------
+let _resoudreConfirmEnCours = null;
+
+function confirmerAction({ titre = 'Confirmer', message = '', texteValider = 'Valider' } = {}) {
+  document.getElementById('confirm-titre').textContent = titre;
+  document.getElementById('confirm-message').textContent = message;
+  document.getElementById('confirm-valider').textContent = texteValider;
+  document.getElementById('confirm-overlay').classList.add('visible');
+
+  return new Promise((resolve) => {
+    _resoudreConfirmEnCours = resolve;
+  });
+}
+
+function resoudreConfirm(valeur) {
+  document.getElementById('confirm-overlay').classList.remove('visible');
+  if (_resoudreConfirmEnCours) {
+    _resoudreConfirmEnCours(valeur);
+    _resoudreConfirmEnCours = null;
+  }
 }
 
 // -----------------------------------------------------------------------

@@ -115,6 +115,18 @@
     <div id="panneau-catalogue-corps" class="panneau-corps"></div>
   </aside>
 
+  <!-- Modale de confirmation générique (remplace window.confirm) -->
+  <div id="confirm-overlay" class="confirm-overlay" onclick="if(event.target===this) resoudreConfirm(false)">
+    <div class="confirm-boite">
+      <h4 id="confirm-titre">Confirmer</h4>
+      <p id="confirm-message"></p>
+      <div class="confirm-actions">
+        <button class="btn-secondaire" id="confirm-annuler" onclick="resoudreConfirm(false)">Annuler</button>
+        <button class="btn-principal confirm-valider" id="confirm-valider" onclick="resoudreConfirm(true)">Valider</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Notifications -->
   <div id="toast-container" class="toast-container"></div>
 

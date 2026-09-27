@@ -25,6 +25,7 @@ const {
   addCatalogItem,
   updateCatalogItem,
   removeCatalogItem,
+  clearCatalog,
   listAllInventories,
   addItem,
   removeItem,
@@ -413,6 +414,16 @@ app.patch('/api/inventaire/catalogue/:itemId', async (req, res) => {
     res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/inventaire/catalogue', async (req, res) => {
+  try {
+    const nb = await clearCatalog();
+    logFromReq(req, 'catalogue_vide', `A vidé tout le catalogue (${nb} objet${nb > 1 ? 's' : ''} supprimé${nb > 1 ? 's' : ''}).`);
+    res.json({ ok: true, deleted: nb });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
