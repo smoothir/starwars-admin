@@ -39,9 +39,7 @@ const DEFAULT_CATALOG = [
   { id: 'cape', name: 'Cape', emoji: '🧥', category: 'Divers', description: "Vêtement d'extérieur, souvent à capuche." },
 ];
 
-// Identifiant réservé pour le marqueur "déjà amorcé" (voir getCatalog) — un
-// objet du catalogue ne peut jamais prendre cet id.
-const SEED_MARKER_ID = '__seed_meta__';
+const SEED_MARKER_ID = '__seeded__';
 
 function slugify(str) {
   return String(str || '')
@@ -53,17 +51,19 @@ function slugify(str) {
 
 /**
  * Retourne le catalogue (trié par catégorie puis nom). Amorce la collection
- * avec DEFAULT_CATALOG une seule fois, au tout premier appel qui suit la
- * création de la base — jamais après. Sans le marqueur ci-dessous, vider le
- * catalogue (bouton "Tout supprimer") le faisait réapparaître aussitôt : la
- * collection redevenait vide, donc "jamais amorcée" aux yeux du code, qui la
- * réamorçait sans discernement dès le rechargement suivant de la liste.
+ * avec DEFAULT_CATALOG une seule fois, à VIE — pas "si elle est vide", sinon
+ * vider volontairement le catalogue (bouton "Tout supprimer") le re-remplirait
+ * automatiquement au prochain chargement. Un document marqueur (_id
+ * "__seeded__", jamais renvoyé comme objet) retient que l'amorçage a déjà eu
+ * lieu, même après une suppression totale.
  */
 async function getCatalog() {
   const col = await getItemCatalogCollection();
   const dejaAmorce = await col.findOne({ _id: SEED_MARKER_ID });
   if (!dejaAmorce) {
-    await col.insertMany(DEFAULT_CATALOG.map(it => ({ ...it, _id: it.id })));
+    if (DEFAULT_CATALOG.length > 0) {
+      await col.insertMany(DEFAULT_CATALOG.map(it => ({ ...it, _id: it.id })));
+    }
     await col.insertOne({ _id: SEED_MARKER_ID, seededAt: new Date() });
   }
   const docs = await col.find({ _id: { $ne: SEED_MARKER_ID } }).toArray();
@@ -73,6 +73,7 @@ async function getCatalog() {
 }
 
 async function getItem(itemId) {
+  if (!itemId || itemId === SEED_MARKER_ID) return null;
   const col = await getItemCatalogCollection();
   const doc = await col.findOne({ _id: itemId });
   return doc ? { id: doc._id, name: doc.name, emoji: doc.emoji, category: doc.category, description: doc.description } : null;
@@ -82,8 +83,7 @@ async function getItem(itemId) {
 async function addCatalogItem({ id, name, emoji, category, description }) {
   if (!name) throw new Error('Le nom est obligatoire.');
   const finalId = slugify(id || name);
-  if (!finalId) throw new Error("Impossible de déduire un identifiant pour cet objet.");
-  if (finalId === SEED_MARKER_ID) throw new Error('Identifiant réservé, choisis-en un autre.');
+  if (!finalId || finalId === SEED_MARKER_ID) throw new Error("Impossible de déduire un identifiant valide pour cet objet.");
 
   const col = await getItemCatalogCollection();
   const existing = await col.findOne({ _id: finalId });
@@ -110,7 +110,7 @@ async function updateCatalogItem(itemId, { name, emoji, category, description })
 /**
  * Supprime un objet du catalogue. Les personnages qui en possédaient gardent
  * l'entrée dans leur inventaire (avec une quantité), juste affichée avec un
- * nom générique  pas de suppression en cascade pour ne rien perdre en silence.
+ * nom générique — pas de suppression en cascade pour ne rien perdre en silence.
  */
 async function removeCatalogItem(itemId) {
   const col = await getItemCatalogCollection();
@@ -118,10 +118,11 @@ async function removeCatalogItem(itemId) {
   return result.deletedCount > 0;
 }
 
-/** Supprime tout le catalogue d'un coup. Retourne le nombre d'objets supprimés. */
-/** Supprime tout le catalogue d'un coup (sauf le marqueur d'amorçage, qui doit
- * survivre pour que getCatalog() ne réinsère pas les objets par défaut juste
- * après). Retourne le nombre d'objets réellement supprimés. */
+/**
+ * Supprime tout le catalogue d'un coup (garde le marqueur d'amorçage : c'est
+ * justement lui qui empêche le catalogue de se re-remplir tout seul juste
+ * après). Retourne le nombre d'objets réellement supprimés.
+ */
 async function clearCatalog() {
   const col = await getItemCatalogCollection();
   const result = await col.deleteMany({ _id: { $ne: SEED_MARKER_ID } });
