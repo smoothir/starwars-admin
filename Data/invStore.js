@@ -39,6 +39,10 @@ const DEFAULT_CATALOG = [
   { id: 'cape', name: 'Cape', emoji: '🧥', category: 'Divers', description: "Vêtement d'extérieur, souvent à capuche." },
 ];
 
+// Identifiant réservé pour le marqueur "déjà amorcé" (voir getCatalog) — un
+// objet du catalogue ne peut jamais prendre cet id.
+const SEED_MARKER_ID = '__seed_meta__';
+
 function slugify(str) {
   return String(str || '')
     .toLowerCase()
@@ -49,15 +53,20 @@ function slugify(str) {
 
 /**
  * Retourne le catalogue (trié par catégorie puis nom). Amorce la collection
- * avec DEFAULT_CATALOG si elle est encore vide (première utilisation).
+ * avec DEFAULT_CATALOG une seule fois, au tout premier appel qui suit la
+ * création de la base — jamais après. Sans le marqueur ci-dessous, vider le
+ * catalogue (bouton "Tout supprimer") le faisait réapparaître aussitôt : la
+ * collection redevenait vide, donc "jamais amorcée" aux yeux du code, qui la
+ * réamorçait sans discernement dès le rechargement suivant de la liste.
  */
 async function getCatalog() {
   const col = await getItemCatalogCollection();
-  const count = await col.countDocuments();
-  if (count === 0) {
+  const dejaAmorce = await col.findOne({ _id: SEED_MARKER_ID });
+  if (!dejaAmorce) {
     await col.insertMany(DEFAULT_CATALOG.map(it => ({ ...it, _id: it.id })));
+    await col.insertOne({ _id: SEED_MARKER_ID, seededAt: new Date() });
   }
-  const docs = await col.find().toArray();
+  const docs = await col.find({ _id: { $ne: SEED_MARKER_ID } }).toArray();
   return docs
     .map(({ _id, ...rest }) => ({ id: _id, ...rest }))
     .sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name));
@@ -74,6 +83,7 @@ async function addCatalogItem({ id, name, emoji, category, description }) {
   if (!name) throw new Error('Le nom est obligatoire.');
   const finalId = slugify(id || name);
   if (!finalId) throw new Error("Impossible de déduire un identifiant pour cet objet.");
+  if (finalId === SEED_MARKER_ID) throw new Error('Identifiant réservé, choisis-en un autre.');
 
   const col = await getItemCatalogCollection();
   const existing = await col.findOne({ _id: finalId });
@@ -109,9 +119,12 @@ async function removeCatalogItem(itemId) {
 }
 
 /** Supprime tout le catalogue d'un coup. Retourne le nombre d'objets supprimés. */
+/** Supprime tout le catalogue d'un coup (sauf le marqueur d'amorçage, qui doit
+ * survivre pour que getCatalog() ne réinsère pas les objets par défaut juste
+ * après). Retourne le nombre d'objets réellement supprimés. */
 async function clearCatalog() {
   const col = await getItemCatalogCollection();
-  const result = await col.deleteMany({});
+  const result = await col.deleteMany({ _id: { $ne: SEED_MARKER_ID } });
   return result.deletedCount || 0;
 }
 
