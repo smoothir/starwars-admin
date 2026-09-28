@@ -1,45 +1,63 @@
 // -----------------------------------------------------------------------
-// ⚠️ NOTE DE SYNCHRONISATION AVEC LE BOT
+// SYNCHRO AVEC LE BOT
 // -----------------------------------------------------------------------
-// Le bot Discord (Data/invStore.js de son côté) lit le catalogue d'objets
-// depuis un fichier statique Data/inv.json. Ici, sur le site, le catalogue
-// est stocké dans MongoDB (collection "item_catalog")  parce qu'un fichier
-// modifié sur Render ne survit pas à un redéploiement.
-//
-// Résultat : tant que le bot n'est pas mis à jour pour lire lui aussi cette
-// collection Mongo, un objet ajouté/modifié/supprimé ICI (depuis le site)
-// n'apparaîtra PAS automatiquement dans les commandes Discord (/inventaire
-// ajouter, etc.), et inversement. Les quantités par personnage (collection
-// "inv"), elles, sont déjà partagées avec le bot  pas de souci de ce côté.
+// Le catalogue d'objets vit dans MongoDB (collection "item_catalog"), la
+// MÊME que celle lue par le bot Discord. Les marqueurs internes
+// ("__seeded__", "__migrated_equipement__") et les champs slot/image/usable
+// doivent rester IDENTIQUES à ceux du bot (Data/invStore.js côté bot).
 // -----------------------------------------------------------------------
 
 const { getInvCollection, getItemCatalogCollection } = require('./mongo.js');
 
+// Catalogue de départ (copie exacte de celui du bot).
+const EQUIPMENT_SLOTS = ['casque', 'plastron', 'mainGauche', 'mainDroite', 'jambes', 'pieds'];
+const EQUIPMENT_SLOT_LABELS = {
+  casque: 'Casque',
+  plastron: 'Plastron',
+  mainGauche: 'Main gauche',
+  mainDroite: 'Main droite',
+  jambes: 'Jambes',
+  pieds: 'Pieds',
+};
+
+function emptyEquipement() {
+  return Object.fromEntries(EQUIPMENT_SLOTS.map(s => [s, null]));
+}
+
 // Catalogue de départ, utilisé pour "amorcer" la collection Mongo la toute
-// première fois (si elle est vide)  ensuite, tout passe par Mongo.
+// première fois. Garder cette liste identique à celle du site évite une
+// incohérence si l'un des deux démarre avant l'autre sur une base vide.
 const DEFAULT_CATALOG = [
-  { id: 'sabre_laser', name: 'Sabre laser', emoji: '🗡️', category: 'Arme', description: 'Arme rituelle forgée avec un cristal kyber.' },
-  { id: 'blaster', name: 'Pistolet blaster', emoji: '🔫', category: 'Arme', description: 'Arme de poing standard, à énergie.' },
-  { id: 'fusil_blaster', name: 'Fusil blaster', emoji: '🔫', category: 'Arme', description: "Arme d'épaule à longue portée." },
-  { id: 'vibrolame', name: 'Vibrolame', emoji: '🔪', category: 'Arme', description: 'Lame vibrante, efficace même contre une armure légère.' },
-  { id: 'grenade_thermique', name: 'Détonateur thermique', emoji: '💣', category: 'Arme', description: 'Explosif portatif à haut rendement.' },
-  { id: 'armure_legere', name: 'Armure légère', emoji: '🦺', category: 'Équipement', description: 'Protection basique, ne gêne pas la mobilité.' },
-  { id: 'casque', name: 'Casque de combat', emoji: '⛑️', category: 'Équipement', description: 'Protection crânienne avec visée intégrée.' },
-  { id: 'jetpack', name: 'Jetpack', emoji: '🚀', category: 'Équipement', description: 'Propulseur dorsal, vol de courte durée.' },
-  { id: 'comlink', name: 'Comlink', emoji: '📡', category: 'Équipement', description: 'Communicateur longue portée.' },
-  { id: 'kit_medical', name: 'Kit médical', emoji: '💉', category: 'Équipement', description: "Nécessaire de soin d'urgence." },
-  { id: 'macrobinoculaire', name: 'Macrobinoculaire', emoji: '🔭', category: 'Équipement', description: 'Optique longue portée.' },
-  { id: 'outils_reparation', name: 'Outils de réparation', emoji: '🔧', category: 'Équipement', description: 'Nécessaire pour réparer droïdes et vaisseaux.' },
-  { id: 'credits', name: 'Crédits galactiques', emoji: '💰', category: 'Ressource', description: 'La monnaie standard de la galaxie.' },
-  { id: 'cristal_kyber', name: 'Cristal kyber', emoji: '💎', category: 'Ressource', description: 'Cristal rare, sensible à la Force.' },
-  { id: 'carburant', name: 'Carburant (bidon)', emoji: '⛽', category: 'Ressource', description: 'Carburant pour vaisseau ou speeder.' },
-  { id: 'rations', name: 'Rations de survie', emoji: '🍱', category: 'Ressource', description: 'Nourriture longue conservation.' },
-  { id: 'datapad', name: 'Datapad', emoji: '📓', category: 'Divers', description: 'Tablette de données portable.' },
-  { id: 'holoprojecteur', name: 'Holoprojecteur', emoji: '📽️', category: 'Divers', description: 'Projette des messages ou cartes en hologramme.' },
-  { id: 'cape', name: 'Cape', emoji: '🧥', category: 'Divers', description: "Vêtement d'extérieur, souvent à capuche." },
+  { id: 'sabre_laser', name: 'Sabre laser', emoji: '🗡️', category: 'Arme', description: 'Arme rituelle forgée avec un cristal kyber.', slot: 'mainDroite', image: null, usable: true },
+  { id: 'blaster', name: 'Pistolet blaster', emoji: '🔫', category: 'Arme', description: 'Arme de poing standard, à énergie.', slot: 'mainDroite', image: null, usable: true },
+  { id: 'fusil_blaster', name: 'Fusil blaster', emoji: '🔫', category: 'Arme', description: "Arme d'épaule à longue portée.", slot: 'mainDroite', image: null, usable: true },
+  { id: 'vibrolame', name: 'Vibrolame', emoji: '🔪', category: 'Arme', description: 'Lame vibrante, efficace même contre une armure légère.', slot: 'mainGauche', image: null, usable: true },
+  { id: 'grenade_thermique', name: 'Détonateur thermique', emoji: '💣', category: 'Arme', description: 'Explosif portatif à haut rendement.', slot: null, image: null, usable: false },
+  { id: 'armure_legere', name: 'Armure légère', emoji: '🦺', category: 'Équipement', description: 'Protection basique, ne gêne pas la mobilité.', slot: 'plastron', image: null, usable: true },
+  { id: 'casque', name: 'Casque de combat', emoji: '⛑️', category: 'Équipement', description: 'Protection crânienne avec visée intégrée.', slot: 'casque', image: null, usable: true },
+  { id: 'jetpack', name: 'Jetpack', emoji: '🚀', category: 'Équipement', description: 'Propulseur dorsal, vol de courte durée.', slot: 'plastron', image: null, usable: true },
+  { id: 'comlink', name: 'Comlink', emoji: '📡', category: 'Équipement', description: 'Communicateur longue portée.', slot: null, image: null, usable: false },
+  { id: 'kit_medical', name: 'Kit médical', emoji: '💉', category: 'Équipement', description: "Nécessaire de soin d'urgence.", slot: null, image: null, usable: false },
+  { id: 'macrobinoculaire', name: 'Macrobinoculaire', emoji: '🔭', category: 'Équipement', description: 'Optique longue portée.', slot: null, image: null, usable: false },
+  { id: 'outils_reparation', name: 'Outils de réparation', emoji: '🔧', category: 'Équipement', description: 'Nécessaire pour réparer droïdes et vaisseaux.', slot: null, image: null, usable: false },
+  { id: 'bottes_combat', name: 'Bottes de combat', emoji: '🥾', category: 'Équipement', description: 'Renforcées, bonne accroche au sol.', slot: 'pieds', image: null, usable: true },
+  { id: 'pantalon_renforce', name: 'Pantalon renforcé', emoji: '👖', category: 'Équipement', description: 'Protection légère pour les jambes.', slot: 'jambes', image: null, usable: true },
+  { id: 'credits', name: 'Crédits galactiques', emoji: '💰', category: 'Ressource', description: 'La monnaie standard de la galaxie.', slot: null, image: null, usable: false },
+  { id: 'cristal_kyber', name: 'Cristal kyber', emoji: '💎', category: 'Ressource', description: 'Cristal rare, sensible à la Force.', slot: null, image: null, usable: false },
+  { id: 'carburant', name: 'Carburant (bidon)', emoji: '⛽', category: 'Ressource', description: 'Carburant pour vaisseau ou speeder.', slot: null, image: null, usable: false },
+  { id: 'rations', name: 'Rations de survie', emoji: '🍱', category: 'Ressource', description: 'Nourriture longue conservation.', slot: null, image: null, usable: false },
+  { id: 'datapad', name: 'Datapad', emoji: '📓', category: 'Divers', description: 'Tablette de données portable.', slot: null, image: null, usable: false },
+  { id: 'holoprojecteur', name: 'Holoprojecteur', emoji: '📽️', category: 'Divers', description: 'Projette des messages ou cartes en hologramme.', slot: null, image: null, usable: false },
+  { id: 'cape', name: 'Cape', emoji: '🧥', category: 'Divers', description: "Vêtement d'extérieur, souvent à capuche.", slot: null, image: null, usable: false },
 ];
 
 const SEED_MARKER_ID = '__seeded__';
+const MIGRATION_MARKER_ID = '__migrated_equipement__';
+const MARKER_IDS = [SEED_MARKER_ID, MIGRATION_MARKER_ID];
+
+// Taille max d'une image enregistrée directement en base (data URL). Le site
+// réduit déjà l'image côté navigateur (≈256 px) : ceci n'est qu'un garde-fou.
+const MAX_IMAGE_DATAURL_LENGTH = 400 * 1024;
 
 function slugify(str) {
   return String(str || '')
@@ -50,93 +68,136 @@ function slugify(str) {
 }
 
 /**
- * Retourne le catalogue (trié par catégorie puis nom). Amorce la collection
- * avec DEFAULT_CATALOG une seule fois, à VIE — pas "si elle est vide", sinon
- * vider volontairement le catalogue (bouton "Tout supprimer") le re-remplirait
- * automatiquement au prochain chargement. Un document marqueur (_id
- * "__seeded__", jamais renvoyé comme objet) retient que l'amorçage a déjà eu
- * lieu, même après une suppression totale.
+ * Valide/normalise le champ "image" d'un objet. Formats acceptés :
+ *  - null / '' : pas d'image (l'emoji est utilisé à la place)
+ *  - data:image/(png|jpeg|webp|gif);base64,... : image envoyée depuis le site
+ *  - http(s)://... : image hébergée ailleurs
+ *  - /image/... : chemin relatif à la racine du bot (ancien format)
+ */
+function normalizeImage(image) {
+  if (image === undefined) return undefined;
+  if (image === null || image === '') return null;
+  if (typeof image !== 'string') throw new Error("Image invalide.");
+  const value = image.trim();
+  if (/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(value)) {
+    if (value.length > MAX_IMAGE_DATAURL_LENGTH) throw new Error('Image trop lourde (max ~300 Ko).');
+    return value;
+  }
+  if (/^https?:\/\/\S{1,500}$/.test(value)) return value;
+  if (/^\/image\/[\w\-./]+$/.test(value)) return value;
+  throw new Error("Image invalide (PNG, JPEG, WebP ou GIF attendu).");
+}
+
+function toItem(doc) {
+  return {
+    id: doc._id,
+    name: doc.name,
+    emoji: doc.emoji,
+    category: doc.category,
+    description: doc.description,
+    slot: doc.slot || null,
+    image: doc.image || null,
+    usable: Boolean(doc.usable),
+  };
+}
+
+/**
+ * Retourne le catalogue (trié par catégorie puis nom). Amorçage et migration
+ * identiques à ceux du bot (une seule fois à vie, marqueurs dédiés).
  */
 async function getCatalog() {
   const col = await getItemCatalogCollection();
-    const dejaAmorce = await col.findOne({ _id: SEED_MARKER_ID });
+  const dejaAmorce = await col.findOne({ _id: SEED_MARKER_ID });
   if (!dejaAmorce) {
     if (DEFAULT_CATALOG.length > 0) {
       const operations = DEFAULT_CATALOG.map(it => ({
-        updateOne: {
-          filter: { _id: it.id },
-          update: { $setOnInsert: { ...it, _id: it.id } },
-          upsert: true,
-        },
+        updateOne: { filter: { _id: it.id }, update: { $setOnInsert: { ...it, _id: it.id } }, upsert: true },
       }));
       await col.bulkWrite(operations, { ordered: false });
     }
-    await col.updateOne(
-      { _id: SEED_MARKER_ID },
-      { $setOnInsert: { seededAt: new Date() } },
-      { upsert: true },
-    );
+    await col.updateOne({ _id: SEED_MARKER_ID }, { $setOnInsert: { seededAt: new Date() } }, { upsert: true });
   }
-  const docs = await col.find({ _id: { $ne: SEED_MARKER_ID } }).toArray();
+
+  const dejaMigre = await col.findOne({ _id: MIGRATION_MARKER_ID });
+  if (!dejaMigre) {
+    const migration = DEFAULT_CATALOG.map(it => ({
+      updateOne: {
+        filter: { _id: it.id, usable: { $exists: false } },
+        update: { $set: { slot: it.slot, image: it.image, usable: it.usable } },
+      },
+    }));
+    if (migration.length > 0) await col.bulkWrite(migration, { ordered: false });
+    await col.updateOne({ _id: MIGRATION_MARKER_ID }, { $setOnInsert: { migratedAt: new Date() } }, { upsert: true });
+  }
+
+  const docs = await col.find({ _id: { $nin: MARKER_IDS } }).toArray();
   return docs
-    .map(({ _id, ...rest }) => ({ id: _id, ...rest }))
+    .map(toItem)
     .sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name));
 }
 
 async function getItem(itemId) {
-  if (!itemId || itemId === SEED_MARKER_ID) return null;
+  if (!itemId || MARKER_IDS.includes(itemId)) return null;
   const col = await getItemCatalogCollection();
   const doc = await col.findOne({ _id: itemId });
-  return doc ? { id: doc._id, name: doc.name, emoji: doc.emoji, category: doc.category, description: doc.description } : null;
+  return doc ? toItem(doc) : null;
 }
 
 /** Ajoute un nouvel objet au catalogue. Génère un id à partir du nom si non fourni. */
-async function addCatalogItem({ id, name, emoji, category, description }) {
+async function addCatalogItem({ id, name, emoji, category, description, image }) {
   if (!name) throw new Error('Le nom est obligatoire.');
   const finalId = slugify(id || name);
-  if (!finalId || finalId === SEED_MARKER_ID) throw new Error("Impossible de déduire un identifiant valide pour cet objet.");
+  if (!finalId || MARKER_IDS.includes(finalId)) throw new Error("Impossible de déduire un identifiant valide pour cet objet.");
 
   const col = await getItemCatalogCollection();
   const existing = await col.findOne({ _id: finalId });
   if (existing) throw new Error(`Un objet avec l'identifiant "${finalId}" existe déjà.`);
 
-  const doc = { _id: finalId, name, emoji: emoji || '❔', category: category || 'Divers', description: description || '' };
+  const doc = {
+    _id: finalId,
+    name,
+    emoji: emoji || '❔',
+    category: category || 'Divers',
+    description: description || '',
+    slot: null,
+    image: normalizeImage(image) || null,
+    usable: false,
+  };
   await col.insertOne(doc);
-  return { id: finalId, ...doc, _id: undefined };
+  return toItem(doc);
 }
 
-async function updateCatalogItem(itemId, { name, emoji, category, description }) {
+/** Met à jour un objet. Un champ `undefined` est laissé tel quel (slot/usable ne sont jamais touchés ici). */
+async function updateCatalogItem(itemId, { name, emoji, category, description, image }) {
   const col = await getItemCatalogCollection();
   const fields = {};
   if (name !== undefined) fields.name = name;
   if (emoji !== undefined) fields.emoji = emoji;
   if (category !== undefined) fields.category = category;
   if (description !== undefined) fields.description = description;
+  if (image !== undefined) fields.image = normalizeImage(image);
 
   const result = await col.findOneAndUpdate({ _id: itemId }, { $set: fields }, { returnDocument: 'after' });
   if (!result) throw new Error('Objet introuvable.');
-  return { id: result._id, name: result.name, emoji: result.emoji, category: result.category, description: result.description };
+  return toItem(result);
 }
 
 /**
  * Supprime un objet du catalogue. Les personnages qui en possédaient gardent
  * l'entrée dans leur inventaire (avec une quantité), juste affichée avec un
- * nom générique — pas de suppression en cascade pour ne rien perdre en silence.
+ * nom générique — pas de suppression en cascade.
  */
 async function removeCatalogItem(itemId) {
+  if (MARKER_IDS.includes(itemId)) return false;
   const col = await getItemCatalogCollection();
   const result = await col.deleteOne({ _id: itemId });
   return result.deletedCount > 0;
 }
 
-/**
- * Supprime tout le catalogue d'un coup (garde le marqueur d'amorçage : c'est
- * justement lui qui empêche le catalogue de se re-remplir tout seul juste
- * après). Retourne le nombre d'objets réellement supprimés.
- */
+/** Supprime tout le catalogue d'un coup, SAUF les marqueurs (sinon le bot/site réamorcerait les objets par défaut). */
 async function clearCatalog() {
   const col = await getItemCatalogCollection();
-  const result = await col.deleteMany({ _id: { $ne: SEED_MARKER_ID } });
+  const result = await col.deleteMany({ _id: { $nin: MARKER_IDS } });
   return result.deletedCount || 0;
 }
 
