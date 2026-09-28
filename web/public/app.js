@@ -267,10 +267,24 @@ async function rafraichirCataloguePanel() {
   renderCataloguePanelListe();
 }
 
+// Une image d'objet est utilisable dans le navigateur si c'est une data URL ou
+// une URL http(s). Les anciens chemins "/image/items/..." (fichiers du bot)
+// ne sont pas accessibles depuis le site : on retombe alors sur l'emoji.
+function imageUtilisable(image) {
+  return typeof image === 'string' && /^(data:image\/|https?:\/\/)/.test(image);
+}
+
+function itemVisuelHTML(item) {
+  if (imageUtilisable(item?.image)) {
+    return `<span class="item-emoji"><img class="item-img" src="${escapeAttr(item.image)}" alt=""></span>`;
+  }
+  return `<span class="item-emoji">${item?.emoji || '❔'}</span>`;
+}
+
 function catalogueItemHTML(item) {
   return `
     <div class="item-row">
-      <span class="item-emoji">${item.emoji || '❔'}</span>
+      ${itemVisuelHTML(item)}
       <div class="item-corps">
         <div class="item-nom">${escapeHtml(item.name)}</div>
         <div class="item-meta"><span class="badge badge-defaut">${escapeHtml(item.category || 'Divers')}</span></div>
@@ -538,6 +552,7 @@ function previewPortrait(input) {
 function ouvrirEditeurCatalogue(itemId) {
   const item = itemId ? state.catalogue.find(it => it.id === itemId) : null;
   state.itemActuel = { type: 'catalogue', id: itemId };
+  state.pendingItemImage = undefined; // undefined = image inchangée, null = retirée, texte = nouvelle image
 
   document.getElementById('panneau-catalogue-titre').textContent = item ? item.name : 'Nouvel objet';
   document.getElementById('panneau-catalogue-corps').innerHTML = panneauCatalogueItem(item);
@@ -555,9 +570,73 @@ function panneauCatalogueItem(item) {
     </div>
     <div class="champ"><label for="f-item-description">Description</label><textarea id="f-item-description">${escapeHtml(item?.description || '')}</textarea></div>
 
+    <div class="champ">
+      <label for="f-item-image">Image de l'objet</label>
+      <div class="image-objet-zone">
+        <div class="image-objet-apercu" id="apercu-image-objet">${apercuImageObjetHTML(item?.image, item?.emoji)}</div>
+        <div class="image-objet-actions">
+          <input type="file" id="f-item-image" accept="image/png,image/jpeg,image/webp,image/gif" onchange="choisirImageObjet(this)">
+          <button type="button" class="btn-secondaire" id="btn-retirer-image" onclick="retirerImageObjet()" ${imageUtilisable(item?.image) ? '' : 'hidden'}>Retirer l'image</button>
+          <p class="section-note">Réduite automatiquement (256 px max). Sans image, l'emoji est utilisé.</p>
+        </div>
+      </div>
+    </div>
+
     <div class="actions-panneau">
       <button class="btn-principal" id="btn-enregistrer" onclick="sauvegarderCatalogueItem(${isNew ? 'null' : `'${jsAttr(item.id)}'`})">${isNew ? "Créer l'objet" : 'Enregistrer les modifications'}</button>
     </div>`;
+}
+
+function apercuImageObjetHTML(image, emoji) {
+  if (imageUtilisable(image)) return `<img src="${escapeAttr(image)}" alt="">`;
+  return `<span class="apercu-emoji">${escapeHtml(emoji || '❔')}</span>`;
+}
+
+// Réduit l'image choisie (256 px max) et la convertit en data URL : c'est ce
+// qui est enregistré en base, donc visible aussi par le bot Discord.
+function reduireImageEnDataUrl(file, maxSize = 256) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      let data = canvas.toDataURL('image/png');
+      if (data.length > 380 * 1024) data = canvas.toDataURL('image/webp', 0.85);
+      resolve(data);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Impossible de lire cette image.')); };
+    img.src = url;
+  });
+}
+
+async function choisirImageObjet(input) {
+  const fichier = input.files && input.files[0];
+  if (!fichier) return;
+  try {
+    const data = await reduireImageEnDataUrl(fichier);
+    if (data.length > 400 * 1024) throw new Error('Image trop lourde, choisis-en une plus simple.');
+    state.pendingItemImage = data;
+    document.getElementById('apercu-image-objet').innerHTML = apercuImageObjetHTML(data);
+    document.getElementById('btn-retirer-image').hidden = false;
+  } catch (error) {
+    input.value = '';
+    toast(error.message, 'erreur');
+  }
+}
+
+function retirerImageObjet() {
+  state.pendingItemImage = null;
+  const input = document.getElementById('f-item-image');
+  if (input) input.value = '';
+  document.getElementById('apercu-image-objet').innerHTML = apercuImageObjetHTML(null, val('f-item-emoji'));
+  document.getElementById('btn-retirer-image').hidden = true;
 }
 
 async function sauvegarderCatalogueItem(itemId) {
@@ -573,6 +652,7 @@ async function sauvegarderCatalogueItem(itemId) {
       category: val('f-item-category'),
       description: val('f-item-description'),
     };
+    if (state.pendingItemImage !== undefined) payload.image = state.pendingItemImage;
     if (itemId) {
       await fetchJSON(`/api/inventaire/catalogue/${encodeURIComponent(itemId)}`, payload, 'PATCH');
     } else {
@@ -647,7 +727,7 @@ function panneauInventairePersonnage(profile, inventoryDoc) {
     const catalogItem = state.catalogue.find(it => it.id === itemId) || { id: itemId, name: itemId, emoji: '❔' };
     return `
       <div class="item-row">
-        <span class="item-emoji">${catalogItem.emoji || '❔'}</span>
+        ${itemVisuelHTML(catalogItem)}
         <div class="item-corps"><div class="item-nom">${escapeHtml(catalogItem.name)}</div></div>
         <input type="number" min="0" class="qte-input" id="qte-${escapeAttr(itemId)}" value="${qty}">
         <button class="btn-secondaire" onclick="modifierQuantiteItem('${jsAttr(profile._id)}', '${jsAttr(itemId)}')">OK</button>

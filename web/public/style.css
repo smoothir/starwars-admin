@@ -900,7 +900,29 @@ h1, h2, h3, h4 {
   border: 1px solid var(--border-subtle);
   margin-bottom: 8px;
 }
-.item-emoji { font-size: 1.3rem; flex-shrink: 0; width: 26px; text-align: center; }
+.item-emoji { font-size: 1.3rem; flex-shrink: 0; width: 32px; text-align: center; }
+.item-emoji .item-img { display: block; width: 32px; height: 32px; object-fit: contain; }
+
+/* Champ "Image de l'objet" dans le formulaire du catalogue */
+.image-objet-zone { display: flex; gap: 14px; align-items: flex-start; }
+.image-objet-apercu {
+  width: 84px;
+  height: 84px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.image-objet-apercu img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.image-objet-apercu .apercu-emoji { font-size: 2.2rem; }
+.image-objet-actions { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.image-objet-actions .btn-secondaire { padding: 8px 14px; }
+.image-objet-actions .btn-secondaire[hidden] { display: none; }
+.image-objet-actions .section-note { margin: 0; }
 .item-corps { flex: 1; min-width: 0; }
 .item-nom { font-weight: 700; font-size: 0.92rem; color: var(--text-primary); }
 .item-meta { margin-top: 3px; }
