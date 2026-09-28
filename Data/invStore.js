@@ -27,29 +27,7 @@ function emptyEquipement() {
 // Catalogue de départ, utilisé pour "amorcer" la collection Mongo la toute
 // première fois. Garder cette liste identique à celle du site évite une
 // incohérence si l'un des deux démarre avant l'autre sur une base vide.
-const DEFAULT_CATALOG = [
-  { id: 'sabre_laser', name: 'Sabre laser', emoji: '🗡️', category: 'Arme', description: 'Arme rituelle forgée avec un cristal kyber.', slot: 'mainDroite', image: null, usable: true },
-  { id: 'blaster', name: 'Pistolet blaster', emoji: '🔫', category: 'Arme', description: 'Arme de poing standard, à énergie.', slot: 'mainDroite', image: null, usable: true },
-  { id: 'fusil_blaster', name: 'Fusil blaster', emoji: '🔫', category: 'Arme', description: "Arme d'épaule à longue portée.", slot: 'mainDroite', image: null, usable: true },
-  { id: 'vibrolame', name: 'Vibrolame', emoji: '🔪', category: 'Arme', description: 'Lame vibrante, efficace même contre une armure légère.', slot: 'mainGauche', image: null, usable: true },
-  { id: 'grenade_thermique', name: 'Détonateur thermique', emoji: '💣', category: 'Arme', description: 'Explosif portatif à haut rendement.', slot: null, image: null, usable: false },
-  { id: 'armure_legere', name: 'Armure légère', emoji: '🦺', category: 'Équipement', description: 'Protection basique, ne gêne pas la mobilité.', slot: 'plastron', image: null, usable: true },
-  { id: 'casque', name: 'Casque de combat', emoji: '⛑️', category: 'Équipement', description: 'Protection crânienne avec visée intégrée.', slot: 'casque', image: null, usable: true },
-  { id: 'jetpack', name: 'Jetpack', emoji: '🚀', category: 'Équipement', description: 'Propulseur dorsal, vol de courte durée.', slot: 'plastron', image: null, usable: true },
-  { id: 'comlink', name: 'Comlink', emoji: '📡', category: 'Équipement', description: 'Communicateur longue portée.', slot: null, image: null, usable: false },
-  { id: 'kit_medical', name: 'Kit médical', emoji: '💉', category: 'Équipement', description: "Nécessaire de soin d'urgence.", slot: null, image: null, usable: false },
-  { id: 'macrobinoculaire', name: 'Macrobinoculaire', emoji: '🔭', category: 'Équipement', description: 'Optique longue portée.', slot: null, image: null, usable: false },
-  { id: 'outils_reparation', name: 'Outils de réparation', emoji: '🔧', category: 'Équipement', description: 'Nécessaire pour réparer droïdes et vaisseaux.', slot: null, image: null, usable: false },
-  { id: 'bottes_combat', name: 'Bottes de combat', emoji: '🥾', category: 'Équipement', description: 'Renforcées, bonne accroche au sol.', slot: 'pieds', image: null, usable: true },
-  { id: 'pantalon_renforce', name: 'Pantalon renforcé', emoji: '👖', category: 'Équipement', description: 'Protection légère pour les jambes.', slot: 'jambes', image: null, usable: true },
-  { id: 'credits', name: 'Crédits galactiques', emoji: '💰', category: 'Ressource', description: 'La monnaie standard de la galaxie.', slot: null, image: null, usable: false },
-  { id: 'cristal_kyber', name: 'Cristal kyber', emoji: '💎', category: 'Ressource', description: 'Cristal rare, sensible à la Force.', slot: null, image: null, usable: false },
-  { id: 'carburant', name: 'Carburant (bidon)', emoji: '⛽', category: 'Ressource', description: 'Carburant pour vaisseau ou speeder.', slot: null, image: null, usable: false },
-  { id: 'rations', name: 'Rations de survie', emoji: '🍱', category: 'Ressource', description: 'Nourriture longue conservation.', slot: null, image: null, usable: false },
-  { id: 'datapad', name: 'Datapad', emoji: '📓', category: 'Divers', description: 'Tablette de données portable.', slot: null, image: null, usable: false },
-  { id: 'holoprojecteur', name: 'Holoprojecteur', emoji: '📽️', category: 'Divers', description: 'Projette des messages ou cartes en hologramme.', slot: null, image: null, usable: false },
-  { id: 'cape', name: 'Cape', emoji: '🧥', category: 'Divers', description: "Vêtement d'extérieur, souvent à capuche.", slot: null, image: null, usable: false },
-];
+const DEFAULT_CATALOG = [];
 
 const SEED_MARKER_ID = '__seeded__';
 const MIGRATION_MARKER_ID = '__migrated_equipement__';
