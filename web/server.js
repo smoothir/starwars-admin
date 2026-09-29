@@ -21,6 +21,8 @@ const config = require('../Data/config.js');
 const { getFactions, findGradeByRoleId } = require('../Data/factionHelper.js');
 const { findAvatar, upsertAvatarImage } = require('../Data/avatarStore.js');
 const {
+  EQUIPMENT_SLOTS,
+  EQUIPMENT_SLOT_LABELS,
   getCatalog,
   addCatalogItem,
   updateCatalogItem,
@@ -360,6 +362,7 @@ app.get('/api/lists', (req, res) => {
     relationLevels: config.RELATION_LEVELS,
     defaultStats: DEFAULT_STATS,
     statMax: STAT_MAX,
+    equipmentSlots: EQUIPMENT_SLOTS.map(id => ({ id, label: EQUIPMENT_SLOT_LABELS[id] || id })),
   });
 });
 
@@ -397,8 +400,8 @@ app.get('/api/inventaire/catalogue', async (req, res) => {
 
 app.post('/api/inventaire/catalogue', async (req, res) => {
   try {
-    const { id, name, emoji, category, description, image } = req.body || {};
-    const created = await addCatalogItem({ id, name, emoji, category, description, image });
+    const { id, name, emoji, category, description, image, slot, usable } = req.body || {};
+    const created = await addCatalogItem({ id, name, emoji, category, description, image, slot, usable });
     logFromReq(req, 'objet_cree', `A ajouté l'objet "${name}" au catalogue.`);
     res.status(201).json(created);
   } catch (err) {
@@ -408,8 +411,8 @@ app.post('/api/inventaire/catalogue', async (req, res) => {
 
 app.patch('/api/inventaire/catalogue/:itemId', async (req, res) => {
   try {
-    const { name, emoji, category, description, image } = req.body || {};
-    const updated = await updateCatalogItem(req.params.itemId, { name, emoji, category, description, image });
+    const { name, emoji, category, description, image, slot, usable } = req.body || {};
+    const updated = await updateCatalogItem(req.params.itemId, { name, emoji, category, description, image, slot, usable });
     const imageInfo = image === undefined ? '' : (image ? ' (image modifiée)' : ' (image retirée)');
     logFromReq(req, 'objet_modifie', `A modifié l'objet "${name || req.params.itemId}" du catalogue${imageInfo}.`);
     res.json(updated);

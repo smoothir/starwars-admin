@@ -27,7 +27,29 @@ function emptyEquipement() {
 // Catalogue de départ, utilisé pour "amorcer" la collection Mongo la toute
 // première fois. Garder cette liste identique à celle du site évite une
 // incohérence si l'un des deux démarre avant l'autre sur une base vide.
-const DEFAULT_CATALOG = [];
+const DEFAULT_CATALOG = [
+  { id: 'sabre_laser', name: 'Sabre laser', emoji: '🗡️', category: 'Arme', description: 'Arme rituelle forgée avec un cristal kyber.', slot: 'mainDroite', image: null, usable: true },
+  { id: 'blaster', name: 'Pistolet blaster', emoji: '🔫', category: 'Arme', description: 'Arme de poing standard, à énergie.', slot: 'mainDroite', image: null, usable: true },
+  { id: 'fusil_blaster', name: 'Fusil blaster', emoji: '🔫', category: 'Arme', description: "Arme d'épaule à longue portée.", slot: 'mainDroite', image: null, usable: true },
+  { id: 'vibrolame', name: 'Vibrolame', emoji: '🔪', category: 'Arme', description: 'Lame vibrante, efficace même contre une armure légère.', slot: 'mainGauche', image: null, usable: true },
+  { id: 'grenade_thermique', name: 'Détonateur thermique', emoji: '💣', category: 'Arme', description: 'Explosif portatif à haut rendement.', slot: null, image: null, usable: false },
+  { id: 'armure_legere', name: 'Armure légère', emoji: '🦺', category: 'Équipement', description: 'Protection basique, ne gêne pas la mobilité.', slot: 'plastron', image: null, usable: true },
+  { id: 'casque', name: 'Casque de combat', emoji: '⛑️', category: 'Équipement', description: 'Protection crânienne avec visée intégrée.', slot: 'casque', image: null, usable: true },
+  { id: 'jetpack', name: 'Jetpack', emoji: '🚀', category: 'Équipement', description: 'Propulseur dorsal, vol de courte durée.', slot: 'plastron', image: null, usable: true },
+  { id: 'comlink', name: 'Comlink', emoji: '📡', category: 'Équipement', description: 'Communicateur longue portée.', slot: null, image: null, usable: false },
+  { id: 'kit_medical', name: 'Kit médical', emoji: '💉', category: 'Équipement', description: "Nécessaire de soin d'urgence.", slot: null, image: null, usable: false },
+  { id: 'macrobinoculaire', name: 'Macrobinoculaire', emoji: '🔭', category: 'Équipement', description: 'Optique longue portée.', slot: null, image: null, usable: false },
+  { id: 'outils_reparation', name: 'Outils de réparation', emoji: '🔧', category: 'Équipement', description: 'Nécessaire pour réparer droïdes et vaisseaux.', slot: null, image: null, usable: false },
+  { id: 'bottes_combat', name: 'Bottes de combat', emoji: '🥾', category: 'Équipement', description: 'Renforcées, bonne accroche au sol.', slot: 'pieds', image: null, usable: true },
+  { id: 'pantalon_renforce', name: 'Pantalon renforcé', emoji: '👖', category: 'Équipement', description: 'Protection légère pour les jambes.', slot: 'jambes', image: null, usable: true },
+  { id: 'credits', name: 'Crédits galactiques', emoji: '💰', category: 'Ressource', description: 'La monnaie standard de la galaxie.', slot: null, image: null, usable: false },
+  { id: 'cristal_kyber', name: 'Cristal kyber', emoji: '💎', category: 'Ressource', description: 'Cristal rare, sensible à la Force.', slot: null, image: null, usable: false },
+  { id: 'carburant', name: 'Carburant (bidon)', emoji: '⛽', category: 'Ressource', description: 'Carburant pour vaisseau ou speeder.', slot: null, image: null, usable: false },
+  { id: 'rations', name: 'Rations de survie', emoji: '🍱', category: 'Ressource', description: 'Nourriture longue conservation.', slot: null, image: null, usable: false },
+  { id: 'datapad', name: 'Datapad', emoji: '📓', category: 'Divers', description: 'Tablette de données portable.', slot: null, image: null, usable: false },
+  { id: 'holoprojecteur', name: 'Holoprojecteur', emoji: '📽️', category: 'Divers', description: 'Projette des messages ou cartes en hologramme.', slot: null, image: null, usable: false },
+  { id: 'cape', name: 'Cape', emoji: '🧥', category: 'Divers', description: "Vêtement d'extérieur, souvent à capuche.", slot: null, image: null, usable: false },
+];
 
 const SEED_MARKER_ID = '__seeded__';
 const MIGRATION_MARKER_ID = '__migrated_equipement__';
@@ -70,6 +92,13 @@ function normalizeImage(image) {
   if (/^https?:\/\/\S{1,500}$/.test(value)) return value;
   if (/^\/image\/[\w\-./]+$/.test(value)) return value;
   throw new Error("Image invalide (PNG, JPEG, WebP ou GIF attendu).");
+}
+
+function normalizeSlot(slot) {
+  if (slot === undefined) return undefined;
+  if (slot === null || slot === '') return null;
+  if (!EQUIPMENT_SLOTS.includes(slot)) throw new Error(`Emplacement invalide : ${slot}`);
+  return slot;
 }
 
 function toItem(doc) {
@@ -128,10 +157,11 @@ async function getItem(itemId) {
 }
 
 /** Ajoute un nouvel objet au catalogue. Génère un id à partir du nom si non fourni. */
-async function addCatalogItem({ id, name, emoji, category, description, image }) {
+async function addCatalogItem({ id, name, emoji, category, description, image, slot, usable }) {
   if (!name) throw new Error('Le nom est obligatoire.');
   const finalId = slugify(id || name);
   if (!finalId || isReservedId(finalId)) throw new Error("Impossible de déduire un identifiant valide pour cet objet.");
+  const finalSlot = normalizeSlot(slot);
 
   const col = await getItemCatalogCollection();
   const existing = await col.findOne({ _id: finalId });
@@ -143,16 +173,16 @@ async function addCatalogItem({ id, name, emoji, category, description, image })
     emoji: emoji || '❔',
     category: category || 'Divers',
     description: description || '',
-    slot: null,
+    slot: finalSlot,
     image: normalizeImage(image) || null,
-    usable: false,
+    usable: finalSlot ? true : Boolean(usable),
   };
   await col.insertOne(doc);
   return toItem(doc);
 }
 
 /** Met à jour un objet. Un champ `undefined` est laissé tel quel (slot/usable ne sont jamais touchés ici). */
-async function updateCatalogItem(itemId, { name, emoji, category, description, image }) {
+async function updateCatalogItem(itemId, { name, emoji, category, description, image, slot, usable }) {
   if (isReservedId(itemId)) throw new Error('Objet introuvable.');
   const col = await getItemCatalogCollection();
   const fields = {};
@@ -161,6 +191,13 @@ async function updateCatalogItem(itemId, { name, emoji, category, description, i
   if (category !== undefined) fields.category = category;
   if (description !== undefined) fields.description = description;
   if (image !== undefined) fields.image = normalizeImage(image);
+  if (slot !== undefined) {
+    fields.slot = normalizeSlot(slot);
+    // Un objet équipable dans un emplacement est forcément "usable" (c'est
+    // justement ce que le bot vérifie pour l'équiper) — même règle qu'à la création.
+    if (fields.slot) fields.usable = true;
+  }
+  if (usable !== undefined) fields.usable = Boolean(usable);
 
   const result = await col.findOneAndUpdate({ _id: itemId }, { $set: fields }, { returnDocument: 'after' });
   if (!result) throw new Error('Objet introuvable.');
@@ -253,6 +290,8 @@ async function setItemQuantity(profileId, itemId, quantity) {
 }
 
 module.exports = {
+  EQUIPMENT_SLOTS,
+  EQUIPMENT_SLOT_LABELS,
   getCatalog,
   getItem,
   addCatalogItem,
