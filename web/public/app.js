@@ -198,7 +198,7 @@ async function chargerInventairePage() {
       apiFetch('/api/inventaire').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
       state.cache.profils.length ? Promise.resolve(state.cache.profils) : apiFetch('/api/profils').then(r => r.json()),
     ]);
-    state.catalogue = catalogue;
+    state.catalogue = catalogueValide(catalogue);
     state.cache.inventaires = inventaires;
     state.cache.profils = profils;
     majCompteur('inventaire', profils.length);
@@ -261,10 +261,17 @@ async function rafraichirCataloguePanel() {
     apiFetch('/api/inventaire/catalogue').then(r => r.json()),
     apiFetch('/api/inventaire').then(r => r.json()),
   ]);
-  state.catalogue = catalogue;
+  state.catalogue = catalogueValide(catalogue);
   state.cache.inventaires = inventaires;
   if (state.collectionActuelle === 'inventaire') renderInventairePage();
   renderCataloguePanelListe();
+}
+
+// Sécurité : ignore les documents internes (id "__xxx__") ou sans nom qu'un
+// serveur pas à jour pourrait renvoyer, pour qu'ils n'apparaissent jamais
+// comme de faux objets vides dans le catalogue.
+function catalogueValide(liste) {
+  return (liste || []).filter(it => it && it.name && !/^__.*__$/.test(String(it.id || '')));
 }
 
 // Une image d'objet est utilisable dans le navigateur si c'est une data URL ou
@@ -282,12 +289,17 @@ function itemVisuelHTML(item) {
 }
 
 function catalogueItemHTML(item) {
+  const labelSlot = item.slot ? (state.listes.equipmentSlots || []).find(s => s.id === item.slot)?.label || item.slot : null;
   return `
     <div class="item-row">
       ${itemVisuelHTML(item)}
       <div class="item-corps">
         <div class="item-nom">${escapeHtml(item.name)}</div>
-        <div class="item-meta"><span class="badge badge-defaut">${escapeHtml(item.category || 'Divers')}</span></div>
+        <div class="item-meta">
+          <span class="badge badge-defaut">${escapeHtml(item.category || 'Divers')}</span>
+          ${labelSlot ? `<span class="badge badge-defaut">🧷 ${escapeHtml(labelSlot)}</span>` : ''}
+          ${item.usable ? '<span class="badge badge-defaut">✅ Utilisable</span>' : ''}
+        </div>
       </div>
       <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue('${jsAttr(item.id)}')">Modifier</button>
       <button class="btn-secondaire btn-danger" onclick="supprimerCatalogueItem('${jsAttr(item.id)}')">Supprimer</button>
@@ -582,6 +594,21 @@ function panneauCatalogueItem(item) {
       </div>
     </div>
 
+    <div class="champ">
+      <label for="f-item-slot">Emplacement d'équipement</label>
+      <select id="f-item-slot" onchange="onSlotObjetChange()">
+        <option value="">Aucun (objet non équipable)</option>
+        ${(state.listes.equipmentSlots || []).map(s => `<option value="${escapeAttr(s.id)}" ${item?.slot === s.id ? 'selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="champ champ-case">
+      <label class="case-label">
+        <input type="checkbox" id="f-item-usable" ${item?.usable ? 'checked' : ''} ${item?.slot ? 'disabled' : ''}>
+        Utilisable depuis Discord
+      </label>
+      <p class="section-note" id="note-usable-slot" ${item?.slot ? '' : 'hidden'}>Coché automatiquement : un objet équipable est toujours utilisable.</p>
+    </div>
+
     <div class="actions-panneau">
       <button class="btn-principal" id="btn-enregistrer" onclick="sauvegarderCatalogueItem(${isNew ? 'null' : `'${jsAttr(item.id)}'`})">${isNew ? "Créer l'objet" : 'Enregistrer les modifications'}</button>
     </div>`;
@@ -639,6 +666,15 @@ function retirerImageObjet() {
   document.getElementById('btn-retirer-image').hidden = true;
 }
 
+function onSlotObjetChange() {
+  const aUnSlot = !!val('f-item-slot');
+  const caseUsable = document.getElementById('f-item-usable');
+  const note = document.getElementById('note-usable-slot');
+  caseUsable.disabled = aUnSlot;
+  if (aUnSlot) caseUsable.checked = true;
+  note.hidden = !aUnSlot;
+}
+
 async function sauvegarderCatalogueItem(itemId) {
   const btn = document.getElementById('btn-enregistrer');
   const texteOriginal = btn.textContent;
@@ -651,6 +687,8 @@ async function sauvegarderCatalogueItem(itemId) {
       emoji: val('f-item-emoji'),
       category: val('f-item-category'),
       description: val('f-item-description'),
+      slot: val('f-item-slot') || null,
+      usable: document.getElementById('f-item-usable').checked,
     };
     if (state.pendingItemImage !== undefined) payload.image = state.pendingItemImage;
     if (itemId) {
