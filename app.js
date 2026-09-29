@@ -13,7 +13,9 @@ const state = {
 document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (document.getElementById('panneau-catalogue').classList.contains('ouvert')) {
+    if (document.getElementById('confirm-overlay').classList.contains('visible')) {
+      resoudreConfirm(false);
+    } else if (document.getElementById('panneau-catalogue').classList.contains('ouvert')) {
       fermerCataloguePanel();
     } else {
       fermerPanneau();
@@ -59,6 +61,7 @@ function afficherUtilisateurConnecte(me) {
   const avatar = document.getElementById('user-avatar');
   if (me.avatar) { avatar.src = me.avatar; avatar.hidden = false; } else { avatar.hidden = true; }
   badge.hidden = false;
+  document.getElementById('nav-admin').hidden = !me.isSuperAdmin;
 }
 
 // -----------------------------------------------------------------------
@@ -124,6 +127,11 @@ async function chargerDonnees(collection) {
     document.getElementById('titre-section').textContent = 'Inventaire';
     document.getElementById('sous-titre').textContent = "Catalogue d'objets et inventaires des personnages.";
     await chargerInventairePage();
+  } else if (collection === 'admin') {
+    searchWrap.hidden = true;
+    document.getElementById('titre-section').textContent = 'Admin';
+    document.getElementById('sous-titre').textContent = 'Connexions et journal des actions — visible par le créateur uniquement.';
+    await chargerAdminPage();
   }
 }
 
@@ -190,7 +198,7 @@ async function chargerInventairePage() {
       apiFetch('/api/inventaire').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
       state.cache.profils.length ? Promise.resolve(state.cache.profils) : apiFetch('/api/profils').then(r => r.json()),
     ]);
-    state.catalogue = catalogue;
+    state.catalogue = catalogueValide(catalogue);
     state.cache.inventaires = inventaires;
     state.cache.profils = profils;
     majCompteur('inventaire', profils.length);
@@ -211,7 +219,6 @@ function renderInventairePage() {
   document.getElementById('contenu').innerHTML = `
     <button class="btn-catalogue-ouvrir" onclick="ouvrirCataloguePanel()">
       <span>📦 Catalogue d'objets</span>
-      <span class="nav-count">${state.catalogue.length}</span>
       <span class="fleche">→</span>
     </button>
     <div style="margin-top:22px; display:flex; flex-direction:column; gap:10px;">
@@ -240,7 +247,10 @@ function renderCataloguePanelListe() {
   document.getElementById('panneau-catalogue-titre').textContent = "Catalogue d'objets";
   document.getElementById('panneau-catalogue-corps').innerHTML = `
     <div id="catalogue-liste">${state.catalogue.map(catalogueItemHTML).join('') || '<p class="section-note">Catalogue vide.</p>'}</div>
-    <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue(null)">+ Ajouter un objet</button>
+    <div style="display:flex; gap:10px; margin-top:4px;">
+      <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue(null)" style="flex:1">+ Ajouter un objet</button>
+      <button class="btn-secondaire btn-danger" onclick="supprimerTousLesObjets()" ${state.catalogue.length ? '' : 'disabled'}>🗑️ Tout supprimer</button>
+    </div>
   `;
 }
 
@@ -251,16 +261,37 @@ async function rafraichirCataloguePanel() {
     apiFetch('/api/inventaire/catalogue').then(r => r.json()),
     apiFetch('/api/inventaire').then(r => r.json()),
   ]);
-  state.catalogue = catalogue;
+  state.catalogue = catalogueValide(catalogue);
   state.cache.inventaires = inventaires;
   if (state.collectionActuelle === 'inventaire') renderInventairePage();
   renderCataloguePanelListe();
 }
 
+// Sécurité : ignore les documents internes (id "__xxx__") ou sans nom qu'un
+// serveur pas à jour pourrait renvoyer, pour qu'ils n'apparaissent jamais
+// comme de faux objets vides dans le catalogue.
+function catalogueValide(liste) {
+  return (liste || []).filter(it => it && it.name && !/^__.*__$/.test(String(it.id || '')));
+}
+
+// Une image d'objet est utilisable dans le navigateur si c'est une data URL ou
+// une URL http(s). Les anciens chemins "/image/items/..." (fichiers du bot)
+// ne sont pas accessibles depuis le site : on retombe alors sur l'emoji.
+function imageUtilisable(image) {
+  return typeof image === 'string' && /^(data:image\/|https?:\/\/)/.test(image);
+}
+
+function itemVisuelHTML(item) {
+  if (imageUtilisable(item?.image)) {
+    return `<span class="item-emoji"><img class="item-img" src="${escapeAttr(item.image)}" alt=""></span>`;
+  }
+  return `<span class="item-emoji">${item?.emoji || '❔'}</span>`;
+}
+
 function catalogueItemHTML(item) {
   return `
     <div class="item-row">
-      <span class="item-emoji">${item.emoji || '❔'}</span>
+      ${itemVisuelHTML(item)}
       <div class="item-corps">
         <div class="item-nom">${escapeHtml(item.name)}</div>
         <div class="item-meta"><span class="badge badge-defaut">${escapeHtml(item.category || 'Divers')}</span></div>
@@ -296,6 +327,85 @@ function filtrerListe() {
   });
   const aucun = document.getElementById('aucun-resultat');
   if (aucun) aucun.hidden = visibles !== 0;
+}
+
+// -----------------------------------------------------------------------
+// Panel Admin (créateur uniquement) : qui se connecte, combien de fois, et
+// journal des actions faites sur le site.
+// -----------------------------------------------------------------------
+async function chargerAdminPage() {
+  const contenuDiv = document.getElementById('contenu');
+  contenuDiv.innerHTML = Array.from({ length: 4 }).map(() => '<div class="squelette"></div>').join('');
+
+  try {
+    const [connexions, logs] = await Promise.all([
+      apiFetch('/api/admin/connexions').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      apiFetch('/api/admin/logs').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+    ]);
+
+    contenuDiv.innerHTML = `
+      <div class="section-titre">👥 Connexions (${connexions.length})</div>
+      <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:34px;">
+        ${connexions.map(connexionLigneHTML).join('') || "<div class='etat-vide'><p>Personne ne s'est encore connecté.</p></div>"}
+      </div>
+
+      <div class="section-titre">📜 Journal des actions</div>
+      <div class="log-liste">
+        ${logs.map(logLigneHTML).join('') || "<p class='section-note'>Aucune action enregistrée pour le moment.</p>"}
+      </div>
+    `;
+    setStatutConnexion(true);
+  } catch (error) {
+    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de connexion à l'API</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    setStatutConnexion(false);
+    console.error('Erreur Fetch:', error);
+  }
+}
+
+function connexionLigneHTML(c) {
+  return `
+    <div class="ligne">
+      ${c.avatar ? `<img src="${escapeAttr(c.avatar)}" class="ligne-avatar" alt="">` : '<div class="ligne-sigil">👤</div>'}
+      <div class="ligne-corps">
+        <div class="ligne-nom">${escapeHtml(c.username || c._id)}</div>
+        <div class="ligne-meta">
+          <span class="badge badge-defaut">${c.count || 0} connexion${(c.count || 0) > 1 ? 's' : ''}</span>
+          <span class="badge badge-defaut">Dernière : ${formatDateLog(c.lastLogin)}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+const LOG_ICONES = {
+  login: '🔓',
+  logout: '🔒',
+  profil_modifie: '✏️',
+  objet_cree: '➕',
+  objet_modifie: '✏️',
+  objet_supprime: '🗑️',
+  catalogue_vide: '🧹',
+  inventaire_ajout: '📥',
+  inventaire_quantite: '🔢',
+  inventaire_retrait: '📤',
+};
+
+function logLigneHTML(entry) {
+  const icone = LOG_ICONES[entry.action] || '•';
+  return `
+    <div class="log-entry">
+      <span class="log-icone">${icone}</span>
+      <div class="log-corps">
+        <div class="log-details"><strong>${escapeHtml(entry.username || 'Inconnu')}</strong> ${escapeHtml(entry.details || entry.action)}</div>
+        <div class="log-date">${formatDateLog(entry.timestamp)}</div>
+      </div>
+    </div>`;
+}
+
+function formatDateLog(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 // -----------------------------------------------------------------------
@@ -449,6 +559,7 @@ function previewPortrait(input) {
 function ouvrirEditeurCatalogue(itemId) {
   const item = itemId ? state.catalogue.find(it => it.id === itemId) : null;
   state.itemActuel = { type: 'catalogue', id: itemId };
+  state.pendingItemImage = undefined; // undefined = image inchangée, null = retirée, texte = nouvelle image
 
   document.getElementById('panneau-catalogue-titre').textContent = item ? item.name : 'Nouvel objet';
   document.getElementById('panneau-catalogue-corps').innerHTML = panneauCatalogueItem(item);
@@ -466,9 +577,73 @@ function panneauCatalogueItem(item) {
     </div>
     <div class="champ"><label for="f-item-description">Description</label><textarea id="f-item-description">${escapeHtml(item?.description || '')}</textarea></div>
 
+    <div class="champ">
+      <label for="f-item-image">Image de l'objet</label>
+      <div class="image-objet-zone">
+        <div class="image-objet-apercu" id="apercu-image-objet">${apercuImageObjetHTML(item?.image, item?.emoji)}</div>
+        <div class="image-objet-actions">
+          <input type="file" id="f-item-image" accept="image/png,image/jpeg,image/webp,image/gif" onchange="choisirImageObjet(this)">
+          <button type="button" class="btn-secondaire" id="btn-retirer-image" onclick="retirerImageObjet()" ${imageUtilisable(item?.image) ? '' : 'hidden'}>Retirer l'image</button>
+          <p class="section-note">Réduite automatiquement (256 px max). Sans image, l'emoji est utilisé.</p>
+        </div>
+      </div>
+    </div>
+
     <div class="actions-panneau">
       <button class="btn-principal" id="btn-enregistrer" onclick="sauvegarderCatalogueItem(${isNew ? 'null' : `'${jsAttr(item.id)}'`})">${isNew ? "Créer l'objet" : 'Enregistrer les modifications'}</button>
     </div>`;
+}
+
+function apercuImageObjetHTML(image, emoji) {
+  if (imageUtilisable(image)) return `<img src="${escapeAttr(image)}" alt="">`;
+  return `<span class="apercu-emoji">${escapeHtml(emoji || '❔')}</span>`;
+}
+
+// Réduit l'image choisie (256 px max) et la convertit en data URL : c'est ce
+// qui est enregistré en base, donc visible aussi par le bot Discord.
+function reduireImageEnDataUrl(file, maxSize = 256) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      let data = canvas.toDataURL('image/png');
+      if (data.length > 380 * 1024) data = canvas.toDataURL('image/webp', 0.85);
+      resolve(data);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Impossible de lire cette image.')); };
+    img.src = url;
+  });
+}
+
+async function choisirImageObjet(input) {
+  const fichier = input.files && input.files[0];
+  if (!fichier) return;
+  try {
+    const data = await reduireImageEnDataUrl(fichier);
+    if (data.length > 400 * 1024) throw new Error('Image trop lourde, choisis-en une plus simple.');
+    state.pendingItemImage = data;
+    document.getElementById('apercu-image-objet').innerHTML = apercuImageObjetHTML(data);
+    document.getElementById('btn-retirer-image').hidden = false;
+  } catch (error) {
+    input.value = '';
+    toast(error.message, 'erreur');
+  }
+}
+
+function retirerImageObjet() {
+  state.pendingItemImage = null;
+  const input = document.getElementById('f-item-image');
+  if (input) input.value = '';
+  document.getElementById('apercu-image-objet').innerHTML = apercuImageObjetHTML(null, val('f-item-emoji'));
+  document.getElementById('btn-retirer-image').hidden = true;
 }
 
 async function sauvegarderCatalogueItem(itemId) {
@@ -484,6 +659,7 @@ async function sauvegarderCatalogueItem(itemId) {
       category: val('f-item-category'),
       description: val('f-item-description'),
     };
+    if (state.pendingItemImage !== undefined) payload.image = state.pendingItemImage;
     if (itemId) {
       await fetchJSON(`/api/inventaire/catalogue/${encodeURIComponent(itemId)}`, payload, 'PATCH');
     } else {
@@ -501,10 +677,32 @@ async function sauvegarderCatalogueItem(itemId) {
 }
 
 async function supprimerCatalogueItem(itemId) {
-  if (!confirm('Supprimer cet objet du catalogue ? Les personnages qui le possèdent garderont son entrée (avec sa quantité), affichée avec un nom générique.')) return;
+  const ok = await confirmerAction({
+    titre: "Supprimer l'objet",
+    message: 'Supprimer cet objet du catalogue ? Les personnages qui le possèdent garderont son entrée (avec sa quantité), affichée avec un nom générique.',
+    texteValider: 'Supprimer',
+  });
+  if (!ok) return;
   try {
     await fetchJSON(`/api/inventaire/catalogue/${encodeURIComponent(itemId)}`, null, 'DELETE');
     toast('Objet supprimé du catalogue.', 'succes');
+    await rafraichirCataloguePanel();
+  } catch (error) {
+    toast(`Échec de la suppression : ${error.message}`, 'erreur');
+  }
+}
+
+async function supprimerTousLesObjets() {
+  if (!state.catalogue.length) return;
+  const ok = await confirmerAction({
+    titre: 'Vider le catalogue',
+    message: `Supprimer les ${state.catalogue.length} objets du catalogue ? Les personnages qui en possèdent garderont leur quantité, affichée avec un nom générique. Cette action est irréversible.`,
+    texteValider: 'Tout supprimer',
+  });
+  if (!ok) return;
+  try {
+    await fetchJSON('/api/inventaire/catalogue', null, 'DELETE');
+    toast('Catalogue vidé.', 'succes');
     await rafraichirCataloguePanel();
   } catch (error) {
     toast(`Échec de la suppression : ${error.message}`, 'erreur');
@@ -536,7 +734,7 @@ function panneauInventairePersonnage(profile, inventoryDoc) {
     const catalogItem = state.catalogue.find(it => it.id === itemId) || { id: itemId, name: itemId, emoji: '❔' };
     return `
       <div class="item-row">
-        <span class="item-emoji">${catalogItem.emoji || '❔'}</span>
+        ${itemVisuelHTML(catalogItem)}
         <div class="item-corps"><div class="item-nom">${escapeHtml(catalogItem.name)}</div></div>
         <input type="number" min="0" class="qte-input" id="qte-${escapeAttr(itemId)}" value="${qty}">
         <button class="btn-secondaire" onclick="modifierQuantiteItem('${jsAttr(profile._id)}', '${jsAttr(itemId)}')">OK</button>
@@ -671,16 +869,49 @@ async function rafraichirEtRouvrir() {
 }
 
 async function fetchJSON(url, body, method = 'PATCH') {
-  const response = await apiFetch(url, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  // Pas de corps du tout pour les suppressions (body === null) : envoyer le
+  // texte "null" avec Content-Type: application/json fait échouer le
+  // parseur JSON d'Express (mode strict, qui n'accepte que { ou [ en
+  // premier caractère) avec une page d'erreur HTML brute, pas les 404/400
+  // JSON propres attendus par le code plus bas.
+  const options = { method };
+  if (body !== null && body !== undefined) {
+    options.headers = { 'Content-Type': 'application/json' };
+    options.body = JSON.stringify(body);
+  }
+  const response = await apiFetch(url, options);
   if (!response.ok) {
     const texte = await response.text().catch(() => '');
     throw new Error(`HTTP ${response.status} ${texte}`.trim());
   }
   return response.json();
+}
+
+// -----------------------------------------------------------------------
+// Confirmation (remplace window.confirm par une modale du même style que le
+// reste du site). confirmerAction() retourne une Promise<boolean> : true si
+// la personne a cliqué "Valider", false sinon (Annuler, croix, clic dehors,
+// touche Échap) — s'utilise avec await, comme confirm() mais async.
+// -----------------------------------------------------------------------
+let _resoudreConfirmEnCours = null;
+
+function confirmerAction({ titre = 'Confirmer', message = '', texteValider = 'Valider' } = {}) {
+  document.getElementById('confirm-titre').textContent = titre;
+  document.getElementById('confirm-message').textContent = message;
+  document.getElementById('confirm-valider').textContent = texteValider;
+  document.getElementById('confirm-overlay').classList.add('visible');
+
+  return new Promise((resolve) => {
+    _resoudreConfirmEnCours = resolve;
+  });
+}
+
+function resoudreConfirm(valeur) {
+  document.getElementById('confirm-overlay').classList.remove('visible');
+  if (_resoudreConfirmEnCours) {
+    _resoudreConfirmEnCours(valeur);
+    _resoudreConfirmEnCours = null;
+  }
 }
 
 // -----------------------------------------------------------------------

@@ -33,6 +33,12 @@ const SEED_MARKER_ID = '__seeded__';
 const MIGRATION_MARKER_ID = '__migrated_equipement__';
 const MARKER_IDS = [SEED_MARKER_ID, MIGRATION_MARKER_ID];
 
+// Tout identifiant de la forme "__xxx__" est un document interne (marqueur
+// posé par le bot ou le site), jamais un vrai objet : on les cache et on les
+// protège TOUS, y compris ceux que le bot ajouterait plus tard.
+const RESERVED_ID = /^__.*__$/;
+const isReservedId = (id) => RESERVED_ID.test(String(id || ''));
+
 // Taille max d'une image enregistrée directement en base (data URL). Le site
 // réduit déjà l'image côté navigateur (≈256 px) : ceci n'est qu'un garde-fou.
 const MAX_IMAGE_DATAURL_LENGTH = 400 * 1024;
@@ -108,14 +114,14 @@ async function getCatalog() {
     await col.updateOne({ _id: MIGRATION_MARKER_ID }, { $setOnInsert: { migratedAt: new Date() } }, { upsert: true });
   }
 
-  const docs = await col.find({ _id: { $nin: MARKER_IDS } }).toArray();
+  const docs = (await col.find({ _id: { $not: RESERVED_ID } }).toArray()).filter(d => !isReservedId(d._id));
   return docs
     .map(toItem)
     .sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name));
 }
 
 async function getItem(itemId) {
-  if (!itemId || MARKER_IDS.includes(itemId)) return null;
+  if (!itemId || isReservedId(itemId)) return null;
   const col = await getItemCatalogCollection();
   const doc = await col.findOne({ _id: itemId });
   return doc ? toItem(doc) : null;
@@ -125,7 +131,7 @@ async function getItem(itemId) {
 async function addCatalogItem({ id, name, emoji, category, description, image }) {
   if (!name) throw new Error('Le nom est obligatoire.');
   const finalId = slugify(id || name);
-  if (!finalId || MARKER_IDS.includes(finalId)) throw new Error("Impossible de déduire un identifiant valide pour cet objet.");
+  if (!finalId || isReservedId(finalId)) throw new Error("Impossible de déduire un identifiant valide pour cet objet.");
 
   const col = await getItemCatalogCollection();
   const existing = await col.findOne({ _id: finalId });
@@ -147,6 +153,7 @@ async function addCatalogItem({ id, name, emoji, category, description, image })
 
 /** Met à jour un objet. Un champ `undefined` est laissé tel quel (slot/usable ne sont jamais touchés ici). */
 async function updateCatalogItem(itemId, { name, emoji, category, description, image }) {
+  if (isReservedId(itemId)) throw new Error('Objet introuvable.');
   const col = await getItemCatalogCollection();
   const fields = {};
   if (name !== undefined) fields.name = name;
@@ -166,7 +173,7 @@ async function updateCatalogItem(itemId, { name, emoji, category, description, i
  * nom générique — pas de suppression en cascade.
  */
 async function removeCatalogItem(itemId) {
-  if (MARKER_IDS.includes(itemId)) return false;
+  if (isReservedId(itemId)) return false;
   const col = await getItemCatalogCollection();
   const result = await col.deleteOne({ _id: itemId });
   return result.deletedCount > 0;
@@ -175,7 +182,7 @@ async function removeCatalogItem(itemId) {
 /** Supprime tout le catalogue d'un coup, SAUF les marqueurs (sinon le bot/site réamorcerait les objets par défaut). */
 async function clearCatalog() {
   const col = await getItemCatalogCollection();
-  const result = await col.deleteMany({ _id: { $nin: MARKER_IDS } });
+  const result = await col.deleteMany({ _id: { $not: RESERVED_ID } });
   return result.deletedCount || 0;
 }
 
