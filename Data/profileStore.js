@@ -10,7 +10,7 @@ const STATUT_EMOJI = {
 };
 
 // Statistiques toujours affichées sur la carte "Stats", même si leur valeur est 0.
-// Chaque statistique est notée sur STAT_MAX (10). Le staff peut ajouter n'importe
+// Chaque statistique est notée sur STAT_MAX (100). Le staff peut ajouter n'importe
 // quel autre nom de stat via /stats, elle s'affichera en plus de celles-ci.
 const DEFAULT_STATS = [
   'Éloquence & Commerce',
@@ -18,9 +18,71 @@ const DEFAULT_STATS = [
   'Tir & Précision',
   'Pilotage',
   'Technologie & Savoir',
+  'Résistance',
+];
+const STAT_MAX = 100;
+
+// Ancienne liste (notée sur 10), conservée uniquement pour la migration
+// automatique ci-dessous — ne pas utiliser ailleurs dans le code.
+const OLD_DEFAULT_STATS = [
+  'Éloquence & Commerce',
+  'Corps-à-corps',
+  'Tir & Précision',
+  'Pilotage',
+  'Technologie & Savoir',
   'Endurance & Survie',
 ];
-const STAT_MAX = 10;
+const OLD_STAT_MAX = 10;
+
+// Document marqueur (même collection "profils") attestant que la migration
+// "stats sur 100" a déjà eu lieu — une seule fois à vie, jamais renvoyé comme
+// un profil (voir le filtre dans listAllProfiles ci-dessous).
+const STATS_MIGRATION_MARKER_ID = '__stats_migrated_sur_100__';
+
+/**
+ * Migration "stats sur 100" : pour chaque profil déjà existant,
+ *  - retire l'ancienne stat "Endurance & Survie" (supprimée, remplacée par
+ *    "Résistance" qui démarre à 0 comme toute nouvelle stat) ;
+ *  - multiplie par 10 les autres stats par défaut pour les faire passer de
+ *    l'échelle /10 à l'échelle /100, en conservant leur valeur relative.
+ * Ne touche jamais une stat custom ajoutée à la main par le staff (hors des
+ * 6 stats par défaut), qui n'a de toute façon pas de maximum défini.
+ * Idempotent via le marqueur : s'exécute une seule fois, même si rappelée
+ * à chaque démarrage du bot et du site.
+ */
+async function ensureStatsMigrated() {
+  const col = await getProfilsCollection();
+  const dejaMigre = await col.findOne({ _id: STATS_MIGRATION_MARKER_ID });
+  if (dejaMigre) return;
+
+  const profils = await col.find({ _id: { $ne: STATS_MIGRATION_MARKER_ID }, stats: { $exists: true } }).toArray();
+  for (const p of profils) {
+    const stats = { ...p.stats };
+    let modifie = false;
+
+    if ('Endurance & Survie' in stats) {
+      delete stats['Endurance & Survie'];
+      modifie = true;
+    }
+    for (const key of OLD_DEFAULT_STATS) {
+      if (key === 'Endurance & Survie') continue; // déjà traitée ci-dessus
+      if (typeof stats[key] === 'number') {
+        stats[key] = Math.min(STAT_MAX, Math.round(stats[key] * (STAT_MAX / OLD_STAT_MAX)));
+        modifie = true;
+      }
+    }
+
+    if (modifie) {
+      await col.updateOne({ _id: p._id }, { $set: { stats, updatedAt: new Date() } });
+    }
+  }
+
+  await col.updateOne(
+    { _id: STATS_MIGRATION_MARKER_ID },
+    { $setOnInsert: { migratedAt: new Date() } },
+    { upsert: true },
+  );
+}
 
 function slugify(text) {
   return (text || '')
@@ -43,7 +105,7 @@ function buildDefaultRelations() {
  * Crée (ou met à jour) le profil d'un personnage à partir des infos de son ticket
  * de fiche, une fois celle-ci validée. Ne touche jamais aux champs modifiables
  * par le joueur (statut, garde personnelle, bourse, alliés, rivaux, renommée, notes)
- * s'ils existent déjà  seules les infos issues de la fiche sont (re)synchronisées.
+ * s'ils existent déjà — seules les infos issues de la fiche sont (re)synchronisées.
  */
 async function upsertProfileFromTicket(ticket) {
   const col = await getProfilsCollection();
@@ -129,11 +191,13 @@ async function upsertProfileBasicInfo({ userId, nomPrenom, surnom, age, imageUrl
 }
 
 async function getProfile(profileId) {
+  await ensureStatsMigrated();
   const col = await getProfilsCollection();
   return col.findOne({ _id: profileId });
 }
 
 async function listProfilesForUser(userId) {
+  await ensureStatsMigrated();
   const col = await getProfilsCollection();
   return col.find({ userId }).toArray();
 }
@@ -153,8 +217,9 @@ async function getProfileByChannel(reservationChannelId) {
  * (utilisé par /profil pour le staff, et par l'autocomplétion de /stats).
  */
 async function listAllProfiles() {
+  await ensureStatsMigrated();
   const col = await getProfilsCollection();
-  return col.find({}).toArray();
+  return col.find({ _id: { $ne: STATS_MIGRATION_MARKER_ID } }).toArray();
 }
 
 async function updateProfileFields(profileId, fields) {
@@ -179,7 +244,7 @@ async function setRelationLevel(profileId, factionKey, level) {
 
 /**
  * Tire des statistiques aléatoires (1 à STAT_MAX sur chacune des DEFAULT_STATS)
- * pour un personnage  utilisé par le bouton "🎲 Stats aléatoire" affiché une
+ * pour un personnage — utilisé par le bouton "🎲 Stats aléatoire" affiché une
  * fois la fiche validée. Ne fait rien si les stats ont déjà été tirées, pour
  * éviter qu'on puisse relancer indéfiniment en espérant de meilleures valeurs.
  * Retourne { profile, alreadyRolled }.

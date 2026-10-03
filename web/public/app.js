@@ -299,6 +299,7 @@ function catalogueItemHTML(item) {
           <span class="badge badge-defaut">${escapeHtml(item.category || 'Divers')}</span>
           ${labelSlot ? `<span class="badge badge-defaut">🧷 ${escapeHtml(labelSlot)}</span>` : ''}
           ${item.usable ? '<span class="badge badge-defaut">✅ Utilisable</span>' : ''}
+          ${Object.entries(item.statBonus || {}).map(([stat, val]) => `<span class="badge badge-defaut">📊 +${val} ${escapeHtml(stat)}</span>`).join('')}
         </div>
       </div>
       <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue('${jsAttr(item.id)}')">Modifier</button>
@@ -609,6 +610,16 @@ function panneauCatalogueItem(item) {
       <p class="section-note" id="note-usable-slot" ${item?.slot ? '' : 'hidden'}>Coché automatiquement : un objet équipable est toujours utilisable.</p>
     </div>
 
+    <div class="section-titre" style="margin-top:26px">📊 Bonus de stats (si équipé)</div>
+    <p class="section-note">Laisse à 0 les stats que cet objet ne modifie pas. S'applique uniquement quand l'objet est équipé (pas juste possédé).</p>
+    <div class="grille-champs" id="bonus-stats-grille">
+      ${(state.listes.defaultStats || []).map((stat, i) => `
+        <div class="champ">
+          <label for="f-bonus-${i}">${escapeHtml(stat)}</label>
+          <input type="number" id="f-bonus-${i}" data-bonus-stat="${escapeAttr(stat)}" value="${item?.statBonus?.[stat] || 0}">
+        </div>`).join('')}
+    </div>
+
     <div class="actions-panneau">
       <button class="btn-principal" id="btn-enregistrer" onclick="sauvegarderCatalogueItem(${isNew ? 'null' : `'${jsAttr(item.id)}'`})">${isNew ? "Créer l'objet" : 'Enregistrer les modifications'}</button>
     </div>`;
@@ -689,6 +700,10 @@ async function sauvegarderCatalogueItem(itemId) {
       description: val('f-item-description'),
       slot: val('f-item-slot') || null,
       usable: document.getElementById('f-item-usable').checked,
+      statBonus: Object.fromEntries(
+        Array.from(document.querySelectorAll('[data-bonus-stat]'))
+          .map(el => [el.dataset.bonusStat, Number(el.value) || 0])
+      ),
     };
     if (state.pendingItemImage !== undefined) payload.image = state.pendingItemImage;
     if (itemId) {
