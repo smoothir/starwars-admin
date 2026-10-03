@@ -4,6 +4,7 @@
 // différentes.
 require('dotenv').config();
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const session = require('express-session');
 const { MongoStore } = require('connect-mongo');
@@ -95,6 +96,29 @@ app.use(session({
 // de la page elle-meme qui gere l'authentification, pas le navigateur. Seules
 // les routes /api/* sont protegees, et sans en-tete WWW-Authenticate, pour ne
 // jamais declencher la popup native du navigateur par-dessus notre ecran.
+// Les images d'objets existantes vivent dans le dossier /image du bot.
+// On le publie sous /image afin que les anciens chemins enregistrés en base
+// restent valides. ITEM_IMAGE_DIR / BOT_IMAGE_DIR permet de forcer un autre
+// emplacement si les deux projets ne sont pas dans le même répertoire.
+const imageDirCandidats = [
+  process.env.ITEM_IMAGE_DIR,
+  process.env.BOT_IMAGE_DIR,
+  path.resolve(__dirname, '..', '..', 'image'),
+  path.resolve(__dirname, '..', 'image'),
+  path.resolve(process.cwd(), 'image'),
+].filter(Boolean).map(dir => path.resolve(dir));
+
+const itemImageDir = imageDirCandidats.find(dir => {
+  try { return fs.statSync(dir).isDirectory(); } catch { return false; }
+});
+
+if (itemImageDir) {
+  console.log(`🖼️ Images du catalogue servies depuis : ${itemImageDir}`);
+  app.use('/image', express.static(itemImageDir, { maxAge: '1d' }));
+} else {
+  console.warn('⚠️ Aucun dossier image trouvé. Définis ITEM_IMAGE_DIR ou BOT_IMAGE_DIR si nécessaire.');
+}
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Qui est connecte (utilise par le site au chargement pour savoir si une

@@ -346,16 +346,27 @@ function catalogueValide(liste) {
   return (liste || []).filter(it => it && it.name && !/^__.*__$/.test(String(it.id || '')));
 }
 
-// Une image d'objet est utilisable dans le navigateur si c'est une data URL ou
-// une URL http(s). Les anciens chemins "/image/items/..." (fichiers du bot)
-// ne sont pas accessibles depuis le site : on retombe alors sur l'emoji.
+// Une image d'objet peut venir d'une data URL, d'une URL distante ou du dossier
+// /image/ partagé avec le bot. Les chemins relatifs "image/..." sont aussi
+// acceptés et convertis en "/image/..." pour le navigateur.
+function normaliserImageNavigateur(image) {
+  if (typeof image !== 'string' || !image.trim()) return null;
+  const value = image.trim();
+  if (/^https?:\/\//i.test(value) || /^data:image\//i.test(value)) return value;
+  if (/^\/?image\//i.test(value)) {
+    return `/${encodeURI(value.replace(/^\/+/, ''))}`;
+  }
+  return null;
+}
+
 function imageUtilisable(image) {
-  return typeof image === 'string' && /^(data:image\/|https?:\/\/)/.test(image);
+  return !!normaliserImageNavigateur(image);
 }
 
 function itemVisuelHTML(item) {
-  if (imageUtilisable(item?.image)) {
-    return `<span class="item-emoji"><img class="item-img" src="${escapeAttr(item.image)}" alt=""></span>`;
+  const imageSrc = normaliserImageNavigateur(item?.image);
+  if (imageSrc) {
+    return `<span class="item-emoji"><img class="item-img" src="${escapeAttr(imageSrc)}" alt=""></span>`;
   }
   return `<span class="item-emoji">${item?.emoji || '❔'}</span>`;
 }
@@ -723,7 +734,8 @@ function panneauCatalogueItem(item) {
 }
 
 function apercuImageObjetHTML(image, emoji) {
-  if (imageUtilisable(image)) return `<img src="${escapeAttr(image)}" alt="">`;
+  const imageSrc = normaliserImageNavigateur(image);
+  if (imageSrc) return `<img src="${escapeAttr(imageSrc)}" alt="">`;
   return `<span class="apercu-emoji">${escapeHtml(emoji || '❔')}</span>`;
 }
 
