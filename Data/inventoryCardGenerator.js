@@ -11,17 +11,17 @@ const FALLBACK_ICON_PATH = path.join(__dirname, '..', 'image', 'aucun.png');
 // Rectangles des 6 emplacements d'équipement sur image/inventaire.png (mesurés
 // pixel par pixel sur l'image fournie). Ajuste ici si tu changes le fond.
 const EQUIPMENT_RECTS = {
-  casque:     { x: 166, y: 63,  w: 66, h: 70 },
-  plastron:   { x: 164, y: 164, w: 68, h: 71 },
-  mainGauche: { x: 61,  y: 243, w: 68, h: 72 },
-  mainDroite: { x: 267, y: 243, w: 69, h: 70 },
-  jambes:     { x: 164, y: 324, w: 68, h: 71 },
-  pieds:      { x: 164, y: 415, w: 68, h: 70 },
+  casque:     { x: 154, y: 51,  w: 90, h: 94 },
+  plastron:   { x: 152, y: 152, w: 92, h: 95 },
+  mainGauche: { x: 49,  y: 231, w: 92, h: 96 },
+  mainDroite: { x: 255, y: 231, w: 93, h: 94 },
+  jambes:     { x: 152, y: 312, w: 92, h: 95 },
+  pieds:      { x: 152, y: 403, w: 92, h: 94 },
 };
 
 // Grille d'inventaire : 5 colonnes x 4 lignes = 20 cases par page. Ces
 // tableaux sont les limites exactes (en pixels) entre les cases du fond.
-const GRID_COLS_X = [374, 480, 581, 687, 793, 896];
+const GRID_COLS_X = [372, 476, 580, 684, 788, 892];
 const GRID_ROWS_Y = [42, 154, 266, 378, 487];
 const COLS = GRID_COLS_X.length - 1;
 const ROWS = GRID_ROWS_Y.length - 1;
@@ -29,10 +29,6 @@ const SLOTS_PER_PAGE = COLS * ROWS;
 
 const ICON_PADDING = 8;
 
-// Petit cache des icônes déjà chargées, pour ne pas relire/redécoder l'image à
-// chaque génération. La clé est un hash pour les images envoyées depuis le
-// site (data URL très longues) : si l'image d'un objet change, la clé change
-// aussi, donc la nouvelle image est prise en compte tout de suite.
 const iconCache = new Map();
 const ICON_CACHE_MAX = 300;
 
@@ -40,13 +36,6 @@ function cacheKey(source) {
   return source.length > 200 ? crypto.createHash('sha1').update(source).digest('hex') : source;
 }
 
-/**
- * Charge l'image d'un objet. `item.image` peut être :
- *  - une data URL (image envoyée depuis le site, stockée dans Mongo)
- *  - une URL http(s)
- *  - un chemin relatif à la racine du bot, ex. "/image/items/xxx.png"
- * En cas d'échec (ou d'absence d'image) : image/aucun.png.
- */
 async function loadIcon(item) {
   const raw = item?.image;
   const candidates = [];
@@ -54,8 +43,7 @@ async function loadIcon(item) {
     if (/^data:image\//.test(raw) || /^https?:\/\//.test(raw)) {
       candidates.push(raw);
     } else {
-      // Chemin du catalogue relatif à la racine du bot, pas un chemin absolu du disque.
-      candidates.push(path.join(__dirname, '..', raw.replace(/^[/\\]+/, '')));
+      candidates.push(path.join(__dirname, '..', String(raw).replace(/^[/\\]+/, '')));
     }
   }
   candidates.push(FALLBACK_ICON_PATH);
@@ -64,29 +52,29 @@ async function loadIcon(item) {
     const key = cacheKey(candidate);
     if (iconCache.has(key)) return iconCache.get(key);
     try {
-      const source = candidate.startsWith('data:')
+      const source = typeof candidate === 'string' && candidate.startsWith('data:')
         ? Buffer.from(candidate.slice(candidate.indexOf(',') + 1), 'base64')
         : candidate;
-      const img = await loadImage(source);
+      const loadedIcon = await loadImage(source);
       if (iconCache.size >= ICON_CACHE_MAX) iconCache.clear();
-      iconCache.set(key, img);
-      return img;
-    } catch {
+      iconCache.set(key, loadedIcon);
+      return loadedIcon;
+    } catch (err) {
       // essaie le candidat suivant (au final : image/aucun.png)
     }
   }
   return null;
 }
 
-function drawContained(ctx, img, rect) {
+function drawContained(ctx, icon, rect) {
   const maxW = rect.w - ICON_PADDING * 2;
   const maxH = rect.h - ICON_PADDING * 2;
-  const scale = Math.min(maxW / img.width, maxH / img.height);
-  const w = img.width * scale;
-  const h = img.height * scale;
+  const scale = Math.min(maxW / icon.width, maxH / icon.height);
+  const w = icon.width * scale;
+  const h = icon.height * scale;
   const x = rect.x + (rect.w - w) / 2;
   const y = rect.y + (rect.h - h) / 2;
-  ctx.drawImage(img, x, y, w, h);
+  ctx.drawImage(icon, x, y, w, h);
 }
 
 function drawQuantityBadge(ctx, rect, quantity) {
@@ -117,11 +105,6 @@ function gridCellRect(index) {
   };
 }
 
-/**
- * Liste ordonnée des objets de l'inventaire à afficher dans la grille
- * (les objets équipés n'y sont PAS : ils sont sur la silhouette de gauche).
- * Triés par catégorie puis nom, comme le catalogue.
- */
 function listGridEntries(inventory, catalog) {
   return Object.entries(inventory.items || {})
     .filter(([, qty]) => qty > 0)
@@ -136,10 +119,6 @@ function pageCount(inventory, catalog) {
   return Math.max(1, Math.ceil(listGridEntries(inventory, catalog).length / SLOTS_PER_PAGE));
 }
 
-/**
- * Génère l'image d'inventaire d'un personnage (Buffer PNG).
- * `page` commence à 0 ; 20 objets par page.
- */
 async function generateInventoryCard({ nomPrenom, inventory, catalog, page = 0 }) {
   const canvas = createCanvas(WIDTH, HEIGHT);
   const ctx = canvas.getContext('2d');
@@ -153,13 +132,11 @@ async function generateInventoryCard({ nomPrenom, inventory, catalog, page = 0 }
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
   }
 
-  // Nom du personnage, à la suite de "Inventaire de" déjà présent sur le fond.
   ctx.fillStyle = '#ffffff';
-  ctx.font = '15px sans-serif';
+  ctx.font = '13px sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText(String(nomPrenom || '').slice(0, 40), 458, 31);
+  ctx.fillText(String(nomPrenom || '').slice(0, 40), 458, 30);
 
-  // --- Équipements (silhouette de gauche) ---
   for (const slot of EQUIPMENT_SLOTS) {
     const itemId = inventory.equipement?.[slot];
     if (!itemId) continue;
@@ -168,7 +145,6 @@ async function generateInventoryCard({ nomPrenom, inventory, catalog, page = 0 }
     if (icon) drawContained(ctx, icon, EQUIPMENT_RECTS[slot]);
   }
 
-  // --- Grille d'inventaire (droite) ---
   const entries = listGridEntries(inventory, catalog);
   const totalPages = Math.max(1, Math.ceil(entries.length / SLOTS_PER_PAGE));
   const safePage = Math.min(Math.max(0, page), totalPages - 1);
@@ -182,7 +158,6 @@ async function generateInventoryCard({ nomPrenom, inventory, catalog, page = 0 }
     if (qty > 1) drawQuantityBadge(ctx, rect, qty);
   }
 
-  // Indicateur de page si l'inventaire dépasse une page.
   if (totalPages > 1) {
     ctx.fillStyle = '#ffffff';
     ctx.font = '13px sans-serif';

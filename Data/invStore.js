@@ -28,32 +28,35 @@ function emptyEquipement() {
 // première fois. Garder cette liste identique à celle du site évite une
 // incohérence si l'un des deux démarre avant l'autre sur une base vide.
 const DEFAULT_CATALOG = [
-  { id: 'sabre_laser', name: 'Sabre laser', emoji: '🗡️', category: 'Arme', description: 'Arme rituelle forgée avec un cristal kyber.', slot: 'mainDroite', image: null, usable: true, statBonus: { 'Corps-à-corps': 15 } },
-  { id: 'blaster', name: 'Pistolet blaster', emoji: '🔫', category: 'Arme', description: 'Arme de poing standard, à énergie.', slot: 'mainDroite', image: null, usable: true, statBonus: { 'Tir & Précision': 15 } },
-  { id: 'fusil_blaster', name: 'Fusil blaster', emoji: '🔫', category: 'Arme', description: "Arme d'épaule à longue portée.", slot: 'mainDroite', image: null, usable: true, statBonus: { 'Tir & Précision': 20 } },
-  { id: 'vibrolame', name: 'Vibrolame', emoji: '🔪', category: 'Arme', description: 'Lame vibrante, efficace même contre une armure légère.', slot: 'mainGauche', image: null, usable: true, statBonus: { 'Corps-à-corps': 10 } },
-  { id: 'grenade_thermique', name: 'Détonateur thermique', emoji: '💣', category: 'Arme', description: 'Explosif portatif à haut rendement.', slot: null, image: null, usable: false, statBonus: {} },
-  { id: 'armure_legere', name: 'Armure légère', emoji: '🦺', category: 'Équipement', description: 'Protection basique, ne gêne pas la mobilité.', slot: 'plastron', image: null, usable: true, statBonus: { 'Résistance': 12 } },
-  { id: 'casque', name: 'Casque de combat', emoji: '⛑️', category: 'Équipement', description: 'Protection crânienne avec visée intégrée.', slot: 'casque', image: null, usable: true, statBonus: { 'Résistance': 8 } },
-  { id: 'jetpack', name: 'Jetpack', emoji: '🚀', category: 'Équipement', description: 'Propulseur dorsal, vol de courte durée.', slot: 'plastron', image: null, usable: true, statBonus: { 'Pilotage': 10 } },
-  { id: 'comlink', name: 'Comlink', emoji: '📡', category: 'Équipement', description: 'Communicateur longue portée.', slot: null, image: null, usable: false, statBonus: {} },
-  { id: 'kit_medical', name: 'Kit médical', emoji: '💉', category: 'Équipement', description: "Nécessaire de soin d'urgence.", slot: null, image: null, usable: false, statBonus: {} },
-  { id: 'macrobinoculaire', name: 'Macrobinoculaire', emoji: '🔭', category: 'Équipement', description: 'Optique longue portée.', slot: null, image: null, usable: false, statBonus: {} },
-  { id: 'outils_reparation', name: 'Outils de réparation', emoji: '🔧', category: 'Équipement', description: 'Nécessaire pour réparer droïdes et vaisseaux.', slot: null, image: null, usable: false, statBonus: {} },
-  { id: 'bottes_combat', name: 'Bottes de combat', emoji: '🥾', category: 'Équipement', description: 'Renforcées, bonne accroche au sol.', slot: 'pieds', image: null, usable: true, statBonus: { 'Résistance': 5 } },
-  { id: 'pantalon_renforce', name: 'Pantalon renforcé', emoji: '👖', category: 'Équipement', description: 'Protection légère pour les jambes.', slot: 'jambes', image: null, usable: true, statBonus: { 'Résistance': 7 } },
-  { id: 'credits', name: 'Crédits galactiques', emoji: '💰', category: 'Ressource', description: 'La monnaie standard de la galaxie.', slot: null, image: null, usable: false, statBonus: {} },
-  { id: 'cristal_kyber', name: 'Cristal kyber', emoji: '💎', category: 'Ressource', description: 'Cristal rare, sensible à la Force.', slot: null, image: null, usable: false, statBonus: {} },
-  { id: 'carburant', name: 'Carburant (bidon)', emoji: '⛽', category: 'Ressource', description: 'Carburant pour vaisseau ou speeder.', slot: null, image: null, usable: false, statBonus: {} },
-  { id: 'rations', name: 'Rations de survie', emoji: '🍱', category: 'Ressource', description: 'Nourriture longue conservation.', slot: null, image: null, usable: false, statBonus: {} },
-  { id: 'datapad', name: 'Datapad', emoji: '📓', category: 'Divers', description: 'Tablette de données portable.', slot: null, image: null, usable: false, statBonus: {} },
-  { id: 'holoprojecteur', name: 'Holoprojecteur', emoji: '📽️', category: 'Divers', description: 'Projette des messages ou cartes en hologramme.', slot: null, image: null, usable: false, statBonus: {} },
-  { id: 'cape', name: 'Cape', emoji: '🧥', category: 'Divers', description: "Vêtement d'extérieur, souvent à capuche.", slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'sabre_laser', name: 'Sabre laser', emoji: '🗡️', category: 'Arme', rarity: 'Commun', description: 'Arme rituelle forgée avec un cristal kyber.', slot: 'mainDroite', image: null, usable: true, statBonus: { 'Corps-à-corps': 15 } },
+  { id: 'blaster', name: 'Pistolet blaster', emoji: '🔫', category: 'Arme', rarity: 'Commun', description: 'Arme de poing standard, à énergie.', slot: 'mainDroite', image: null, usable: true, statBonus: { 'Tir & Précision': 15 } },
+  { id: 'fusil_blaster', name: 'Fusil blaster', emoji: '🔫', category: 'Arme', rarity: 'Commun', description: "Arme d'épaule à longue portée.", slot: 'mainDroite', image: null, usable: true, statBonus: { 'Tir & Précision': 20 } },
+  { id: 'vibrolame', name: 'Vibrolame', emoji: '🔪', category: 'Arme', rarity: 'Commun', description: 'Lame vibrante, efficace même contre une armure légère.', slot: 'mainGauche', image: null, usable: true, statBonus: { 'Corps-à-corps': 10 } },
+  { id: 'grenade_thermique', name: 'Détonateur thermique', emoji: '💣', category: 'Arme', rarity: 'Commun', description: 'Explosif portatif à haut rendement.', slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'armure_legere', name: 'Armure légère', emoji: '🦺', category: 'Équipement', rarity: 'Commun', description: 'Protection basique, ne gêne pas la mobilité.', slot: 'plastron', image: null, usable: true, statBonus: { 'Résistance': 12 } },
+  { id: 'casque', name: 'Casque de combat', emoji: '⛑️', category: 'Équipement', rarity: 'Commun', description: 'Protection crânienne avec visée intégrée.', slot: 'casque', image: null, usable: true, statBonus: { 'Résistance': 8 } },
+  { id: 'jetpack', name: 'Jetpack', emoji: '🚀', category: 'Équipement', rarity: 'Commun', description: 'Propulseur dorsal, vol de courte durée.', slot: 'plastron', image: null, usable: true, statBonus: { 'Pilotage': 10 } },
+  { id: 'comlink', name: 'Comlink', emoji: '📡', category: 'Équipement', rarity: 'Commun', description: 'Communicateur longue portée.', slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'kit_medical', name: 'Kit médical', emoji: '💉', category: 'Équipement', rarity: 'Commun', description: "Nécessaire de soin d'urgence.", slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'macrobinoculaire', name: 'Macrobinoculaire', emoji: '🔭', category: 'Équipement', rarity: 'Commun', description: 'Optique longue portée.', slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'outils_reparation', name: 'Outils de réparation', emoji: '🔧', category: 'Équipement', rarity: 'Commun', description: 'Nécessaire pour réparer droïdes et vaisseaux.', slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'bottes_combat', name: 'Bottes de combat', emoji: '🥾', category: 'Équipement', rarity: 'Commun', description: 'Renforcées, bonne accroche au sol.', slot: 'pieds', image: null, usable: true, statBonus: { 'Résistance': 5 } },
+  { id: 'pantalon_renforce', name: 'Pantalon renforcé', emoji: '👖', category: 'Équipement', rarity: 'Commun', description: 'Protection légère pour les jambes.', slot: 'jambes', image: null, usable: true, statBonus: { 'Résistance': 7 } },
+  { id: 'credits', name: 'Crédits galactiques', emoji: '💰', category: 'Ressource', rarity: 'Commun', description: 'La monnaie standard de la galaxie.', slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'cristal_kyber', name: 'Cristal kyber', emoji: '💎', category: 'Ressource', rarity: 'Commun', description: 'Cristal rare, sensible à la Force.', slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'carburant', name: 'Carburant (bidon)', emoji: '⛽', category: 'Ressource', rarity: 'Commun', description: 'Carburant pour vaisseau ou speeder.', slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'rations', name: 'Rations de survie', emoji: '🍱', category: 'Ressource', rarity: 'Commun', description: 'Nourriture longue conservation.', slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'datapad', name: 'Datapad', emoji: '📓', category: 'Divers', rarity: 'Commun', description: 'Tablette de données portable.', slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'holoprojecteur', name: 'Holoprojecteur', emoji: '📽️', category: 'Divers', rarity: 'Commun', description: 'Projette des messages ou cartes en hologramme.', slot: null, image: null, usable: false, statBonus: {} },
+  { id: 'cape', name: 'Cape', emoji: '🧥', category: 'Divers', rarity: 'Commun', description: "Vêtement d'extérieur, souvent à capuche.", slot: null, image: null, usable: false, statBonus: {} },
 ];
 
 const SEED_MARKER_ID = '__seeded__';
 const MIGRATION_MARKER_ID = '__migrated_equipement__';
-const MARKER_IDS = [SEED_MARKER_ID, MIGRATION_MARKER_ID];
+const RARITY_MIGRATION_MARKER_ID = '__migrated_rarete__';
+const MARKER_IDS = [SEED_MARKER_ID, MIGRATION_MARKER_ID, RARITY_MIGRATION_MARKER_ID];
+
+const ITEM_RARITIES = ['Épique', 'Rare', 'Peu commun', 'Commun'];
 
 // Tout identifiant de la forme "__xxx__" est un document interne (marqueur
 // posé par le bot ou le site), jamais un vrai objet : on les cache et on les
@@ -102,6 +105,13 @@ function normalizeSlot(slot) {
 }
 
 /** Valide/normalise le bonus de stats d'un objet : { "Nom de la stat": nombre entier, ... }. */
+function normalizeRarity(rarity) {
+  if (rarity === undefined || rarity === null || rarity === '') return 'Commun';
+  const value = String(rarity).trim();
+  if (!ITEM_RARITIES.includes(value)) throw new Error(`Rareté invalide : ${value}`);
+  return value;
+}
+
 function normalizeStatBonus(statBonus) {
   if (statBonus === undefined || statBonus === null) return {};
   if (typeof statBonus !== 'object' || Array.isArray(statBonus)) throw new Error('Bonus de stats invalide.');
@@ -120,6 +130,7 @@ function toItem(doc) {
     name: doc.name,
     emoji: doc.emoji,
     category: doc.category,
+    rarity: normalizeRarity(doc.rarity),
     description: doc.description,
     slot: doc.slot || null,
     image: doc.image || null,
@@ -157,6 +168,19 @@ async function getCatalog() {
     await col.updateOne({ _id: MIGRATION_MARKER_ID }, { $setOnInsert: { migratedAt: new Date() } }, { upsert: true });
   }
 
+  const dejaMigreRarete = await col.findOne({ _id: RARITY_MIGRATION_MARKER_ID });
+  if (!dejaMigreRarete) {
+    await col.updateMany(
+      { _id: { $not: RESERVED_ID }, rarity: { $exists: false } },
+      { $set: { rarity: 'Commun' } },
+    );
+    await col.updateOne(
+      { _id: RARITY_MIGRATION_MARKER_ID },
+      { $setOnInsert: { migratedAt: new Date() } },
+      { upsert: true },
+    );
+  }
+
   const docs = (await col.find({ _id: { $not: RESERVED_ID } }).toArray()).filter(d => !isReservedId(d._id));
   return docs
     .map(toItem)
@@ -171,7 +195,7 @@ async function getItem(itemId) {
 }
 
 /** Ajoute un nouvel objet au catalogue. Génère un id à partir du nom si non fourni. */
-async function addCatalogItem({ id, name, emoji, category, description, image, slot, usable, statBonus }) {
+async function addCatalogItem({ id, name, emoji, category, rarity, description, image, slot, usable, statBonus }) {
   if (!name) throw new Error('Le nom est obligatoire.');
   const finalId = slugify(id || name);
   if (!finalId || isReservedId(finalId)) throw new Error("Impossible de déduire un identifiant valide pour cet objet.");
@@ -186,6 +210,7 @@ async function addCatalogItem({ id, name, emoji, category, description, image, s
     name,
     emoji: emoji || '❔',
     category: category || 'Divers',
+    rarity: normalizeRarity(rarity),
     description: description || '',
     slot: finalSlot,
     image: normalizeImage(image) || null,
@@ -197,13 +222,14 @@ async function addCatalogItem({ id, name, emoji, category, description, image, s
 }
 
 /** Met à jour un objet. Un champ `undefined` est laissé tel quel (slot/usable ne sont jamais touchés ici). */
-async function updateCatalogItem(itemId, { name, emoji, category, description, image, slot, usable, statBonus }) {
+async function updateCatalogItem(itemId, { name, emoji, category, rarity, description, image, slot, usable, statBonus }) {
   if (isReservedId(itemId)) throw new Error('Objet introuvable.');
   const col = await getItemCatalogCollection();
   const fields = {};
   if (name !== undefined) fields.name = name;
   if (emoji !== undefined) fields.emoji = emoji;
   if (category !== undefined) fields.category = category;
+  if (rarity !== undefined) fields.rarity = normalizeRarity(rarity);
   if (description !== undefined) fields.description = description;
   if (image !== undefined) fields.image = normalizeImage(image);
   if (slot !== undefined) {
@@ -308,6 +334,7 @@ async function setItemQuantity(profileId, itemId, quantity) {
 module.exports = {
   EQUIPMENT_SLOTS,
   EQUIPMENT_SLOT_LABELS,
+  ITEM_RARITIES,
   getCatalog,
   getItem,
   addCatalogItem,

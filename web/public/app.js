@@ -297,6 +297,7 @@ function catalogueItemHTML(item) {
         <div class="item-nom">${escapeHtml(item.name)}</div>
         <div class="item-meta">
           <span class="badge badge-defaut">${escapeHtml(item.category || 'Divers')}</span>
+          <span class="badge badge-defaut">✨ ${escapeHtml(item.rarity || 'Commun')}</span>
           ${labelSlot ? `<span class="badge badge-defaut">🧷 ${escapeHtml(labelSlot)}</span>` : ''}
           ${item.usable ? '<span class="badge badge-defaut">✅ Utilisable</span>' : ''}
           ${Object.entries(item.statBonus || {}).map(([stat, val]) => `<span class="badge badge-defaut">📊 +${val} ${escapeHtml(stat)}</span>`).join('')}
@@ -580,6 +581,7 @@ function panneauCatalogueItem(item) {
       <div class="champ"><label for="f-item-name">Nom</label><input type="text" id="f-item-name" value="${escapeAttr(item?.name || '')}"></div>
       <div class="champ"><label for="f-item-emoji">Emoji</label><input type="text" id="f-item-emoji" value="${escapeAttr(item?.emoji || '')}" maxlength="4"></div>
       <div class="champ"><label for="f-item-category">Catégorie</label><input type="text" id="f-item-category" value="${escapeAttr(item?.category || '')}" placeholder="Arme, Équipement, Ressource..."></div>
+      <div class="champ"><label for="f-item-rarity">Rareté</label><select id="f-item-rarity">${(state.listes.itemRarities || ['Épique', 'Rare', 'Peu commun', 'Commun']).map(r => `<option value="${escapeAttr(r)}" ${((item?.rarity || 'Commun') === r) ? 'selected' : ''}>${escapeHtml(r)}</option>`).join('')}</select></div>
     </div>
     <div class="champ"><label for="f-item-description">Description</label><textarea id="f-item-description">${escapeHtml(item?.description || '')}</textarea></div>
 
@@ -697,6 +699,7 @@ async function sauvegarderCatalogueItem(itemId) {
       name: val('f-item-name'),
       emoji: val('f-item-emoji'),
       category: val('f-item-category'),
+      rarity: val('f-item-rarity') || 'Commun',
       description: val('f-item-description'),
       slot: val('f-item-slot') || null,
       usable: document.getElementById('f-item-usable').checked,
@@ -781,7 +784,10 @@ function panneauInventairePersonnage(profile, inventoryDoc) {
     return `
       <div class="item-row">
         ${itemVisuelHTML(catalogItem)}
-        <div class="item-corps"><div class="item-nom">${escapeHtml(catalogItem.name)}</div></div>
+        <div class="item-corps">
+          <div class="item-nom">${escapeHtml(catalogItem.name)}</div>
+          <div class="item-meta"><span class="badge badge-defaut">✨ ${escapeHtml(catalogItem.rarity || 'Commun')}</span></div>
+        </div>
         <input type="number" min="0" class="qte-input" id="qte-${escapeAttr(itemId)}" value="${qty}">
         <button class="btn-secondaire" onclick="modifierQuantiteItem('${jsAttr(profile._id)}', '${jsAttr(itemId)}')">OK</button>
         <button class="btn-secondaire btn-danger" onclick="supprimerItemPersonnage('${jsAttr(profile._id)}', '${jsAttr(itemId)}')">✕</button>
