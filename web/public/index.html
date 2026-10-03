@@ -55,6 +55,10 @@
           <span class="nav-label">Inventaire</span>
           <span class="nav-count" id="count-inventaire"></span>
         </button>
+        <button class="nav-btn" data-collection="catalogue" onclick="chargerDonnees('catalogue')">
+          <span class="nav-label">📦 Catalogue</span>
+          <span class="nav-count" id="count-catalogue"></span>
+        </button>
         <button class="nav-btn" data-collection="admin" onclick="chargerDonnees('admin')" id="nav-admin" hidden>
           <span class="nav-label">🛡️ Admin</span>
         </button>
@@ -101,8 +105,8 @@
   <aside id="panneau-catalogue" class="panneau-catalogue">
     <div class="panneau-header">
       <div>
-        <span class="panneau-eyebrow">Inventaire</span>
-        <h3 id="panneau-catalogue-titre">Catalogue d'objets</h3>
+        <span class="panneau-eyebrow">Catalogue</span>
+        <h3 id="panneau-catalogue-titre">Édition d'objet</h3>
       </div>
       <button class="btn-fermer" onclick="fermerCataloguePanel()" aria-label="Fermer">✕</button>
     </div>

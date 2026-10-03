@@ -103,7 +103,7 @@ function majCompteur(collection, n) {
 }
 
 // -----------------------------------------------------------------------
-// Chargement d'une catégorie : "Profils RP" ou "Inventaire"
+// Chargement d'une section : Profils RP, Inventaire, Catalogue ou Admin
 // -----------------------------------------------------------------------
 async function chargerDonnees(collection) {
   state.collectionActuelle = collection;
@@ -125,8 +125,16 @@ async function chargerDonnees(collection) {
     rechercheInput.value = '';
     rechercheInput.placeholder = 'Rechercher un personnage...';
     document.getElementById('titre-section').textContent = 'Inventaire';
-    document.getElementById('sous-titre').textContent = "Catalogue d'objets et inventaires des personnages.";
+    document.getElementById('sous-titre').textContent = 'Inventaires individuels des personnages.';
     await chargerInventairePage();
+  } else if (collection === 'catalogue') {
+    searchWrap.hidden = false;
+    const rechercheInput = document.getElementById('recherche');
+    rechercheInput.value = '';
+    rechercheInput.placeholder = 'Rechercher un objet...';
+    document.getElementById('titre-section').textContent = "Catalogue d'objets";
+    document.getElementById('sous-titre').textContent = 'Tous les objets du serveur, organisés par catégorie et rareté.';
+    await chargerCataloguePage();
   } else if (collection === 'admin') {
     searchWrap.hidden = true;
     document.getElementById('titre-section').textContent = 'Admin';
@@ -185,8 +193,7 @@ function ligneHTML(item, index) {
 
 // -----------------------------------------------------------------------
 // Inventaire : les inventaires des personnages s'affichent directement dans
-// la page (comme "Profils RP"). Le catalogue d'objets, lui, reste à part :
-// un bouton en haut de la liste l'ouvre dans son propre panneau à droite.
+// la page. Le catalogue d'objets possède désormais sa propre section dédiée.
 // -----------------------------------------------------------------------
 async function chargerInventairePage() {
   const contenuDiv = document.getElementById('contenu');
@@ -217,11 +224,14 @@ function renderInventairePage() {
   );
 
   document.getElementById('contenu').innerHTML = `
-    <button class="btn-catalogue-ouvrir" onclick="ouvrirCataloguePanel()">
-      <span>📦 Catalogue d'objets</span>
-      <span class="fleche">→</span>
-    </button>
-    <div style="margin-top:22px; display:flex; flex-direction:column; gap:10px;">
+    <div class="page-intro-card">
+      <span class="page-intro-icon">🎒</span>
+      <div>
+        <strong>Inventaires des personnages</strong>
+        <p>Choisis un personnage pour consulter et modifier les objets qu'il possède.</p>
+      </div>
+    </div>
+    <div class="liste-personnages-inventaire">
       ${state.cache.profils.map((p, i) => ligneInventaireHTML(p, quantiteParProfil.get(p._id) || 0, i)).join('') || "<div class='etat-vide'><p>Aucun personnage.</p></div>"}
     </div>
     <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>
@@ -229,13 +239,87 @@ function renderInventairePage() {
 }
 
 // -----------------------------------------------------------------------
-// Panneau "Catalogue d'objets" : s'ouvre à droite au clic sur le bouton
-// en haut de la page Inventaire.
+// Catalogue : page principale indépendante de la page Inventaire.
 // -----------------------------------------------------------------------
-function ouvrirCataloguePanel() {
-  document.getElementById('overlay-catalogue').classList.add('visible');
-  document.getElementById('panneau-catalogue').classList.add('ouvert');
-  renderCataloguePanelListe();
+async function chargerCataloguePage() {
+  const contenuDiv = document.getElementById('contenu');
+  contenuDiv.innerHTML = Array.from({ length: 4 }).map(() => '<div class="squelette"></div>').join('');
+
+  try {
+    const catalogue = await apiFetch('/api/inventaire/catalogue').then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    });
+    state.catalogue = catalogueValide(catalogue);
+    majCompteur('catalogue', state.catalogue.length);
+    renderCataloguePage();
+    setStatutConnexion(true);
+  } catch (error) {
+    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de chargement du catalogue</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    setStatutConnexion(false);
+    console.error('Erreur catalogue:', error);
+  }
+}
+
+function renderCataloguePage() {
+  const contenuDiv = document.getElementById('contenu');
+  const categories = new Map();
+
+  state.catalogue.forEach(item => {
+    const categorie = String(item.category || 'Divers').trim() || 'Divers';
+    if (!categories.has(categorie)) categories.set(categorie, []);
+    categories.get(categorie).push(item);
+  });
+
+  const blocs = [...categories.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, 'fr'))
+    .map(([categorie, items], index) => {
+      items.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+      const id = `catalogue-categorie-${slugTexte(categorie)}-${index}`;
+      return `
+        <section class="catalogue-categorie" id="${escapeAttr(id)}">
+          <div class="catalogue-categorie-header">
+            <div>
+              <span class="catalogue-categorie-eyebrow">Catégorie</span>
+              <h3>${escapeHtml(categorie)}</h3>
+            </div>
+            <span class="catalogue-categorie-count">${items.length} objet${items.length > 1 ? 's' : ''}</span>
+          </div>
+          <div class="catalogue-grille">
+            ${items.map(catalogueItemHTML).join('')}
+          </div>
+        </section>`;
+    }).join('');
+
+  const navigationCategories = [...categories.keys()]
+    .sort((a, b) => a.localeCompare(b, 'fr'))
+    .map((categorie, index) => `<a class="catalogue-categorie-chip" href="#catalogue-categorie-${slugTexte(categorie)}-${index}">${escapeHtml(categorie)}</a>`)
+    .join('');
+
+  contenuDiv.innerHTML = `
+    <div class="catalogue-actions-bar">
+      <div>
+        <strong>📦 Catalogue complet</strong>
+        <span>${state.catalogue.length} objet${state.catalogue.length > 1 ? 's' : ''} dans ${categories.size} catégorie${categories.size > 1 ? 's' : ''}</span>
+      </div>
+      <div class="catalogue-actions">
+        <button class="btn-principal" onclick="ouvrirEditeurCatalogue(null)">＋ Ajouter un objet</button>
+        <button class="btn-secondaire btn-danger" onclick="supprimerTousLesObjets()" ${state.catalogue.length ? '' : 'disabled'}>🗑️ Tout supprimer</button>
+      </div>
+    </div>
+    ${navigationCategories ? `<div class="catalogue-categories-nav">${navigationCategories}</div>` : ''}
+    ${blocs || '<div class="etat-vide"><div class="etat-vide-icone">📦</div><p>Catalogue vide.</p><span class="etat-vide-sub">Ajoute ton premier objet avec le bouton ci-dessus.</span></div>'}
+    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun objet ne correspond à cette recherche.</div>
+  `;
+}
+
+function slugTexte(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'divers';
 }
 
 function fermerCataloguePanel() {
@@ -243,19 +327,6 @@ function fermerCataloguePanel() {
   document.getElementById('panneau-catalogue').classList.remove('ouvert');
 }
 
-function renderCataloguePanelListe() {
-  document.getElementById('panneau-catalogue-titre').textContent = "Catalogue d'objets";
-  document.getElementById('panneau-catalogue-corps').innerHTML = `
-    <div id="catalogue-liste">${state.catalogue.map(catalogueItemHTML).join('') || '<p class="section-note">Catalogue vide.</p>'}</div>
-    <div style="display:flex; gap:10px; margin-top:4px;">
-      <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue(null)" style="flex:1">+ Ajouter un objet</button>
-      <button class="btn-secondaire btn-danger" onclick="supprimerTousLesObjets()" ${state.catalogue.length ? '' : 'disabled'}>🗑️ Tout supprimer</button>
-    </div>
-  `;
-}
-
-// Recharge catalogue + inventaires et rafraîchit à la fois la page principale
-// (compteurs, quantités) et le panneau catalogue actuellement ouvert.
 async function rafraichirCataloguePanel() {
   const [catalogue, inventaires] = await Promise.all([
     apiFetch('/api/inventaire/catalogue').then(r => r.json()),
@@ -263,8 +334,9 @@ async function rafraichirCataloguePanel() {
   ]);
   state.catalogue = catalogueValide(catalogue);
   state.cache.inventaires = inventaires;
+  majCompteur('catalogue', state.catalogue.length);
   if (state.collectionActuelle === 'inventaire') renderInventairePage();
-  renderCataloguePanelListe();
+  if (state.collectionActuelle === 'catalogue') renderCataloguePage();
 }
 
 // Sécurité : ignore les documents internes (id "__xxx__") ou sans nom qu'un
@@ -288,24 +360,33 @@ function itemVisuelHTML(item) {
   return `<span class="item-emoji">${item?.emoji || '❔'}</span>`;
 }
 
+function classeRariete(rarity) {
+  return `rarity-${slugTexte(rarity || 'Commun')}`;
+}
+
 function catalogueItemHTML(item) {
   const labelSlot = item.slot ? (state.listes.equipmentSlots || []).find(s => s.id === item.slot)?.label || item.slot : null;
+  const rarity = item.rarity || 'Commun';
   return `
-    <div class="item-row">
-      ${itemVisuelHTML(item)}
+    <article class="catalogue-item item-row" data-nom="${escapeAttr(String(item.name || '').toLowerCase())}">
+      <div class="catalogue-item-visual">${itemVisuelHTML(item)}</div>
       <div class="item-corps">
-        <div class="item-nom">${escapeHtml(item.name)}</div>
+        <div class="catalogue-item-title-row">
+          <div class="item-nom">${escapeHtml(item.name)}</div>
+          <span class="rarity-badge ${classeRariete(rarity)}">✨ ${escapeHtml(rarity)}</span>
+        </div>
+        <div class="item-description">${escapeHtml(item.description || 'Aucune description.')}</div>
         <div class="item-meta">
-          <span class="badge badge-defaut">${escapeHtml(item.category || 'Divers')}</span>
-          <span class="badge badge-defaut">✨ ${escapeHtml(item.rarity || 'Commun')}</span>
           ${labelSlot ? `<span class="badge badge-defaut">🧷 ${escapeHtml(labelSlot)}</span>` : ''}
           ${item.usable ? '<span class="badge badge-defaut">✅ Utilisable</span>' : ''}
           ${Object.entries(item.statBonus || {}).map(([stat, val]) => `<span class="badge badge-defaut">📊 +${val} ${escapeHtml(stat)}</span>`).join('')}
         </div>
       </div>
-      <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue('${jsAttr(item.id)}')">Modifier</button>
-      <button class="btn-secondaire btn-danger" onclick="supprimerCatalogueItem('${jsAttr(item.id)}')">Supprimer</button>
-    </div>`;
+      <div class="catalogue-item-actions">
+        <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue('${jsAttr(item.id)}')">Modifier</button>
+        <button class="btn-secondaire btn-danger" onclick="supprimerCatalogueItem('${jsAttr(item.id)}')">Supprimer</button>
+      </div>
+    </article>`;
 }
 
 function ligneInventaireHTML(profile, quantiteTotale, index) {
@@ -325,14 +406,27 @@ function ligneInventaireHTML(profile, quantiteTotale, index) {
 
 function filtrerListe() {
   const q = document.getElementById('recherche').value.trim().toLowerCase();
-  const lignes = document.querySelectorAll('.contenu .ligne');
-  let visibles = 0;
-  lignes.forEach(l => {
-    const correspond = !q || (l.dataset.nom || '').includes(q);
-    l.classList.toggle('masquee', !correspond);
-    if (correspond) visibles += 1;
-  });
   const aucun = document.getElementById('aucun-resultat');
+  let visibles = 0;
+
+  if (state.collectionActuelle === 'catalogue') {
+    document.querySelectorAll('.catalogue-item').forEach(item => {
+      const correspond = !q || (item.dataset.nom || '').includes(q);
+      item.classList.toggle('masquee', !correspond);
+      if (correspond) visibles += 1;
+    });
+    document.querySelectorAll('.catalogue-categorie').forEach(section => {
+      const itemsVisibles = section.querySelectorAll('.catalogue-item:not(.masquee)').length;
+      section.classList.toggle('masquee', itemsVisibles === 0);
+    });
+  } else {
+    document.querySelectorAll('.contenu .ligne').forEach(l => {
+      const correspond = !q || (l.dataset.nom || '').includes(q);
+      l.classList.toggle('masquee', !correspond);
+      if (correspond) visibles += 1;
+    });
+  }
+
   if (aucun) aucun.hidden = visibles !== 0;
 }
 
@@ -568,6 +662,8 @@ function ouvrirEditeurCatalogue(itemId) {
   state.itemActuel = { type: 'catalogue', id: itemId };
   state.pendingItemImage = undefined; // undefined = image inchangée, null = retirée, texte = nouvelle image
 
+  document.getElementById('overlay-catalogue').classList.add('visible');
+  document.getElementById('panneau-catalogue').classList.add('ouvert');
   document.getElementById('panneau-catalogue-titre').textContent = item ? item.name : 'Nouvel objet';
   document.getElementById('panneau-catalogue-corps').innerHTML = panneauCatalogueItem(item);
 }
@@ -575,7 +671,6 @@ function ouvrirEditeurCatalogue(itemId) {
 function panneauCatalogueItem(item) {
   const isNew = !item;
   return `
-    <button class="btn-retour" onclick="renderCataloguePanelListe()">← Retour</button>
     <div class="section-titre">${isNew ? '➕ Nouvel objet' : "✏️ Modifier l'objet"}</div>
     <div class="grille-champs">
       <div class="champ"><label for="f-item-name">Nom</label><input type="text" id="f-item-name" value="${escapeAttr(item?.name || '')}"></div>
@@ -716,6 +811,7 @@ async function sauvegarderCatalogueItem(itemId) {
     }
     toast('Objet enregistré avec succès.', 'succes');
     await rafraichirCataloguePanel();
+    fermerCataloguePanel();
   } catch (error) {
     toast(`Échec de la sauvegarde : ${error.message}`, 'erreur');
     console.error(error);
