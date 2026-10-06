@@ -112,6 +112,39 @@ function normalizeRarity(rarity) {
   return value;
 }
 
+
+/** Valide/normalise l'action déclenchée par le bouton "Utiliser". */
+function normalizeUseAction(useAction) {
+  if (useAction === undefined || useAction === null || useAction === '' || useAction?.type === 'aucune') return null;
+  if (typeof useAction !== 'object' || Array.isArray(useAction)) throw new Error('Utilité d\'objet invalide.');
+
+  const type = String(useAction.type || 'aucune');
+  if (type === 'donner_objet') {
+    const rewardItemId = String(useAction.itemId || '').trim();
+    const quantity = Math.max(1, Math.floor(Number(useAction.quantity) || 1));
+    if (!rewardItemId) throw new Error('L\'objet à donner est obligatoire.');
+    return { type, itemId: rewardItemId, quantity };
+  }
+
+  if (type === 'message') {
+    const message = String(useAction.message || '').trim();
+    if (!message) throw new Error('Le message à envoyer est obligatoire.');
+    return { type, message: message.slice(0, 2000) };
+  }
+
+  if (type === 'stat') {
+    const stat = String(useAction.stat || '').trim();
+    const amount = Math.round(Number(useAction.amount) || 0);
+    const mode = useAction.mode === 'temporaire' ? 'temporaire' : 'permanent';
+    const durationMinutes = Math.max(1, Math.floor(Number(useAction.durationMinutes) || 1));
+    if (!stat) throw new Error('La statistique est obligatoire.');
+    if (!amount) throw new Error('La valeur de modification de statistique ne peut pas être 0.');
+    return { type, stat: stat.slice(0, 100), amount, mode, durationMinutes };
+  }
+
+  throw new Error(`Utilité inconnue : ${type}`);
+}
+
 function normalizeStatBonus(statBonus) {
   if (statBonus === undefined || statBonus === null) return {};
   if (typeof statBonus !== 'object' || Array.isArray(statBonus)) throw new Error('Bonus de stats invalide.');
@@ -132,6 +165,7 @@ function toItem(doc) {
     category: doc.category,
     rarity: normalizeRarity(doc.rarity),
     description: doc.description,
+    useAction: normalizeUseAction(doc.useAction),
     slot: doc.slot || null,
     image: doc.image || null,
     usable: Boolean(doc.usable),
@@ -195,13 +229,18 @@ async function getItem(itemId) {
 }
 
 /** Ajoute un nouvel objet au catalogue. Génère un id à partir du nom si non fourni. */
-async function addCatalogItem({ id, name, emoji, category, rarity, description, image, slot, usable, statBonus }) {
+async function addCatalogItem({ id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction }) {
   if (!name) throw new Error('Le nom est obligatoire.');
   const finalId = slugify(id || name);
   if (!finalId || isReservedId(finalId)) throw new Error("Impossible de déduire un identifiant valide pour cet objet.");
   const finalSlot = normalizeSlot(slot);
+  const normalizedUseAction = normalizeUseAction(useAction);
 
   const col = await getItemCatalogCollection();
+  if (normalizedUseAction?.type === 'donner_objet') {
+    const reward = await col.findOne({ _id: normalizedUseAction.itemId });
+    if (!reward || isReservedId(reward._id)) throw new Error("L'objet à donner n'existe pas dans le catalogue.");
+  }
   const existing = await col.findOne({ _id: finalId });
   if (existing) throw new Error(`Un objet avec l'identifiant "${finalId}" existe déjà.`);
 
@@ -212,6 +251,7 @@ async function addCatalogItem({ id, name, emoji, category, rarity, description, 
     category: category || 'Divers',
     rarity: normalizeRarity(rarity),
     description: description || '',
+    useAction: normalizedUseAction,
     slot: finalSlot,
     image: normalizeImage(image) || null,
     usable: finalSlot ? true : Boolean(usable),
@@ -222,7 +262,7 @@ async function addCatalogItem({ id, name, emoji, category, rarity, description, 
 }
 
 /** Met à jour un objet. Un champ `undefined` est laissé tel quel (slot/usable ne sont jamais touchés ici). */
-async function updateCatalogItem(itemId, { name, emoji, category, rarity, description, image, slot, usable, statBonus }) {
+async function updateCatalogItem(itemId, { name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction }) {
   if (isReservedId(itemId)) throw new Error('Objet introuvable.');
   const col = await getItemCatalogCollection();
   const fields = {};
@@ -230,6 +270,7 @@ async function updateCatalogItem(itemId, { name, emoji, category, rarity, descri
   if (emoji !== undefined) fields.emoji = emoji;
   if (category !== undefined) fields.category = category;
   if (rarity !== undefined) fields.rarity = normalizeRarity(rarity);
+  if (useAction !== undefined) fields.useAction = normalizeUseAction(useAction);
   if (description !== undefined) fields.description = description;
   if (image !== undefined) fields.image = normalizeImage(image);
   if (slot !== undefined) {
@@ -240,6 +281,11 @@ async function updateCatalogItem(itemId, { name, emoji, category, rarity, descri
   }
   if (usable !== undefined) fields.usable = Boolean(usable);
   if (statBonus !== undefined) fields.statBonus = normalizeStatBonus(statBonus);
+
+  if (fields.useAction?.type === 'donner_objet') {
+    const reward = await col.findOne({ _id: fields.useAction.itemId });
+    if (!reward || isReservedId(reward._id)) throw new Error("L'objet à donner n'existe pas dans le catalogue.");
+  }
 
   const result = await col.findOneAndUpdate({ _id: itemId }, { $set: fields }, { returnDocument: 'after' });
   if (!result) throw new Error('Objet introuvable.');
@@ -335,6 +381,7 @@ module.exports = {
   EQUIPMENT_SLOTS,
   EQUIPMENT_SLOT_LABELS,
   ITEM_RARITIES,
+  normalizeUseAction,
   getCatalog,
   getItem,
   addCatalogItem,

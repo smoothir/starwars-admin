@@ -8,97 +8,6 @@ const state = {
 };
 
 // -----------------------------------------------------------------------
-// Animations (apparition au scroll, header compact, chiffres qui défilent,
-// effet magnétique) — tout est désactivé si prefers-reduced-motion est actif.
-// -----------------------------------------------------------------------
-const REDUCE_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-let revealObserver = null;
-function getRevealObserver() {
-  if (revealObserver || REDUCE_MOTION) return revealObserver;
-  revealObserver = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (!entry.isIntersecting) return;
-      entry.target.classList.add('in-view');
-      revealObserver.unobserve(entry.target);
-    });
-  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
-  return revealObserver;
-}
-
-/** À rappeler après chaque rendu de liste : fait apparaître les nouveaux
- * éléments `.reveal` au scroll (ou immédiatement si reduced-motion). */
-function initScrollReveal(root = document) {
-  const elements = root.querySelectorAll('.reveal:not(.in-view)');
-  if (REDUCE_MOTION) {
-    elements.forEach((el) => el.classList.add('in-view'));
-    return;
-  }
-  const observer = getRevealObserver();
-  elements.forEach((el) => observer.observe(el));
-}
-
-/** Header qui se compacte dès qu'on a un peu scrollé (rAF-throttled, pas de
- * calcul coûteux par frame : on ne fait que lire window.scrollY). */
-function initHeaderCompact() {
-  const topbar = document.querySelector('.topbar');
-  if (!topbar || REDUCE_MOTION) return;
-  let ticking = false;
-  const seuil = 24;
-  window.addEventListener('scroll', () => {
-    if (ticking) return;
-    ticking = true;
-    requestAnimationFrame(() => {
-      topbar.classList.toggle('compact', window.scrollY > seuil);
-      ticking = false;
-    });
-  }, { passive: true });
-}
-
-/** Effet magnétique : le bouton suit légèrement le curseur au survol. */
-function initMagneticButtons(root = document) {
-  if (REDUCE_MOTION) return;
-  root.querySelectorAll('.btn-principal, .btn-discord').forEach((btn) => {
-    if (btn.dataset.magnetiqueInit) return;
-    btn.dataset.magnetiqueInit = '1';
-    btn.classList.add('magnetique');
-
-    btn.addEventListener('mousemove', (e) => {
-      const rect = btn.getBoundingClientRect();
-      const x = (e.clientX - rect.left - rect.width / 2) * 0.25;
-      const y = (e.clientY - rect.top - rect.height / 2) * 0.35;
-      requestAnimationFrame(() => {
-        btn.style.transform = `translate(${x}px, ${y}px)`;
-      });
-    });
-    btn.addEventListener('mouseleave', () => {
-      requestAnimationFrame(() => { btn.style.transform = ''; });
-    });
-  });
-}
-
-/** Fait défiler un nombre affiché, de sa valeur actuelle jusqu'à `cible`. */
-function animerCompteur(el, cible) {
-  const valeurCible = Number(cible) || 0;
-  if (REDUCE_MOTION) { el.textContent = valeurCible; return; }
-
-  const depart = Number(el.textContent) || 0;
-  if (depart === valeurCible) { el.textContent = valeurCible; return; }
-
-  el.classList.add('compte');
-  const duree = 700;
-  const t0 = performance.now();
-  function etape(now) {
-    const p = Math.min(1, (now - t0) / duree);
-    const easeOut = 1 - Math.pow(1 - p, 3);
-    el.textContent = Math.round(depart + (valeurCible - depart) * easeOut);
-    if (p < 1) requestAnimationFrame(etape);
-    else el.textContent = valeurCible;
-  }
-  requestAnimationFrame(etape);
-}
-
-// -----------------------------------------------------------------------
 // Démarrage
 // -----------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
@@ -114,21 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-deconnexion').addEventListener('click', deconnexion);
-
-  initHeaderCompact();
-  initMagneticButtons();
-  initScrollReveal();
-
-  // Les panneaux latéraux (profil, catalogue, inventaire d'un personnage)
-  // injectent leur contenu via innerHTML à chaque ouverture : on y réapplique
-  // l'effet magnétique sur les boutons dès qu'ils apparaissent.
-  if (!REDUCE_MOTION && window.MutationObserver) {
-    ['panneau-corps', 'panneau-catalogue-corps'].forEach((id) => {
-      const cible = document.getElementById(id);
-      if (!cible) return;
-      new MutationObserver(() => initMagneticButtons(cible)).observe(cible, { childList: true });
-    });
-  }
 
   afficherErreurAuthEventuelle();
   verifierSessionExistante();
@@ -205,7 +99,7 @@ function setStatutConnexion(ok) {
 
 function majCompteur(collection, n) {
   const el = document.getElementById(`count-${collection}`);
-  if (el) animerCompteur(el, n);
+  if (el) el.textContent = n;
 }
 
 // -----------------------------------------------------------------------
@@ -277,7 +171,6 @@ function renderListeProfils(data) {
   }
   contenuDiv.innerHTML = data.map((item, i) => ligneHTML(item, i)).join('') +
     '<div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>';
-  initScrollReveal(contenuDiv);
 }
 
 function ligneHTML(item, index) {
@@ -285,7 +178,7 @@ function ligneHTML(item, index) {
   const statutBadge = item.statut === 'Vivant' ? 'badge-vert' : item.statut === 'Mort' ? 'badge-sang'
     : item.statut === 'Prisonnier' ? 'badge-acier' : 'badge-or';
   return `
-    <div class="ligne reveal" style="--i:${delay}" data-nom="${escapeAttr(((item.nomPrenom || item._id) + ' ' + (item.categoryName || item.roleName || '')).toLowerCase())}">
+    <div class="ligne" style="--i:${delay}" data-nom="${escapeAttr(((item.nomPrenom || item._id) + ' ' + (item.categoryName || item.roleName || '')).toLowerCase())}">
       <div class="ligne-sigil">👤</div>
       <div class="ligne-corps">
         <div class="ligne-nom">${escapeHtml(item.nomPrenom || item._id)}</div>
@@ -343,7 +236,6 @@ function renderInventairePage() {
     </div>
     <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>
   `;
-  initScrollReveal(document.getElementById('contenu'));
 }
 
 // -----------------------------------------------------------------------
@@ -419,8 +311,6 @@ function renderCataloguePage() {
     ${blocs || '<div class="etat-vide"><div class="etat-vide-icone">📦</div><p>Catalogue vide.</p><span class="etat-vide-sub">Ajoute ton premier objet avec le bouton ci-dessus.</span></div>'}
     <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun objet ne correspond à cette recherche.</div>
   `;
-  initScrollReveal(contenuDiv);
-  initMagneticButtons(contenuDiv);
 }
 
 function slugTexte(value) {
@@ -456,27 +346,16 @@ function catalogueValide(liste) {
   return (liste || []).filter(it => it && it.name && !/^__.*__$/.test(String(it.id || '')));
 }
 
-// Une image d'objet peut venir d'une data URL, d'une URL distante ou du dossier
-// /image/ partagé avec le bot. Les chemins relatifs "image/..." sont aussi
-// acceptés et convertis en "/image/..." pour le navigateur.
-function normaliserImageNavigateur(image) {
-  if (typeof image !== 'string' || !image.trim()) return null;
-  const value = image.trim();
-  if (/^https?:\/\//i.test(value) || /^data:image\//i.test(value)) return value;
-  if (/^\/?image\//i.test(value)) {
-    return `/${encodeURI(value.replace(/^\/+/, ''))}`;
-  }
-  return null;
-}
-
+// Une image d'objet est utilisable dans le navigateur si c'est une data URL ou
+// une URL http(s). Les anciens chemins "/image/items/..." (fichiers du bot)
+// ne sont pas accessibles depuis le site : on retombe alors sur l'emoji.
 function imageUtilisable(image) {
-  return !!normaliserImageNavigateur(image);
+  return typeof image === 'string' && /^(data:image\/|https?:\/\/)/.test(image);
 }
 
 function itemVisuelHTML(item) {
-  const imageSrc = normaliserImageNavigateur(item?.image);
-  if (imageSrc) {
-    return `<span class="item-emoji"><img class="item-img" src="${escapeAttr(imageSrc)}" alt=""></span>`;
+  if (imageUtilisable(item?.image)) {
+    return `<span class="item-emoji"><img class="item-img" src="${escapeAttr(item.image)}" alt=""></span>`;
   }
   return `<span class="item-emoji">${item?.emoji || '❔'}</span>`;
 }
@@ -489,7 +368,7 @@ function catalogueItemHTML(item) {
   const labelSlot = item.slot ? (state.listes.equipmentSlots || []).find(s => s.id === item.slot)?.label || item.slot : null;
   const rarity = item.rarity || 'Commun';
   return `
-    <article class="catalogue-item item-row reveal" data-nom="${escapeAttr(String(item.name || '').toLowerCase())}">
+    <article class="catalogue-item item-row" data-nom="${escapeAttr(String(item.name || '').toLowerCase())}">
       <div class="catalogue-item-visual">${itemVisuelHTML(item)}</div>
       <div class="item-corps">
         <div class="catalogue-item-title-row">
@@ -513,7 +392,7 @@ function catalogueItemHTML(item) {
 function ligneInventaireHTML(profile, quantiteTotale, index) {
   const delay = `${Math.min(index, 14) * 35}ms`;
   return `
-    <div class="ligne ligne-personnage reveal" style="--i:${delay}" data-id="${escapeAttr(profile._id)}" data-nom="${escapeAttr((profile.nomPrenom || profile._id).toLowerCase())}">
+    <div class="ligne ligne-personnage" style="--i:${delay}" data-id="${escapeAttr(profile._id)}" data-nom="${escapeAttr((profile.nomPrenom || profile._id).toLowerCase())}">
       <div class="ligne-sigil">🎒</div>
       <div class="ligne-corps">
         <div class="ligne-nom">${escapeHtml(profile.nomPrenom || profile._id)}</div>
@@ -791,6 +670,16 @@ function ouvrirEditeurCatalogue(itemId) {
 
 function panneauCatalogueItem(item) {
   const isNew = !item;
+  const useAction = item?.useAction || null;
+  const useType = useAction?.type || 'aucune';
+  const rewardOptions = state.catalogue
+    .filter(it => !item || it.id !== item.id)
+    .map(it => `<option value="${escapeAttr(it.id)}" ${(useType === 'donner_objet' && useAction?.itemId === it.id) ? 'selected' : ''}>${escapeHtml(it.emoji || '')} ${escapeHtml(it.name)}</option>`)
+    .join('');
+  const statOptions = (state.listes.defaultStats || [])
+    .map(stat => `<option value="${escapeAttr(stat)}" ${(useType === 'stat' && useAction?.stat === stat) ? 'selected' : ''}>${escapeHtml(stat)}</option>`)
+    .join('');
+
   return `
     <div class="section-titre">${isNew ? '➕ Nouvel objet' : "✏️ Modifier l'objet"}</div>
     <div class="grille-champs">
@@ -822,10 +711,74 @@ function panneauCatalogueItem(item) {
     </div>
     <div class="champ champ-case">
       <label class="case-label">
-        <input type="checkbox" id="f-item-usable" ${item?.usable ? 'checked' : ''} ${item?.slot ? 'disabled' : ''}>
+        <input type="checkbox" id="f-item-usable" ${item?.usable || useType !== 'aucune' ? 'checked' : ''} ${item?.slot ? 'disabled' : ''}>
         Utilisable depuis Discord
       </label>
       <p class="section-note" id="note-usable-slot" ${item?.slot ? '' : 'hidden'}>Coché automatiquement : un objet équipable est toujours utilisable.</p>
+    </div>
+
+    <div class="section-titre" style="margin-top:26px">⚡ Utilité lors de l'utilisation</div>
+    <p class="section-note">Choisis ce que le bouton « Utiliser » fait pour cet objet. Une utilité personnalisée remplace le comportement d'équipement classique de cet objet.</p>
+    <div class="champ">
+      <label for="f-item-use-action">Action</label>
+      <select id="f-item-use-action" onchange="onItemUseActionChange()">
+        <option value="aucune" ${useType === 'aucune' ? 'selected' : ''}>Aucune</option>
+        <option value="donner_objet" ${useType === 'donner_objet' ? 'selected' : ''}>Donner un objet</option>
+        <option value="message" ${useType === 'message' ? 'selected' : ''}>Envoyer un message dans le salon</option>
+        <option value="stat" ${useType === 'stat' ? 'selected' : ''}>Modifier une statistique</option>
+      </select>
+    </div>
+
+    <div id="use-action-donner" ${useType === 'donner_objet' ? '' : 'hidden'}>
+      <div class="grille-champs">
+        <div class="champ">
+          <label for="f-use-reward-item">Objet donné</label>
+          <select id="f-use-reward-item">
+            <option value="">Choisir un objet...</option>
+            ${rewardOptions}
+          </select>
+        </div>
+        <div class="champ">
+          <label for="f-use-reward-qty">Quantité</label>
+          <input type="number" id="f-use-reward-qty" min="1" value="${useAction?.quantity || 1}">
+        </div>
+      </div>
+    </div>
+
+    <div id="use-action-message" ${useType === 'message' ? '' : 'hidden'}>
+      <div class="champ">
+        <label for="f-use-message">Message à envoyer</label>
+        <textarea id="f-use-message" maxlength="2000" placeholder="Message exact envoyé dans le salon...">${escapeHtml(useAction?.message || '')}</textarea>
+        <p class="section-note">Variables optionnelles : <code>{joueur}</code>, <code>{personnage}</code>, <code>{objet}</code>.</p>
+      </div>
+    </div>
+
+    <div id="use-action-stat" ${useType === 'stat' ? '' : 'hidden'}>
+      <div class="grille-champs">
+        <div class="champ">
+          <label for="f-use-stat">Statistique</label>
+          <select id="f-use-stat">
+            ${statOptions}
+          </select>
+        </div>
+        <div class="champ">
+          <label for="f-use-amount">Modification</label>
+          <input type="number" id="f-use-amount" value="${useAction?.amount || 1}" step="1">
+        </div>
+      </div>
+      <div class="grille-champs">
+        <div class="champ">
+          <label for="f-use-stat-mode">Durée</label>
+          <select id="f-use-stat-mode" onchange="onItemUseStatModeChange()">
+            <option value="permanent" ${(useAction?.mode || 'permanent') === 'permanent' ? 'selected' : ''}>Permanent</option>
+            <option value="temporaire" ${useAction?.mode === 'temporaire' ? 'selected' : ''}>Temporaire</option>
+          </select>
+        </div>
+        <div class="champ" id="use-stat-duration-wrap" ${useAction?.mode === 'temporaire' ? '' : 'hidden'}>
+          <label for="f-use-duration">Durée (minutes)</label>
+          <input type="number" id="f-use-duration" min="1" value="${useAction?.durationMinutes || 60}">
+        </div>
+      </div>
     </div>
 
     <div class="section-titre" style="margin-top:26px">📊 Bonus de stats (si équipé)</div>
@@ -843,9 +796,27 @@ function panneauCatalogueItem(item) {
     </div>`;
 }
 
+function onItemUseActionChange() {
+  const type = val('f-item-use-action') || 'aucune';
+  const donner = document.getElementById('use-action-donner');
+  const message = document.getElementById('use-action-message');
+  const stat = document.getElementById('use-action-stat');
+  if (donner) donner.hidden = type !== 'donner_objet';
+  if (message) message.hidden = type !== 'message';
+  if (stat) stat.hidden = type !== 'stat';
+
+  const usable = document.getElementById('f-item-usable');
+  if (usable && type !== 'aucune') usable.checked = true;
+}
+
+function onItemUseStatModeChange() {
+  const mode = val('f-use-stat-mode') || 'permanent';
+  const duration = document.getElementById('use-stat-duration-wrap');
+  if (duration) duration.hidden = mode !== 'temporaire';
+}
+
 function apercuImageObjetHTML(image, emoji) {
-  const imageSrc = normaliserImageNavigateur(image);
-  if (imageSrc) return `<img src="${escapeAttr(imageSrc)}" alt="">`;
+  if (imageUtilisable(image)) return `<img src="${escapeAttr(image)}" alt="">`;
   return `<span class="apercu-emoji">${escapeHtml(emoji || '❔')}</span>`;
 }
 
@@ -905,6 +876,31 @@ function onSlotObjetChange() {
   note.hidden = !aUnSlot;
 }
 
+function construireUtiliteObjet() {
+  const type = val('f-item-use-action') || 'aucune';
+  if (type === 'aucune') return null;
+  if (type === 'donner_objet') {
+    return {
+      type,
+      itemId: val('f-use-reward-item') || '',
+      quantity: Number(val('f-use-reward-qty')) || 1,
+    };
+  }
+  if (type === 'message') {
+    return {
+      type,
+      message: val('f-use-message') || '',
+    };
+  }
+  return {
+    type: 'stat',
+    stat: val('f-use-stat') || '',
+    amount: Number(val('f-use-amount')) || 0,
+    mode: val('f-use-stat-mode') || 'permanent',
+    durationMinutes: Number(val('f-use-duration')) || 60,
+  };
+}
+
 async function sauvegarderCatalogueItem(itemId) {
   const btn = document.getElementById('btn-enregistrer');
   const texteOriginal = btn.textContent;
@@ -919,7 +915,8 @@ async function sauvegarderCatalogueItem(itemId) {
       rarity: val('f-item-rarity') || 'Commun',
       description: val('f-item-description'),
       slot: val('f-item-slot') || null,
-      usable: document.getElementById('f-item-usable').checked,
+      usable: document.getElementById('f-item-usable').checked || (val('f-item-use-action') || 'aucune') !== 'aucune',
+      useAction: construireUtiliteObjet(),
       statBonus: Object.fromEntries(
         Array.from(document.querySelectorAll('[data-bonus-stat]'))
           .map(el => [el.dataset.bonusStat, Number(el.value) || 0])
