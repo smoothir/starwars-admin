@@ -8,6 +8,97 @@ const state = {
 };
 
 // -----------------------------------------------------------------------
+// Animations (apparition au scroll, header compact, chiffres qui défilent,
+// effet magnétique) — tout est désactivé si prefers-reduced-motion est actif.
+// -----------------------------------------------------------------------
+const REDUCE_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let revealObserver = null;
+function getRevealObserver() {
+  if (revealObserver || REDUCE_MOTION) return revealObserver;
+  revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add('in-view');
+      revealObserver.unobserve(entry.target);
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  return revealObserver;
+}
+
+/** À rappeler après chaque rendu de liste : fait apparaître les nouveaux
+ * éléments `.reveal` au scroll (ou immédiatement si reduced-motion). */
+function initScrollReveal(root = document) {
+  const elements = root.querySelectorAll('.reveal:not(.in-view)');
+  if (REDUCE_MOTION) {
+    elements.forEach((el) => el.classList.add('in-view'));
+    return;
+  }
+  const observer = getRevealObserver();
+  elements.forEach((el) => observer.observe(el));
+}
+
+/** Header qui se compacte dès qu'on a un peu scrollé (rAF-throttled, pas de
+ * calcul coûteux par frame : on ne fait que lire window.scrollY). */
+function initHeaderCompact() {
+  const topbar = document.querySelector('.topbar');
+  if (!topbar || REDUCE_MOTION) return;
+  let ticking = false;
+  const seuil = 24;
+  window.addEventListener('scroll', () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      topbar.classList.toggle('compact', window.scrollY > seuil);
+      ticking = false;
+    });
+  }, { passive: true });
+}
+
+/** Effet magnétique : le bouton suit légèrement le curseur au survol. */
+function initMagneticButtons(root = document) {
+  if (REDUCE_MOTION) return;
+  root.querySelectorAll('.btn-principal, .btn-discord').forEach((btn) => {
+    if (btn.dataset.magnetiqueInit) return;
+    btn.dataset.magnetiqueInit = '1';
+    btn.classList.add('magnetique');
+
+    btn.addEventListener('mousemove', (e) => {
+      const rect = btn.getBoundingClientRect();
+      const x = (e.clientX - rect.left - rect.width / 2) * 0.25;
+      const y = (e.clientY - rect.top - rect.height / 2) * 0.35;
+      requestAnimationFrame(() => {
+        btn.style.transform = `translate(${x}px, ${y}px)`;
+      });
+    });
+    btn.addEventListener('mouseleave', () => {
+      requestAnimationFrame(() => { btn.style.transform = ''; });
+    });
+  });
+}
+
+/** Fait défiler un nombre affiché, de sa valeur actuelle jusqu'à `cible`. */
+function animerCompteur(el, cible) {
+  const valeurCible = Number(cible) || 0;
+  if (REDUCE_MOTION) { el.textContent = valeurCible; return; }
+
+  const depart = Number(el.textContent) || 0;
+  if (depart === valeurCible) { el.textContent = valeurCible; return; }
+
+  el.classList.add('compte');
+  const duree = 700;
+  const t0 = performance.now();
+  function etape(now) {
+    const p = Math.min(1, (now - t0) / duree);
+    const easeOut = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(depart + (valeurCible - depart) * easeOut);
+    if (p < 1) requestAnimationFrame(etape);
+    else el.textContent = valeurCible;
+  }
+  requestAnimationFrame(etape);
+}
+
+// -----------------------------------------------------------------------
 // Démarrage
 // -----------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
@@ -23,6 +114,21 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-deconnexion').addEventListener('click', deconnexion);
+
+  initHeaderCompact();
+  initMagneticButtons();
+  initScrollReveal();
+
+  // Les panneaux latéraux (profil, catalogue, inventaire d'un personnage)
+  // injectent leur contenu via innerHTML à chaque ouverture : on y réapplique
+  // l'effet magnétique sur les boutons dès qu'ils apparaissent.
+  if (!REDUCE_MOTION && window.MutationObserver) {
+    ['panneau-corps', 'panneau-catalogue-corps'].forEach((id) => {
+      const cible = document.getElementById(id);
+      if (!cible) return;
+      new MutationObserver(() => initMagneticButtons(cible)).observe(cible, { childList: true });
+    });
+  }
 
   afficherErreurAuthEventuelle();
   verifierSessionExistante();
@@ -99,7 +205,7 @@ function setStatutConnexion(ok) {
 
 function majCompteur(collection, n) {
   const el = document.getElementById(`count-${collection}`);
-  if (el) el.textContent = n;
+  if (el) animerCompteur(el, n);
 }
 
 // -----------------------------------------------------------------------
@@ -171,6 +277,7 @@ function renderListeProfils(data) {
   }
   contenuDiv.innerHTML = data.map((item, i) => ligneHTML(item, i)).join('') +
     '<div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>';
+  initScrollReveal(contenuDiv);
 }
 
 function ligneHTML(item, index) {
@@ -178,7 +285,7 @@ function ligneHTML(item, index) {
   const statutBadge = item.statut === 'Vivant' ? 'badge-vert' : item.statut === 'Mort' ? 'badge-sang'
     : item.statut === 'Prisonnier' ? 'badge-acier' : 'badge-or';
   return `
-    <div class="ligne" style="--i:${delay}" data-nom="${escapeAttr(((item.nomPrenom || item._id) + ' ' + (item.categoryName || item.roleName || '')).toLowerCase())}">
+    <div class="ligne reveal" style="--i:${delay}" data-nom="${escapeAttr(((item.nomPrenom || item._id) + ' ' + (item.categoryName || item.roleName || '')).toLowerCase())}">
       <div class="ligne-sigil">👤</div>
       <div class="ligne-corps">
         <div class="ligne-nom">${escapeHtml(item.nomPrenom || item._id)}</div>
@@ -236,6 +343,7 @@ function renderInventairePage() {
     </div>
     <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>
   `;
+  initScrollReveal(document.getElementById('contenu'));
 }
 
 // -----------------------------------------------------------------------
@@ -311,6 +419,8 @@ function renderCataloguePage() {
     ${blocs || '<div class="etat-vide"><div class="etat-vide-icone">📦</div><p>Catalogue vide.</p><span class="etat-vide-sub">Ajoute ton premier objet avec le bouton ci-dessus.</span></div>'}
     <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun objet ne correspond à cette recherche.</div>
   `;
+  initScrollReveal(contenuDiv);
+  initMagneticButtons(contenuDiv);
 }
 
 function slugTexte(value) {
@@ -379,7 +489,7 @@ function catalogueItemHTML(item) {
   const labelSlot = item.slot ? (state.listes.equipmentSlots || []).find(s => s.id === item.slot)?.label || item.slot : null;
   const rarity = item.rarity || 'Commun';
   return `
-    <article class="catalogue-item item-row" data-nom="${escapeAttr(String(item.name || '').toLowerCase())}">
+    <article class="catalogue-item item-row reveal" data-nom="${escapeAttr(String(item.name || '').toLowerCase())}">
       <div class="catalogue-item-visual">${itemVisuelHTML(item)}</div>
       <div class="item-corps">
         <div class="catalogue-item-title-row">
@@ -403,7 +513,7 @@ function catalogueItemHTML(item) {
 function ligneInventaireHTML(profile, quantiteTotale, index) {
   const delay = `${Math.min(index, 14) * 35}ms`;
   return `
-    <div class="ligne ligne-personnage" style="--i:${delay}" data-id="${escapeAttr(profile._id)}" data-nom="${escapeAttr((profile.nomPrenom || profile._id).toLowerCase())}">
+    <div class="ligne ligne-personnage reveal" style="--i:${delay}" data-id="${escapeAttr(profile._id)}" data-nom="${escapeAttr((profile.nomPrenom || profile._id).toLowerCase())}">
       <div class="ligne-sigil">🎒</div>
       <div class="ligne-corps">
         <div class="ligne-nom">${escapeHtml(profile.nomPrenom || profile._id)}</div>
