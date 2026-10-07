@@ -18,6 +18,7 @@ const COLLECTION_INV = 'inv';
 const COLLECTION_ITEM_CATALOG = 'item_catalog';
 const COLLECTION_SITE_CONNEXIONS = 'site_connexions';
 const COLLECTION_SITE_LOGS = 'site_logs';
+const COLLECTION_SITE_BACKUPS = 'site_backups';
 
 let client = null;
 let db = null;
@@ -231,6 +232,12 @@ async function getSiteLogsCollection() {
   return database.collection(COLLECTION_SITE_LOGS);
 }
 
+/** Collection interne pour les sauvegardes du panneau admin. */
+async function getSiteBackupsCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_SITE_BACKUPS);
+}
+
 module.exports = {
   connect,
   getAvatarsCollection,
@@ -251,4 +258,5 @@ module.exports = {
   getItemCatalogCollection,
   getSiteConnexionsCollection,
   getSiteLogsCollection,
+  getSiteBackupsCollection,
 };

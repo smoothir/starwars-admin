@@ -34,7 +34,7 @@ const {
   removeItem,
   setItemQuantity,
 } = require('../Data/invStore.js');
-const { recordConnexion, listConnexions, logAction, listLogs } = require('../Data/adminStore.js');
+const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup } = require('../Data/adminStore.js');
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
@@ -148,6 +148,50 @@ app.get('/api/admin/connexions', async (req, res) => {
 app.get('/api/admin/logs', async (req, res) => {
   try {
     res.json(await listLogs());
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/backups', async (req, res) => {
+  try {
+    res.json(await listBackups());
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/backups', async (req, res) => {
+  try {
+    const backup = await createBackup(req.session.user);
+    const details = `A créé une sauvegarde des données du site (${Object.entries(backup.collections).map(([name, count]) => `${name}: ${count}`).join(', ')}).`;
+    await logAction({
+      ...req.session.user,
+      action: 'backup_created',
+      details,
+      metadata: { backupId: backup.snapshotId },
+    });
+    res.json({ ok: true, backup });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/backups/:backupId/restore', async (req, res) => {
+  try {
+    const backupId = String(req.params.backupId || '');
+    if (!/^backup_[A-Za-z0-9_-]+$/.test(backupId)) return res.status(400).json({ error: 'Identifiant de sauvegarde invalide.' });
+    const result = await restoreBackup(backupId, { ...req.session.user, preserveSnapshotIds: [backupId] });
+    await logAction({
+      ...req.session.user,
+      action: 'backup_restored',
+      details: `A restauré la sauvegarde ${backupId}. Une sauvegarde de sécurité a été créée automatiquement.`,
+      metadata: { backupId, safetyBackupId: result.safetyBackupId },
+    });
+    res.json({ ok: true, ...result });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });

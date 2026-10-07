@@ -439,12 +439,26 @@ async function chargerAdminPage() {
   contenuDiv.innerHTML = Array.from({ length: 4 }).map(() => '<div class="squelette"></div>').join('');
 
   try {
-    const [connexions, logs] = await Promise.all([
+    const [connexions, logs, backups] = await Promise.all([
       apiFetch('/api/admin/connexions').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
       apiFetch('/api/admin/logs').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      apiFetch('/api/admin/backups').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
     ]);
 
     contenuDiv.innerHTML = `
+      <div class="admin-backup-bar">
+        <div>
+          <strong>💾 Sauvegarde</strong>
+          <p>Enregistre les profils, inventaires, catalogue et avatars dans MongoDB pour pouvoir restaurer l'état du site.</p>
+        </div>
+        <button class="btn-principal admin-backup-btn" onclick="creerBackup()">Créer une sauvegarde</button>
+      </div>
+
+      <div class="section-titre">💾 Sauvegardes disponibles (${backups.length})</div>
+      <div class="backup-liste">
+        ${backups.map(backupLigneHTML).join('') || "<p class='section-note'>Aucune sauvegarde enregistrée.</p>"}
+      </div>
+
       <div class="section-titre">👥 Connexions (${connexions.length})</div>
       <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:34px;">
         ${connexions.map(connexionLigneHTML).join('') || "<div class='etat-vide'><p>Personne ne s'est encore connecté.</p></div>"}
@@ -488,10 +502,16 @@ const LOG_ICONES = {
   inventaire_ajout: '📥',
   inventaire_quantite: '🔢',
   inventaire_retrait: '📤',
+  backup_created: '💾',
+  backup_restored: '↩️',
 };
 
 function logLigneHTML(entry) {
   const icone = LOG_ICONES[entry.action] || '•';
+  const actionBackup = entry.action === 'backup_created' || entry.action === 'backup_restored';
+  const boutonRestore = actionBackup && entry.backupId
+    ? `<button class="btn-secondaire btn-backup-restore" onclick="restaurerBackup('${jsAttr(entry.backupId)}')">Restaurer</button>`
+    : '';
   return `
     <div class="log-entry">
       <span class="log-icone">${icone}</span>
@@ -499,7 +519,60 @@ function logLigneHTML(entry) {
         <div class="log-details"><strong>${escapeHtml(entry.username || 'Inconnu')}</strong> ${escapeHtml(entry.details || entry.action)}</div>
         <div class="log-date">${formatDateLog(entry.timestamp)}</div>
       </div>
+      ${boutonRestore}
     </div>`;
+}
+
+function backupLigneHTML(backup) {
+  const collections = Object.entries(backup.collections || {})
+    .map(([name, count]) => `${escapeHtml(name)}: ${Number(count) || 0}`)
+    .join(' · ');
+  return `
+    <div class="backup-ligne">
+      <div class="backup-icone">💾</div>
+      <div class="backup-corps">
+        <div class="backup-nom">${escapeHtml(backup.snapshotId || backup._id || 'Sauvegarde')}</div>
+        <div class="backup-meta">${formatDateLog(backup.createdAt)} · ${escapeHtml(backup.createdBy?.username || 'Inconnu')}</div>
+        <div class="backup-meta">${collections}</div>
+      </div>
+      <button class="btn-secondaire btn-backup-restore" onclick="restaurerBackup('${jsAttr(backup.snapshotId || backup._id)}')">Restaurer</button>
+    </div>`;
+}
+
+async function creerBackup() {
+  const ok = await confirmerAction({
+    titre: 'Créer une sauvegarde',
+    message: 'Créer un instantané des profils, inventaires, catalogue et avatars actuels ?',
+    texteValider: 'Sauvegarder',
+  });
+  if (!ok) return;
+  try {
+    const r = await apiFetch('/api/admin/backups', { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    toast('Sauvegarde créée avec succès.', 'succes');
+    await chargerAdminPage();
+  } catch (error) {
+    toast(`Échec de la sauvegarde : ${error.message}`, 'erreur');
+  }
+}
+
+async function restaurerBackup(backupId) {
+  const ok = await confirmerAction({
+    titre: 'Restaurer cette sauvegarde ?',
+    message: 'Le contenu actuel sera remplacé. Une sauvegarde de sécurité de l’état actuel sera créée automatiquement avant la restauration.',
+    texteValider: 'Restaurer',
+  });
+  if (!ok) return;
+  try {
+    const r = await apiFetch(`/api/admin/backups/${encodeURIComponent(backupId)}/restore`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    toast('Sauvegarde restaurée. Une sauvegarde de sécurité a été créée.', 'succes');
+    await chargerAdminPage();
+  } catch (error) {
+    toast(`Échec de la restauration : ${error.message}`, 'erreur');
+  }
 }
 
 function formatDateLog(value) {
@@ -683,7 +756,7 @@ function panneauCatalogueItem(item) {
   return `
     <div class="section-titre">${isNew ? '➕ Nouvel objet' : "✏️ Modifier l'objet"}</div>
     <div class="grille-champs">
-            <div class="champ"><label for="f-item-id">Identifiant (ID)</label><input type="text" id="f-item-id" value="${escapeAttr(item?.id || '')}" placeholder="ex. casque_rare" pattern="[A-Za-z0-9_-]+"></div>
+      <div class="champ"><label for="f-item-id">Identifiant (ID)</label><input type="text" id="f-item-id" value="${escapeAttr(item?.id || '')}" placeholder="ex. casque_rare" pattern="[A-Za-z0-9_-]+"><p class="section-note">L'ID permet d'avoir plusieurs objets avec le même nom. Exemple : casque_commun, casque_rare, casque_epique.</p></div>
       <div class="champ"><label for="f-item-name">Nom</label><input type="text" id="f-item-name" value="${escapeAttr(item?.name || '')}"></div>
       <div class="champ"><label for="f-item-emoji">Emoji</label><input type="text" id="f-item-emoji" value="${escapeAttr(item?.emoji || '')}" maxlength="4"></div>
       <div class="champ"><label for="f-item-category">Catégorie</label><input type="text" id="f-item-category" value="${escapeAttr(item?.category || '')}" placeholder="Arme, Équipement, Ressource..."></div>
@@ -698,6 +771,7 @@ function panneauCatalogueItem(item) {
         <div class="image-objet-actions">
           <input type="file" id="f-item-image" accept="image/png,image/jpeg,image/webp,image/gif" onchange="choisirImageObjet(this)">
           <button type="button" class="btn-secondaire" id="btn-retirer-image" onclick="retirerImageObjet()" ${imageUtilisable(item?.image) ? '' : 'hidden'}>Retirer l'image</button>
+          <p class="section-note">Réduite automatiquement (256 px max). Sans image, l'emoji est utilisé.</p>
         </div>
       </div>
     </div>
