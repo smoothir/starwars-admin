@@ -262,9 +262,21 @@ async function addCatalogItem({ id, name, emoji, category, rarity, description, 
 }
 
 /** Met à jour un objet. Un champ `undefined` est laissé tel quel (slot/usable ne sont jamais touchés ici). */
-async function updateCatalogItem(itemId, { name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction }) {
+async function updateCatalogItem(itemId, { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction }) {
   if (isReservedId(itemId)) throw new Error('Objet introuvable.');
   const col = await getItemCatalogCollection();
+  const oldDoc = await col.findOne({ _id: itemId });
+  if (!oldDoc) throw new Error('Objet introuvable.');
+
+  const requestedId = id === undefined || id === null || String(id).trim() === '' ? itemId : id;
+  const newId = slugify(requestedId);
+  if (!newId || isReservedId(newId)) throw new Error('Identifiant invalide. Utilise uniquement des lettres, chiffres, tirets ou underscores.');
+
+  if (newId !== itemId) {
+    const conflict = await col.findOne({ _id: newId });
+    if (conflict) throw new Error(`Un objet avec l'identifiant "${newId}" existe déjà.`);
+  }
+
   const fields = {};
   if (name !== undefined) fields.name = name;
   if (emoji !== undefined) fields.emoji = emoji;
@@ -275,8 +287,6 @@ async function updateCatalogItem(itemId, { name, emoji, category, rarity, descri
   if (image !== undefined) fields.image = normalizeImage(image);
   if (slot !== undefined) {
     fields.slot = normalizeSlot(slot);
-    // Un objet équipable dans un emplacement est forcément "usable" (c'est
-    // justement ce que le bot vérifie pour l'équiper) — même règle qu'à la création.
     if (fields.slot) fields.usable = true;
   }
   if (usable !== undefined) fields.usable = Boolean(usable);
@@ -287,11 +297,47 @@ async function updateCatalogItem(itemId, { name, emoji, category, rarity, descri
     if (!reward || isReservedId(reward._id)) throw new Error("L'objet à donner n'existe pas dans le catalogue.");
   }
 
-  const result = await col.findOneAndUpdate({ _id: itemId }, { $set: fields }, { returnDocument: 'after' });
-  if (!result) throw new Error('Objet introuvable.');
-  return toItem(result);
-}
+  if (newId === itemId) {
+    const result = await col.findOneAndUpdate({ _id: itemId }, { $set: fields }, { returnDocument: 'after' });
+    if (!result) throw new Error('Objet introuvable.');
+    return toItem(result);
+  }
 
+  // MongoDB interdit de modifier directement _id : on recrée le document sous
+  // le nouvel ID puis on migre les références connues (inventaires, équipement
+  // et utilités « donner un objet ») avant de supprimer l'ancien document.
+  const newDoc = { ...oldDoc, ...fields, _id: newId };
+  await col.insertOne(newDoc);
+
+  try {
+    const invCol = await getInvCollection();
+    await invCol.updateMany(
+      { [`items.${itemId}`]: { $exists: true } },
+      { $rename: { [`items.${itemId}`]: `items.${newId}` }, $set: { updatedAt: new Date() } }
+    );
+
+    for (const slotName of EQUIPMENT_SLOTS) {
+      await invCol.updateMany(
+        { [`equipement.${slotName}`]: itemId },
+        { $set: { [`equipement.${slotName}`]: newId, updatedAt: new Date() } }
+      );
+    }
+
+    await col.updateMany(
+      { 'useAction.itemId': itemId },
+      { $set: { 'useAction.itemId': newId } }
+    );
+
+    await col.deleteOne({ _id: itemId });
+  } catch (err) {
+    // Si la migration des références échoue, on supprime le doublon créé et
+    // laisse l'ancien objet intact pour éviter une perte de catalogue.
+    await col.deleteOne({ _id: newId }).catch(() => {});
+    throw err;
+  }
+
+  return toItem(newDoc);
+}
 /**
  * Supprime un objet du catalogue. Les personnages qui en possédaient gardent
  * l'entrée dans leur inventaire (avec une quantité), juste affichée avec un

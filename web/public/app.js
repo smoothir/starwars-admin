@@ -683,6 +683,7 @@ function panneauCatalogueItem(item) {
   return `
     <div class="section-titre">${isNew ? '➕ Nouvel objet' : "✏️ Modifier l'objet"}</div>
     <div class="grille-champs">
+      <div class="champ"><label for="f-item-id">Identifiant (ID)</label><input type="text" id="f-item-id" value="${escapeAttr(item?.id || '')}" placeholder="ex. casque_rare" pattern="[A-Za-z0-9_-]+"><p class="section-note">L'ID permet d'avoir plusieurs objets avec le même nom. Exemple : casque_commun, casque_rare, casque_epique.</p></div>
       <div class="champ"><label for="f-item-name">Nom</label><input type="text" id="f-item-name" value="${escapeAttr(item?.name || '')}"></div>
       <div class="champ"><label for="f-item-emoji">Emoji</label><input type="text" id="f-item-emoji" value="${escapeAttr(item?.emoji || '')}" maxlength="4"></div>
       <div class="champ"><label for="f-item-category">Catégorie</label><input type="text" id="f-item-category" value="${escapeAttr(item?.category || '')}" placeholder="Arme, Équipement, Ressource..."></div>
@@ -909,6 +910,7 @@ async function sauvegarderCatalogueItem(itemId) {
 
   try {
     const payload = {
+      id: val('f-item-id'),
       name: val('f-item-name'),
       emoji: val('f-item-emoji'),
       category: val('f-item-category'),

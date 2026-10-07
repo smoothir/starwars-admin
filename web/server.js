@@ -413,8 +413,8 @@ app.post('/api/inventaire/catalogue', async (req, res) => {
 
 app.patch('/api/inventaire/catalogue/:itemId', async (req, res) => {
   try {
-    const { name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction } = req.body || {};
-    const updated = await updateCatalogItem(req.params.itemId, { name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction });
+    const { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction } = req.body || {};
+    const updated = await updateCatalogItem(req.params.itemId, { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction });
     const imageInfo = image === undefined ? '' : (image ? ' (image modifiée)' : ' (image retirée)');
     logFromReq(req, 'objet_modifie', `A modifié l'objet "${name || req.params.itemId}" du catalogue${imageInfo}.`);
     res.json(updated);
