@@ -683,7 +683,7 @@ function panneauCatalogueItem(item) {
   return `
     <div class="section-titre">${isNew ? '➕ Nouvel objet' : "✏️ Modifier l'objet"}</div>
     <div class="grille-champs">
-      <div class="champ"><label for="f-item-id">Identifiant (ID)</label><input type="text" id="f-item-id" value="${escapeAttr(item?.id || '')}" placeholder="ex. casque_rare" pattern="[A-Za-z0-9_-]+"><p class="section-note">L'ID permet d'avoir plusieurs objets avec le même nom. Exemple : casque_commun, casque_rare, casque_epique.</p></div>
+            <div class="champ"><label for="f-item-id">Identifiant (ID)</label><input type="text" id="f-item-id" value="${escapeAttr(item?.id || '')}" placeholder="ex. casque_rare" pattern="[A-Za-z0-9_-]+"></div>
       <div class="champ"><label for="f-item-name">Nom</label><input type="text" id="f-item-name" value="${escapeAttr(item?.name || '')}"></div>
       <div class="champ"><label for="f-item-emoji">Emoji</label><input type="text" id="f-item-emoji" value="${escapeAttr(item?.emoji || '')}" maxlength="4"></div>
       <div class="champ"><label for="f-item-category">Catégorie</label><input type="text" id="f-item-category" value="${escapeAttr(item?.category || '')}" placeholder="Arme, Équipement, Ressource..."></div>
@@ -698,7 +698,6 @@ function panneauCatalogueItem(item) {
         <div class="image-objet-actions">
           <input type="file" id="f-item-image" accept="image/png,image/jpeg,image/webp,image/gif" onchange="choisirImageObjet(this)">
           <button type="button" class="btn-secondaire" id="btn-retirer-image" onclick="retirerImageObjet()" ${imageUtilisable(item?.image) ? '' : 'hidden'}>Retirer l'image</button>
-          <p class="section-note">Réduite automatiquement (256 px max). Sans image, l'emoji est utilisé.</p>
         </div>
       </div>
     </div>
