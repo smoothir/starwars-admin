@@ -3,6 +3,7 @@
 // dupliquer la logique ni risquer que le site et le bot voient des données
 // différentes.
 require('dotenv').config();
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
@@ -35,7 +36,7 @@ const {
   setItemQuantity,
 } = require('../Data/invStore.js');
 const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup } = require('../Data/adminStore.js');
-const { getCraftRecipesCollection } = require('../Data/mongo.js');
+const { getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection } = require('../Data/mongo.js');
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
@@ -96,6 +97,24 @@ app.use(session({
 // de la page elle-meme qui gere l'authentification, pas le navigateur. Seules
 // les routes /api/* sont protegees, et sans en-tete WWW-Authenticate, pour ne
 // jamais declencher la popup native du navigateur par-dessus notre ecran.
+// Les anciennes images d'objets vivent dans le dossier /image du bot. On les
+// sert à la même URL pour conserver les chemins déjà enregistrés en base.
+const imageDirCandidats = [
+  process.env.ITEM_IMAGE_DIR,
+  process.env.BOT_IMAGE_DIR,
+  path.resolve(__dirname, '..', '..', 'image'),
+  path.resolve(__dirname, '..', 'image'),
+  path.resolve(process.cwd(), 'image'),
+].filter(Boolean).map(dir => path.resolve(dir));
+const itemImageDir = imageDirCandidats.find(dir => {
+  try { return fs.statSync(dir).isDirectory(); } catch { return false; }
+});
+if (itemImageDir) {
+  console.log(`🖼️ Images du catalogue servies depuis : ${itemImageDir}`);
+  app.use('/image', express.static(itemImageDir, { maxAge: '1d' }));
+} else {
+  console.warn('⚠️ Aucun dossier image trouvé. Définis ITEM_IMAGE_DIR ou BOT_IMAGE_DIR si nécessaire.');
+}
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Qui est connecte (utilise par le site au chargement pour savoir si une
@@ -528,6 +547,155 @@ app.delete('/api/crafts/:id', async (req, res) => {
     if (!recipe) return res.status(404).json({ error: 'Recette introuvable.' });
     await col.deleteOne({ _id: req.params.id });
     logFromReq(req, 'craft_supprime', `A supprimé la recette de craft « ${recipe.name} ».`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// PRODUCTION & PERSONNEL — définitions partagées avec le bot Discord.
+// Une production manuelle prend 30 minutes par unité. Le personnel possède
+// ses propres ingrédients par cycle, produits et consommables journaliers.
+// ---------------------------------------------------------------------------
+async function normaliserListeProduction(values, fieldName, obligatoire = true) {
+  if (!Array.isArray(values)) throw new Error(`${fieldName} doit être une liste d'objets.`);
+  const merged = new Map();
+  for (const entry of values) {
+    const itemId = String(entry?.itemId || '').trim();
+    const quantity = Math.floor(Number(entry?.quantity));
+    if (!itemId || !/^[A-Za-z0-9_-]+$/.test(itemId)) throw new Error(`Identifiant d'objet invalide dans « ${fieldName} ».`);
+    if (!Number.isFinite(quantity) || quantity < 1 || quantity > 1000000) throw new Error(`Chaque quantité de « ${fieldName} » doit être comprise entre 1 et 1 000 000.`);
+    merged.set(itemId, (merged.get(itemId) || 0) + quantity);
+  }
+  const rows = [...merged.entries()].map(([itemId, quantity]) => ({ itemId, quantity }));
+  if (obligatoire && !rows.length) throw new Error(`Ajoute au moins un objet dans « ${fieldName} ».`);
+  const catalog = await getCatalog();
+  const known = new Set(catalog.map(item => String(item.id)));
+  for (const row of rows) if (!known.has(row.itemId)) throw new Error(`L'objet « ${row.itemId} » n'existe pas dans le catalogue.`);
+  return rows;
+}
+
+function texteDefinitionProduction(body, fallbackEmoji) {
+  const b = body || {};
+  const name = String(b.name || '').trim();
+  if (!name) throw new Error('Le nom est obligatoire.');
+  return {
+    name: name.slice(0, 100),
+    emoji: String(b.emoji || fallbackEmoji).trim().slice(0, 8) || fallbackEmoji,
+    description: String(b.description || '').trim().slice(0, 1500),
+    enabled: b.enabled !== false,
+    updatedAt: new Date(),
+  };
+}
+
+async function normaliserProduction(body) {
+  const base = texteDefinitionProduction(body, '🏭');
+  const requirements = await normaliserListeProduction(body?.requirements, 'Objets nécessaires');
+  const outputs = await normaliserListeProduction(body?.outputs, 'Objets produits');
+  return { ...base, requirements, outputs, minutesPerUnit: 30 };
+}
+
+async function normaliserPersonnelType(body) {
+  const base = texteDefinitionProduction(body, '👷');
+  const requirements = await normaliserListeProduction(body?.requirements, 'Ingrédients par cycle');
+  const outputs = await normaliserListeProduction(body?.outputs, 'Objets produits par cycle');
+  const dailyUpkeep = await normaliserListeProduction(body?.dailyUpkeep, 'Consommation quotidienne');
+  return { ...base, requirements, outputs, dailyUpkeep, minutesPerCycle: 30 };
+}
+
+app.get('/api/productions', async (req, res) => {
+  try {
+    const col = await getProductionRecipesCollection();
+    res.json(await col.find({}).sort({ name: 1 }).toArray());
+  } catch (err) {
+    console.error('Chargement des productions impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/productions', async (req, res) => {
+  try {
+    const col = await getProductionRecipesCollection();
+    const definition = await normaliserProduction(req.body);
+    const document = { _id: `production_${crypto.randomBytes(10).toString('hex')}`, ...definition, createdAt: new Date() };
+    await col.insertOne(document);
+    logFromReq(req, 'production_creee', `A créé la production « ${document.name} ».`);
+    res.status(201).json(document);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/productions/:id', async (req, res) => {
+  try {
+    const col = await getProductionRecipesCollection();
+    const definition = await normaliserProduction(req.body);
+    const result = await col.findOneAndUpdate({ _id: req.params.id }, { $set: definition }, { returnDocument: 'after' });
+    if (!result) return res.status(404).json({ error: 'Production introuvable.' });
+    logFromReq(req, 'production_modifiee', `A modifié la production « ${result.name} ».`);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/productions/:id', async (req, res) => {
+  try {
+    const col = await getProductionRecipesCollection();
+    const item = await col.findOne({ _id: req.params.id });
+    if (!item) return res.status(404).json({ error: 'Production introuvable.' });
+    await col.deleteOne({ _id: req.params.id });
+    logFromReq(req, 'production_supprimee', `A supprimé la production « ${item.name} ».`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/personnel-types', async (req, res) => {
+  try {
+    const col = await getPersonnelTypesCollection();
+    res.json(await col.find({}).sort({ name: 1 }).toArray());
+  } catch (err) {
+    console.error('Chargement du personnel impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/personnel-types', async (req, res) => {
+  try {
+    const col = await getPersonnelTypesCollection();
+    const definition = await normaliserPersonnelType(req.body);
+    const document = { _id: `personnel_type_${crypto.randomBytes(10).toString('hex')}`, ...definition, createdAt: new Date() };
+    await col.insertOne(document);
+    logFromReq(req, 'personnel_type_cree', `A créé le type de personnel « ${document.name} ».`);
+    res.status(201).json(document);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/personnel-types/:id', async (req, res) => {
+  try {
+    const col = await getPersonnelTypesCollection();
+    const definition = await normaliserPersonnelType(req.body);
+    const result = await col.findOneAndUpdate({ _id: req.params.id }, { $set: definition }, { returnDocument: 'after' });
+    if (!result) return res.status(404).json({ error: 'Type de personnel introuvable.' });
+    logFromReq(req, 'personnel_type_modifie', `A modifié le type de personnel « ${result.name} ».`);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/personnel-types/:id', async (req, res) => {
+  try {
+    const col = await getPersonnelTypesCollection();
+    const item = await col.findOne({ _id: req.params.id });
+    if (!item) return res.status(404).json({ error: 'Type de personnel introuvable.' });
+    await col.deleteOne({ _id: req.params.id });
+    logFromReq(req, 'personnel_type_supprime', `A supprimé le type de personnel « ${item.name} ».`);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

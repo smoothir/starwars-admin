@@ -20,6 +20,8 @@ const COLLECTION_SITE_CONNEXIONS = 'site_connexions';
 const COLLECTION_SITE_LOGS = 'site_logs';
 const COLLECTION_SITE_BACKUPS = 'site_backups';
 const COLLECTION_CRAFT_RECIPES = 'craft_recipes';
+const COLLECTION_PRODUCTION_RECIPES = 'production_recipes';
+const COLLECTION_PERSONNEL_TYPES = 'personnel_types';
 
 let client = null;
 let db = null;
@@ -245,6 +247,18 @@ async function getCraftRecipesCollection() {
   return database.collection(COLLECTION_CRAFT_RECIPES);
 }
 
+/** Recettes de production (30 min par unité), partagées avec le bot. */
+async function getProductionRecipesCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_PRODUCTION_RECIPES);
+}
+
+/** Types de personnel recrutables, partagés avec le bot. */
+async function getPersonnelTypesCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_PERSONNEL_TYPES);
+}
+
 module.exports = {
   connect,
   getAvatarsCollection,
@@ -267,4 +281,6 @@ module.exports = {
   getSiteLogsCollection,
   getSiteBackupsCollection,
   getCraftRecipesCollection,
+  getProductionRecipesCollection,
+  getPersonnelTypesCollection,
 };
