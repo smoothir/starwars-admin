@@ -555,8 +555,8 @@ app.delete('/api/crafts/:id', async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // PRODUCTION & PERSONNEL — définitions partagées avec le bot Discord.
-// Une production manuelle prend 30 minutes par unité. Le personnel possède
-// ses propres ingrédients par cycle, produits et consommables journaliers.
+// Chaque recette et chaque métier possède une durée configurable. Le personnel
+// a un coût de recrutement, des consommables journaliers et une activité facultative.
 // ---------------------------------------------------------------------------
 async function normaliserListeProduction(values, fieldName, obligatoire = true) {
   if (!Array.isArray(values)) throw new Error(`${fieldName} doit être une liste d'objets.`);
@@ -589,19 +589,35 @@ function texteDefinitionProduction(body, fallbackEmoji) {
   };
 }
 
+function normaliserDuree(value, label, fallback = 30) {
+  const minutes = Math.floor(Number(value));
+  if (!Number.isFinite(minutes) || minutes < 1 || minutes > 525600) {
+    if (value === undefined || value === null || value === '') return fallback;
+    throw new Error(`${label} doit être comprise entre 1 minute et 365 jours.`);
+  }
+  return minutes;
+}
+
 async function normaliserProduction(body) {
   const base = texteDefinitionProduction(body, '🏭');
   const requirements = await normaliserListeProduction(body?.requirements, 'Objets nécessaires');
   const outputs = await normaliserListeProduction(body?.outputs, 'Objets produits');
-  return { ...base, requirements, outputs, minutesPerUnit: 30 };
+  const minutesPerUnit = normaliserDuree(body?.minutesPerUnit, 'La durée par unité');
+  return { ...base, requirements, outputs, minutesPerUnit };
 }
 
 async function normaliserPersonnelType(body) {
   const base = texteDefinitionProduction(body, '👷');
-  const requirements = await normaliserListeProduction(body?.requirements, 'Ingrédients par cycle');
-  const outputs = await normaliserListeProduction(body?.outputs, 'Objets produits par cycle');
+  const purchaseCost = await normaliserListeProduction(body?.purchaseCost || [], 'Coût de recrutement', false);
+  const requirements = await normaliserListeProduction(body?.requirements || [], 'Ingrédients par cycle', false);
+  const outputs = await normaliserListeProduction(body?.outputs || [], 'Objets produits par cycle', false);
   const dailyUpkeep = await normaliserListeProduction(body?.dailyUpkeep, 'Consommation quotidienne');
-  return { ...base, requirements, outputs, dailyUpkeep, minutesPerCycle: 30 };
+  const minutesPerCycle = normaliserDuree(body?.minutesPerCycle, 'La durée du cycle');
+  if (outputs.length && !requirements.length) {
+    // Les activités peuvent produire sans consommable de cycle ; les besoins
+    // quotidiens restent configurés séparément dans dailyUpkeep.
+  }
+  return { ...base, purchaseCost, requirements, outputs, dailyUpkeep, minutesPerCycle };
 }
 
 app.get('/api/productions', async (req, res) => {
