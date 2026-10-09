@@ -613,11 +613,18 @@ async function normaliserPersonnelType(body) {
   const outputs = await normaliserListeProduction(body?.outputs || [], 'Objets produits par cycle', false);
   const dailyUpkeep = await normaliserListeProduction(body?.dailyUpkeep, 'Consommation quotidienne');
   const minutesPerCycle = normaliserDuree(body?.minutesPerCycle, 'La durée du cycle');
+  const productionRecipeId = String(body?.productionRecipeId || '').trim() || null;
+  if (productionRecipeId) {
+    const production = await (await getProductionRecipesCollection()).findOne({ _id: productionRecipeId });
+    if (!production || production.enabled === false) {
+      throw new Error('La production associée est introuvable ou désactivée. Choisis une production disponible.');
+    }
+  }
   if (outputs.length && !requirements.length) {
     // Les activités peuvent produire sans consommable de cycle ; les besoins
     // quotidiens restent configurés séparément dans dailyUpkeep.
   }
-  return { ...base, purchaseCost, requirements, outputs, dailyUpkeep, minutesPerCycle };
+  return { ...base, purchaseCost, requirements, outputs, dailyUpkeep, minutesPerCycle, productionRecipeId };
 }
 
 app.get('/api/productions', async (req, res) => {
@@ -662,6 +669,12 @@ app.delete('/api/productions/:id', async (req, res) => {
     const item = await col.findOne({ _id: req.params.id });
     if (!item) return res.status(404).json({ error: 'Production introuvable.' });
     await col.deleteOne({ _id: req.params.id });
+    // Retire aussi l'association depuis les types de personnel ; un métier qui
+    // pointait vers une recette supprimée redevient un métier général.
+    await (await getPersonnelTypesCollection()).updateMany(
+      { productionRecipeId: req.params.id },
+      { $set: { productionRecipeId: null, updatedAt: new Date() } },
+    );
     logFromReq(req, 'production_supprimee', `A supprimé la production « ${item.name} ».`);
     res.json({ ok: true });
   } catch (err) {

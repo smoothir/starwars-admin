@@ -1540,13 +1540,16 @@ function productionCardHTML(recipe) {
 }
 
 function personnelTypeCardHTML(type) {
-  const hasAutomatedWork = Array.isArray(type.outputs) && type.outputs.length > 0;
+  const production = state.productions.find(item => String(item._id) === String(type.productionRecipeId || ''));
+  const affectation = production
+    ? `<strong>${escapeHtml(production.emoji || '🏭')} ${escapeHtml(production.name)}</strong><p class="personnel-role-general">Ce métier travaillera automatiquement sur cette production.</p>`
+    : '<strong>Aucune production automatique</strong><p class="personnel-role-general">Métier général : il peut être recruté sans lancer de cycle de production.</p>';
   const cols = `
     <div class="production-preview"><strong>🪙 Coût de recrutement</strong><ul>${type.purchaseCost?.length ? objetsProductionHTML(type.purchaseCost) : '<li>Gratuit</li>'}</ul></div>
     <div class="production-preview"><strong>🌙 Entretien quotidien à 00 h (Paris)</strong><ul>${objetsProductionHTML(type.dailyUpkeep)}</ul></div>
-    ${hasAutomatedWork ? `<div class="production-preview"><strong>🛠️ Activité automatique — ${escapeHtml(formaterDureeProduction(type.minutesPerCycle || 30))} par cycle</strong><ul><li><b>Consomme au cycle</b></li>${objetsProductionHTML(type.requirements)}<li><b>Produit au cycle</b></li>${objetsProductionHTML(type.outputs)}</ul></div>` : '<div class="production-preview"><strong>🧰 Activité</strong><p class="personnel-role-general">Rôle général : pas de production automatique configurée.</p></div>'}`;
+    <div class="production-preview"><strong>🏭 Production associée par le staff</strong>${affectation}</div>`;
   return `<article class="personnel-type-card" data-nom="${escapeAttr(`${type.name || ''} ${type.description || ''}`.toLowerCase())}">
-    <div class="production-card-head"><span class="production-icon">${escapeHtml(type.emoji || '👷')}</span><div class="production-card-title"><h3>${escapeHtml(type.name || 'Personnel')}</h3><p>${escapeHtml(type.description || 'Aucune description.')}</p></div>${hasAutomatedWork ? `<span class="production-time">⏱ ${escapeHtml(formaterDureeProduction(type.minutesPerCycle || 30))} / cycle</span>` : '<span class="production-time">Métier</span>'}</div>
+    <div class="production-card-head"><span class="production-icon">${escapeHtml(type.emoji || '👷')}</span><div class="production-card-title"><h3>${escapeHtml(type.name || 'Personnel')}</h3><p>${escapeHtml(type.description || 'Aucune description.')}</p></div><span class="production-time">${production ? `🏭 ${escapeHtml(production.name)}` : 'Métier général'}</span></div>
     <div class="production-columns production-columns-three">${cols}</div>
     <div class="production-actions"><button class="btn-secondaire" onclick="ouvrirEditeurPersonnelType('${jsAttr(type._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerPersonnelType('${jsAttr(type._id)}')">Supprimer</button></div>
   </article>`;
@@ -1564,8 +1567,8 @@ function renderProductionPage() {
 function renderPersonnelPage() {
   const types = state.personnelTypes.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
   document.getElementById('contenu').innerHTML = `
-    <div class="production-intro"><div class="production-intro-icon">👥</div><div><strong>Personnel & métiers</strong><p>Configure les métiers que les joueurs peuvent acheter : mineur, pilote, droïde, garde, technicien ou tout rôle personnalisé. Le coût d’achat et les consommables quotidiens sont séparés de l’activité facultative.</p></div></div>
-    <div class="production-section-heading"><div><h3>👷 Personnel achetable</h3><p>Chaque membre est assigné à un personnage et consomme ses fournitures chaque jour à minuit, heure de Paris.</p></div><button class="btn-principal" onclick="ouvrirEditeurPersonnelType(null)">＋ Nouveau type de personnel</button></div>
+    <div class="production-intro"><div class="production-intro-icon">👥</div><div><strong>Personnel & métiers</strong><p>Configure les métiers achetables : mineur, pilote, droïde, garde, technicien ou tout rôle personnalisé. Au recrutement, le joueur affecte ce personnel à une production créée dans l’onglet Production.</p></div></div>
+    <div class="production-section-heading"><div><h3>👷 Personnel achetable</h3><p>Chaque membre est affecté à un personnage et à une production (ex. Kessel). Les besoins par cycle et la durée proviennent de la production ; l’entretien du personnel est prélevé chaque jour à minuit, heure de Paris.</p></div><button class="btn-principal" onclick="ouvrirEditeurPersonnelType(null)">＋ Nouveau type de personnel</button></div>
     <div class="personnel-types-grid">${types.map(personnelTypeCardHTML).join('') || '<div class="etat-vide"><p>Aucun personnel configuré.</p><span class="etat-vide-sub">Crée un type de personnel pour le rendre achetable dans Discord.</span></div>'}</div>
     <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>`;
 }
@@ -1630,9 +1633,9 @@ function ouvrirEditeurPersonnelType(typeId) {
   document.getElementById('panneau-catalogue').classList.add('ouvert');
   document.getElementById('panneau-catalogue-titre').textContent = type ? `Modifier — ${type.name}` : 'Nouveau personnel';
   const purchaseCost = type?.purchaseCost || [];
-  const requirements = type?.requirements || [];
-  const outputs = type?.outputs || [];
   const dailyUpkeep = type?.dailyUpkeep?.length ? type.dailyUpkeep : [{ itemId: '', quantity: 1 }];
+  const productionOptions = state.productions.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr'))
+    .map(production => `<option value="${escapeAttr(production._id)}" ${String(type?.productionRecipeId || '') === String(production._id) ? 'selected' : ''}>${escapeHtml(`${production.emoji || '🏭'} ${production.name}`)}</option>`).join('');
   document.getElementById('panneau-catalogue-corps').innerHTML = `
     <div class="section-titre">${type ? '✏️ Modifier le personnel' : '➕ Créer un type de personnel'}</div>
     <div class="grille-champs"><div class="champ"><label for="f-personnel-name">Nom du personnel / métier</label><input id="f-personnel-name" type="text" maxlength="100" value="${escapeAttr(type?.name || '')}" placeholder="Ex. Mineur, Pilote, Droïde"></div><div class="champ"><label for="f-personnel-emoji">Emoji</label><input id="f-personnel-emoji" type="text" maxlength="8" value="${escapeAttr(type?.emoji || '👷')}"></div></div>
@@ -1641,10 +1644,9 @@ function ouvrirEditeurPersonnelType(typeId) {
     <div id="personnel-purchase-cost" class="production-item-list">${purchaseCost.map(row => ligneObjetProductionHTML('purchaseCost', row)).join('')}</div><button type="button" class="btn-secondaire production-add-row" onclick="ajouterLigneProduction('purchaseCost')">＋ Ajouter un objet au coût d’achat</button>
     <div class="section-titre">🌙 Entretien quotidien</div><p class="section-note">Ces objets sont consommés une fois par jour à 00 h, heure de Paris. S’ils manquent, le personnel est mis en pause jusqu’au ravitaillement.</p>
     <div id="personnel-daily-upkeep" class="production-item-list">${dailyUpkeep.map(row => ligneObjetProductionHTML('dailyUpkeep', row)).join('')}</div><button type="button" class="btn-secondaire production-add-row" onclick="ajouterLigneProduction('dailyUpkeep')">＋ Ajouter un consommable quotidien</button>
-    <div class="section-titre">🛠️ Activité automatique facultative</div><p class="section-note">Pour un mineur, par exemple, configure ici les ressources consommées pendant un cycle et les minerais qu’il fournit. Pour un rôle général (pilote, garde, droïde, etc.), laisse ces listes vides.</p>
-    <div class="champ"><label for="f-personnel-duration">Durée par cycle (minutes)</label><input id="f-personnel-duration" type="number" min="1" max="525600" step="1" value="${Math.max(1, Number(type?.minutesPerCycle) || 30)}"></div>
-    <div class="section-titre">📥 Objets consommés par cycle (facultatif)</div><div id="personnel-requirements" class="production-item-list">${requirements.map(row => ligneObjetProductionHTML('requirements', row)).join('')}</div><button type="button" class="btn-secondaire production-add-row" onclick="ajouterLigneProduction('requirements')">＋ Ajouter un objet consommé</button>
-    <div class="section-titre">📦 Objets produits par cycle (facultatif)</div><div id="personnel-outputs" class="production-item-list">${outputs.map(row => ligneObjetProductionHTML('outputs', row)).join('')}</div><button type="button" class="btn-secondaire production-add-row" onclick="ajouterLigneProduction('outputs')">＋ Ajouter un objet produit</button>
+    <div class="section-titre">🏭 Production associée (configurée par le staff)</div>
+    <div class="champ"><label for="f-personnel-production">Production sur laquelle ce métier travaille</label><select id="f-personnel-production"><option value="">Aucune — métier général sans production automatique</option>${productionOptions}</select></div>
+    <p class="section-note">Exemple : associe « Mineur » à « Kessel ». Tous les mineurs recrutés travailleront automatiquement sur Kessel, avec ses ingrédients, ses résultats et sa durée configurés dans l’onglet Production. Laisse « Aucune » pour un métier général sans production automatique.</p>
     <div class="actions-panneau"><button class="btn-principal" id="btn-enregistrer-personnel" onclick="sauvegarderPersonnelType()">${type ? 'Enregistrer les modifications' : 'Créer le personnel'}</button></div>`;
 }
 
@@ -1677,18 +1679,20 @@ async function sauvegarderPersonnelType() {
   const original = button.textContent;
   button.disabled = true; button.textContent = 'Enregistrement…';
   try {
+    const id = state.personnelTypeActuel;
+    const ancienneDefinition = state.personnelTypes.find(type => type._id === id);
     const payload = {
       name: val('f-personnel-name'), emoji: val('f-personnel-emoji'), description: val('f-personnel-description'),
       purchaseCost: collecterLignesProduction('personnel-purchase-cost'),
-      minutesPerCycle: Number(val('f-personnel-duration')) || 30,
-      requirements: collecterLignesProduction('personnel-requirements'),
-      outputs: collecterLignesProduction('personnel-outputs'),
       dailyUpkeep: collecterLignesProduction('personnel-daily-upkeep'),
+      productionRecipeId: val('f-personnel-production') || null,
+      // Conservé uniquement pour compatibilité avec les anciennes définitions.
+      requirements: ancienneDefinition?.requirements || [],
+      outputs: ancienneDefinition?.outputs || [],
+      minutesPerCycle: Number(ancienneDefinition?.minutesPerCycle) || 30,
     };
     if (!payload.name?.trim()) throw new Error('Le nom du personnel est obligatoire.');
     if (!payload.dailyUpkeep.length) throw new Error('Ajoute au moins un consommable quotidien.');
-    if (payload.outputs.length && !Number.isFinite(payload.minutesPerCycle)) throw new Error('La durée du cycle est invalide.');
-    const id = state.personnelTypeActuel;
     await fetchJSON(id ? `/api/personnel-types/${encodeURIComponent(id)}` : '/api/personnel-types', payload, id ? 'PATCH' : 'POST');
     toast(id ? 'Personnel modifié.' : 'Type de personnel créé.', 'succes');
     fermerCataloguePanel();
