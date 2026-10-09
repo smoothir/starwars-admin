@@ -66,7 +66,7 @@ async function listLogs(limit = 200) {
   return col.find({}).sort({ timestamp: -1 }).limit(limit).toArray();
 }
 
-const BACKUP_COLLECTIONS = ['profils', 'inv', 'item_catalog', 'avatars', 'avatars_config'];
+const BACKUP_COLLECTIONS = ['profils', 'inv', 'item_catalog', 'avatars', 'avatars_config', 'craft_recipes'];
 const MAX_BACKUPS = 20;
 const BACKUP_BATCH_SIZE = 100;
 
@@ -142,6 +142,9 @@ async function restoreBackup(snapshotId, actor = {}) {
 
   try {
     for (const collectionName of BACKUP_COLLECTIONS) {
+      // Les anciennes sauvegardes précèdent certaines collections (ex. craft_recipes).
+      // Si la collection n'était pas incluse dans le snapshot, on la préserve.
+      if (!Object.prototype.hasOwnProperty.call(meta.collections || {}, collectionName)) continue;
       const target = database.collection(collectionName);
       const dataDocs = await backupCol.find({ kind: 'data', snapshotId, collection: collectionName })
         .sort({ index: 1 })
@@ -171,6 +174,8 @@ async function restoreBackupWithoutSafety(snapshotId) {
   const database = await connect();
 
   for (const collectionName of BACKUP_COLLECTIONS) {
+    // Compatibilité avec les snapshots créés avant l'ajout d'une collection.
+    if (!Object.prototype.hasOwnProperty.call(meta.collections || {}, collectionName)) continue;
     const target = database.collection(collectionName);
     const dataDocs = await backupCol.find({ kind: 'data', snapshotId, collection: collectionName })
       .sort({ index: 1 })

@@ -35,6 +35,7 @@ const {
   setItemQuantity,
 } = require('../Data/invStore.js');
 const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup } = require('../Data/adminStore.js');
+const { getCraftRecipesCollection } = require('../Data/mongo.js');
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
@@ -428,6 +429,108 @@ app.get('/api/profils/:id/avatar', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).end();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// CRAFTS — recettes configurables depuis le site, partagées avec le bot.
+// ---------------------------------------------------------------------------
+function normaliserListeCraft(values, fieldName) {
+  if (!Array.isArray(values)) throw new Error(`${fieldName} doit être une liste d'objets.`);
+  const merged = new Map();
+  for (const entry of values) {
+    const itemId = String(entry?.itemId || '').trim();
+    const quantity = Math.floor(Number(entry?.quantity));
+    if (!itemId || !/^[A-Za-z0-9_-]+$/.test(itemId)) throw new Error(`Identifiant d'objet invalide dans « ${fieldName} ».`);
+    if (!Number.isFinite(quantity) || quantity < 1) throw new Error(`Chaque quantité de « ${fieldName} » doit être au moins égale à 1.`);
+    merged.set(itemId, (merged.get(itemId) || 0) + quantity);
+  }
+  return [...merged.entries()].map(([itemId, quantity]) => ({ itemId, quantity }));
+}
+
+async function normaliserRecetteCraft(body) {
+  const b = body || {};
+  const name = String(b.name || '').trim();
+  if (!name) throw new Error('Le nom de la recette est obligatoire.');
+  const requirements = normaliserListeCraft(b.requirements, 'Objets nécessaires');
+  const outputs = normaliserListeCraft(b.outputs, 'Objets produits');
+  if (!requirements.length) throw new Error('Ajoute au moins un ingrédient nécessaire.');
+  if (!outputs.length) throw new Error('Ajoute au moins un objet produit.');
+
+  const durationMinutes = Math.floor(Number(b.durationMinutes));
+  if (!Number.isFinite(durationMinutes) || durationMinutes < 1 || durationMinutes > 5256000) {
+    throw new Error('La durée doit être comprise entre 1 minute et 10 ans.');
+  }
+  const catalog = await getCatalog();
+  const known = new Set(catalog.map(item => String(item.id)));
+  for (const row of [...requirements, ...outputs]) {
+    if (!known.has(row.itemId)) throw new Error(`L'objet « ${row.itemId} » n'existe pas dans le catalogue.`);
+  }
+
+  return {
+    name: name.slice(0, 100),
+    emoji: String(b.emoji || '⚙️').trim().slice(0, 8) || '⚙️',
+    description: String(b.description || '').trim().slice(0, 1500),
+    requirements,
+    outputs,
+    durationMinutes,
+    enabled: b.enabled !== false,
+    updatedAt: new Date(),
+  };
+}
+
+app.get('/api/crafts', async (req, res) => {
+  try {
+    const col = await getCraftRecipesCollection();
+    const recipes = await col.find({}).sort({ name: 1 }).toArray();
+    res.json(recipes);
+  } catch (err) {
+    console.error('Chargement des crafts impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/crafts', async (req, res) => {
+  try {
+    const col = await getCraftRecipesCollection();
+    const recipe = await normaliserRecetteCraft(req.body);
+    const id = `craft_${crypto.randomBytes(10).toString('hex')}`;
+    const document = { _id: id, ...recipe, createdAt: new Date() };
+    await col.insertOne(document);
+    logFromReq(req, 'craft_cree', `A créé la recette de craft « ${document.name} ».`);
+    res.status(201).json(document);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/crafts/:id', async (req, res) => {
+  try {
+    const col = await getCraftRecipesCollection();
+    const recipe = await normaliserRecetteCraft(req.body);
+    const result = await col.findOneAndUpdate(
+      { _id: req.params.id },
+      { $set: recipe },
+      { returnDocument: 'after' },
+    );
+    if (!result) return res.status(404).json({ error: 'Recette introuvable.' });
+    logFromReq(req, 'craft_modifie', `A modifié la recette de craft « ${result.name} ».`);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/crafts/:id', async (req, res) => {
+  try {
+    const col = await getCraftRecipesCollection();
+    const recipe = await col.findOne({ _id: req.params.id });
+    if (!recipe) return res.status(404).json({ error: 'Recette introuvable.' });
+    await col.deleteOne({ _id: req.params.id });
+    logFromReq(req, 'craft_supprime', `A supprimé la recette de craft « ${recipe.name} ».`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

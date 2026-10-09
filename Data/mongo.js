@@ -19,6 +19,7 @@ const COLLECTION_ITEM_CATALOG = 'item_catalog';
 const COLLECTION_SITE_CONNEXIONS = 'site_connexions';
 const COLLECTION_SITE_LOGS = 'site_logs';
 const COLLECTION_SITE_BACKUPS = 'site_backups';
+const COLLECTION_CRAFT_RECIPES = 'craft_recipes';
 
 let client = null;
 let db = null;
@@ -238,6 +239,12 @@ async function getSiteBackupsCollection() {
   return database.collection(COLLECTION_SITE_BACKUPS);
 }
 
+/** Recettes de craft configurées depuis le site et consommées par le bot. */
+async function getCraftRecipesCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_CRAFT_RECIPES);
+}
+
 module.exports = {
   connect,
   getAvatarsCollection,
@@ -259,4 +266,5 @@ module.exports = {
   getSiteConnexionsCollection,
   getSiteLogsCollection,
   getSiteBackupsCollection,
+  getCraftRecipesCollection,
 };

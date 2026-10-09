@@ -1,6 +1,8 @@
 const state = {
   cache: { profils: [], inventaires: [] },
   catalogue: [],
+  crafts: [],
+  craftActuel: null,
   statuts: [],
   listes: { relationFactions: [], relationLevels: [], defaultStats: [], statMax: 10 },
   collectionActuelle: null,
@@ -135,6 +137,14 @@ async function chargerDonnees(collection) {
     document.getElementById('titre-section').textContent = "Catalogue d'objets";
     document.getElementById('sous-titre').textContent = 'Tous les objets du serveur, organisés par catégorie et rareté.';
     await chargerCataloguePage();
+  } else if (collection === 'crafts') {
+    searchWrap.hidden = false;
+    const rechercheInput = document.getElementById('recherche');
+    rechercheInput.value = '';
+    rechercheInput.placeholder = 'Rechercher une recette...';
+    document.getElementById('titre-section').textContent = 'Atelier & crafts';
+    document.getElementById('sous-titre').textContent = 'Configure les recettes disponibles dans le salon Discord Atelier.';
+    await chargerCraftsPage();
   } else if (collection === 'admin') {
     searchWrap.hidden = true;
     document.getElementById('titre-section').textContent = 'Admin';
@@ -313,6 +323,145 @@ function renderCataloguePage() {
   `;
 }
 
+// -----------------------------------------------------------------------
+// Recettes de craft — administration du panneau Atelier Discord.
+// -----------------------------------------------------------------------
+async function chargerCraftsPage() {
+  const contenuDiv = document.getElementById('contenu');
+  contenuDiv.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
+  try {
+    const [craftResponse, catalogueResponse] = await Promise.all([apiFetch('/api/crafts'), apiFetch('/api/inventaire/catalogue')]);
+    if (!craftResponse.ok) throw new Error(`HTTP ${craftResponse.status}`);
+    if (!catalogueResponse.ok) throw new Error(`HTTP ${catalogueResponse.status}`);
+    state.crafts = await craftResponse.json();
+    state.crafts = Array.isArray(state.crafts) ? state.crafts : [];
+    state.catalogue = catalogueValide(await catalogueResponse.json());
+    majCompteur('crafts', state.crafts.length);
+    renderCraftsPage();
+    setStatutConnexion(true);
+  } catch (error) {
+    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de chargement des crafts</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    setStatutConnexion(false);
+    console.error('Erreur crafts:', error);
+  }
+}
+
+function dureeCraftTexte(value) {
+  let minutes = Math.max(0, Math.floor(Number(value) || 0));
+  const jours = Math.floor(minutes / 1440); minutes %= 1440;
+  const heures = Math.floor(minutes / 60); minutes %= 60;
+  const parts = [];
+  if (jours) parts.push(`${jours} j`);
+  if (heures) parts.push(`${heures} h`);
+  if (minutes || !parts.length) parts.push(`${minutes} min`);
+  return parts.join(' ');
+}
+
+function craftObjetsTexte(rows) {
+  return (Array.isArray(rows) ? rows : []).map(row => {
+    const item = state.catalogue.find(it => it.id === row.itemId);
+    return `<li>${escapeHtml(item?.emoji || '📦')} ${escapeHtml(item?.name || row.itemId)} <span>×${Number(row.quantity) || 1}</span></li>`;
+  }).join('');
+}
+
+function renderCraftsPage() {
+  const cards = state.crafts.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr')).map(craftCardHTML).join('');
+  document.getElementById('contenu').innerHTML = `
+    <div class="crafts-intro"><div class="crafts-intro-icon">🛠️</div><div><strong>Atelier de fabrication</strong><p>Configure les ingrédients, les objets produits et la durée réelle de chaque recette. Les joueurs utilisent ensuite le panneau dans le salon Discord Atelier.</p></div><button class="btn-principal" onclick="ouvrirEditeurCraft(null)">＋ Nouvelle recette</button></div>
+    <div class="crafts-grid">${cards || '<div class="etat-vide"><div class="etat-vide-icone">⚙️</div><p>Aucune recette configurée.</p><span class="etat-vide-sub">Crée une recette pour la publier dans le salon Atelier.</span></div>'}</div>
+    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucune recette ne correspond à cette recherche.</div>`;
+}
+
+function craftCardHTML(recipe) {
+  const name = recipe.name || 'Recette sans nom';
+  return `<article class="craft-card" data-nom="${escapeAttr(`${name} ${recipe.description || ''}`.toLowerCase())}">
+    <div class="craft-card-head"><span class="craft-icon">${escapeHtml(recipe.emoji || '⚙️')}</span><div class="craft-card-title"><h3>${escapeHtml(name)}</h3><p>${escapeHtml(recipe.description || 'Aucune description.')}</p></div><span class="craft-duration">⏱ ${escapeHtml(dureeCraftTexte(recipe.durationMinutes))}</span></div>
+    <div class="craft-columns"><div class="craft-items-preview"><strong>📥 Ingrédients nécessaires</strong><ul>${craftObjetsTexte(recipe.requirements) || '<li>—</li>'}</ul></div><div class="craft-items-preview craft-output-preview"><strong>📦 Objets produits</strong><ul>${craftObjetsTexte(recipe.outputs) || '<li>—</li>'}</ul></div></div>
+    <div class="craft-card-actions"><button class="btn-secondaire" onclick="ouvrirEditeurCraft('${jsAttr(recipe._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerCraft('${jsAttr(recipe._id)}')">Supprimer</button></div></article>`;
+}
+
+function optionsCatalogueCraft(selectedId) {
+  return '<option value="">Choisir un objet…</option>' + state.catalogue.map(item =>
+    `<option value="${escapeAttr(item.id)}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name} — ${item.id}`)}</option>`
+  ).join('');
+}
+
+function ligneObjetCraftHTML(kind, row = {}) {
+  return `<div class="craft-item-row" data-kind="${kind}"><select class="craft-item-select" aria-label="Objet">${optionsCatalogueCraft(row.itemId || '')}</select><input class="craft-item-quantity" type="number" min="1" step="1" value="${Math.max(1, Number(row.quantity) || 1)}" aria-label="Quantité"><button type="button" class="btn-secondaire btn-danger" onclick="supprimerLigneCraft(this)" title="Retirer cet objet">✕</button></div>`;
+}
+
+function ouvrirEditeurCraft(recipeId) {
+  const recipe = recipeId ? state.crafts.find(item => item._id === recipeId) : null;
+  if (recipeId && !recipe) { toast('Recette introuvable.', 'erreur'); return; }
+  state.craftActuel = recipe?._id || null;
+  document.getElementById('overlay-catalogue').classList.add('visible');
+  document.getElementById('panneau-catalogue').classList.add('ouvert');
+  document.getElementById('panneau-catalogue-titre').textContent = recipe ? `Modifier — ${recipe.name}` : 'Nouvelle recette de craft';
+  const duration = Math.max(1, Number(recipe?.durationMinutes) || 60);
+  const requirements = recipe?.requirements?.length ? recipe.requirements : [{ itemId: '', quantity: 1 }];
+  const outputs = recipe?.outputs?.length ? recipe.outputs : [{ itemId: '', quantity: 1 }];
+  document.getElementById('panneau-catalogue-corps').innerHTML = `
+    <div class="section-titre">${recipe ? '✏️ Modifier la recette' : '➕ Créer une recette'}</div>
+    <div class="grille-champs"><div class="champ"><label for="f-craft-name">Nom de la recette</label><input id="f-craft-name" type="text" maxlength="100" value="${escapeAttr(recipe?.name || '')}" placeholder="Ex. Fabriquer un blaster"></div><div class="champ"><label for="f-craft-emoji">Emoji</label><input id="f-craft-emoji" type="text" maxlength="8" value="${escapeAttr(recipe?.emoji || '⚙️')}"></div></div>
+    <div class="champ"><label for="f-craft-description">Description</label><textarea id="f-craft-description" maxlength="1500" placeholder="Décris le résultat ou le processus.">${escapeHtml(recipe?.description || '')}</textarea></div>
+    <div class="section-titre">⏱️ Durée de fabrication réelle</div><p class="section-note">Le compte à rebours utilise le temps réel. Les horaires et la notification utilisent l'heure de France métropolitaine, y compris aux changements d'heure.</p>
+    <div class="grille-champs craft-duration-fields"><div class="champ"><label for="f-craft-hours">Heures</label><input id="f-craft-hours" type="number" min="0" max="87600" step="1" value="${Math.floor(duration / 60)}"></div><div class="champ"><label for="f-craft-minutes">Minutes</label><input id="f-craft-minutes" type="number" min="0" max="59" step="1" value="${duration % 60}"></div></div>
+    <div class="section-titre">📥 Objets nécessaires</div><p class="section-note">Les ingrédients sont retirés de l'inventaire au démarrage. Ajoute autant de lignes que nécessaire.</p>
+    <div id="craft-requirements" class="craft-item-list">${requirements.map(row => ligneObjetCraftHTML('requirements', row)).join('')}</div><button type="button" class="btn-secondaire craft-add-row" onclick="ajouterLigneCraft('requirements')">＋ Ajouter un ingrédient</button>
+    <div class="section-titre">📦 Objets donnés à la fin</div><p class="section-note">Tous les objets produits seront ajoutés à l'inventaire du personnage lorsque le délai sera écoulé.</p>
+    <div id="craft-outputs" class="craft-item-list">${outputs.map(row => ligneObjetCraftHTML('outputs', row)).join('')}</div><button type="button" class="btn-secondaire craft-add-row" onclick="ajouterLigneCraft('outputs')">＋ Ajouter un objet produit</button>
+    <div class="actions-panneau"><button class="btn-principal" id="btn-enregistrer-craft" onclick="sauvegarderCraft()">${recipe ? 'Enregistrer les modifications' : 'Créer la recette'}</button></div>`;
+}
+
+function ajouterLigneCraft(kind) {
+  if (!['requirements', 'outputs'].includes(kind)) return;
+  const target = document.getElementById(kind === 'requirements' ? 'craft-requirements' : 'craft-outputs');
+  target?.insertAdjacentHTML('beforeend', ligneObjetCraftHTML(kind, { itemId: '', quantity: 1 }));
+}
+
+function supprimerLigneCraft(button) { button.closest('.craft-item-row')?.remove(); }
+
+function collecterObjetsCraft(containerId) {
+  return Array.from(document.querySelectorAll(`#${containerId} .craft-item-row`)).map(row => ({
+    itemId: row.querySelector('.craft-item-select')?.value || '',
+    quantity: Number(row.querySelector('.craft-item-quantity')?.value) || 0,
+  })).filter(row => row.itemId && row.quantity > 0);
+}
+
+async function sauvegarderCraft() {
+  const button = document.getElementById('btn-enregistrer-craft');
+  if (!button) return;
+  const originalText = button.textContent;
+  button.disabled = true; button.textContent = 'Enregistrement…';
+  try {
+    const durationMinutes = (Number(val('f-craft-hours')) || 0) * 60 + (Number(val('f-craft-minutes')) || 0);
+    const payload = { name: val('f-craft-name'), emoji: val('f-craft-emoji'), description: val('f-craft-description'), durationMinutes, requirements: collecterObjetsCraft('craft-requirements'), outputs: collecterObjetsCraft('craft-outputs') };
+    if (!payload.name?.trim()) throw new Error('Le nom de la recette est obligatoire.');
+    if (durationMinutes < 1) throw new Error('La durée minimale est de 1 minute.');
+    if (!payload.requirements.length) throw new Error('Ajoute au moins un ingrédient nécessaire.');
+    if (!payload.outputs.length) throw new Error('Ajoute au moins un objet produit.');
+    const id = state.craftActuel;
+    await fetchJSON(id ? `/api/crafts/${encodeURIComponent(id)}` : '/api/crafts', payload, id ? 'PATCH' : 'POST');
+    toast(id ? 'Recette modifiée.' : 'Recette créée.', 'succes');
+    fermerCataloguePanel();
+    await chargerCraftsPage();
+  } catch (error) {
+    toast(`Échec de la sauvegarde : ${error.message}`, 'erreur');
+    console.error(error);
+  } finally { button.disabled = false; button.textContent = originalText; }
+}
+
+async function supprimerCraft(recipeId) {
+  const recipe = state.crafts.find(item => item._id === recipeId);
+  const ok = await confirmerAction({ titre: 'Supprimer la recette', message: `Supprimer « ${recipe?.name || recipeId} » ? Les crafts déjà lancés continueront jusqu'à la fin.`, texteValider: 'Supprimer' });
+  if (!ok) return;
+  try {
+    await fetchJSON(`/api/crafts/${encodeURIComponent(recipeId)}`, null, 'DELETE');
+    toast('Recette supprimée.', 'succes');
+    await chargerCraftsPage();
+  } catch (error) { toast(`Échec de la suppression : ${error.message}`, 'erreur'); }
+}
+
 function slugTexte(value) {
   return String(value || '')
     .toLowerCase()
@@ -325,6 +474,7 @@ function slugTexte(value) {
 function fermerCataloguePanel() {
   document.getElementById('overlay-catalogue').classList.remove('visible');
   document.getElementById('panneau-catalogue').classList.remove('ouvert');
+  state.craftActuel = null;
 }
 
 async function rafraichirCataloguePanel() {
@@ -419,6 +569,12 @@ function filtrerListe() {
       const itemsVisibles = section.querySelectorAll('.catalogue-item:not(.masquee)').length;
       section.classList.toggle('masquee', itemsVisibles === 0);
     });
+  } else if (state.collectionActuelle === 'crafts') {
+    document.querySelectorAll('.craft-card').forEach(card => {
+      const correspond = !q || (card.dataset.nom || '').includes(q);
+      card.classList.toggle('masquee', !correspond);
+      if (correspond) visibles += 1;
+    });
   } else {
     document.querySelectorAll('.contenu .ligne').forEach(l => {
       const correspond = !q || (l.dataset.nom || '').includes(q);
@@ -504,6 +660,9 @@ const LOG_ICONES = {
   inventaire_retrait: '📤',
   backup_created: '💾',
   backup_restored: '↩️',
+  craft_cree: '🛠️',
+  craft_modifie: '✏️',
+  craft_supprime: '🗑️',
 };
 
 function logLigneHTML(entry) {
@@ -756,7 +915,7 @@ function panneauCatalogueItem(item) {
   return `
     <div class="section-titre">${isNew ? '➕ Nouvel objet' : "✏️ Modifier l'objet"}</div>
     <div class="grille-champs">
-            <div class="champ"><label for="f-item-id">Identifiant (ID)</label><input type="text" id="f-item-id" value="${escapeAttr(item?.id || '')}" placeholder="ex. casque_rare" pattern="[A-Za-z0-9_-]+"></div>
+      <div class="champ"><label for="f-item-id">Identifiant (ID)</label><input type="text" id="f-item-id" value="${escapeAttr(item?.id || '')}" placeholder="ex. casque_rare" pattern="[A-Za-z0-9_-]+"><p class="section-note">L'ID permet d'avoir plusieurs objets avec le même nom. Exemple : casque_commun, casque_rare, casque_epique.</p></div>
       <div class="champ"><label for="f-item-name">Nom</label><input type="text" id="f-item-name" value="${escapeAttr(item?.name || '')}"></div>
       <div class="champ"><label for="f-item-emoji">Emoji</label><input type="text" id="f-item-emoji" value="${escapeAttr(item?.emoji || '')}" maxlength="4"></div>
       <div class="champ"><label for="f-item-category">Catégorie</label><input type="text" id="f-item-category" value="${escapeAttr(item?.category || '')}" placeholder="Arme, Équipement, Ressource..."></div>
@@ -771,6 +930,7 @@ function panneauCatalogueItem(item) {
         <div class="image-objet-actions">
           <input type="file" id="f-item-image" accept="image/png,image/jpeg,image/webp,image/gif" onchange="choisirImageObjet(this)">
           <button type="button" class="btn-secondaire" id="btn-retirer-image" onclick="retirerImageObjet()" ${imageUtilisable(item?.image) ? '' : 'hidden'}>Retirer l'image</button>
+          <p class="section-note">Réduite automatiquement (256 px max). Sans image, l'emoji est utilisé.</p>
         </div>
       </div>
     </div>
