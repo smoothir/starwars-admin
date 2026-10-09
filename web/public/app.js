@@ -1,6 +1,7 @@
 const state = {
   cache: { profils: [], inventaires: [] },
   catalogue: [],
+  catalogueCategorieActive: 'Tout',
   crafts: [],
   craftActuel: null,
   statuts: [],
@@ -274,6 +275,7 @@ async function chargerCataloguePage() {
 function renderCataloguePage() {
   const contenuDiv = document.getElementById('contenu');
   const categories = new Map();
+  const ordreRarete = { epique: 0, rare: 1, 'peu-commun': 2, commun: 3 };
 
   state.catalogue.forEach(item => {
     const categorie = String(item.category || 'Divers').trim() || 'Divers';
@@ -281,46 +283,70 @@ function renderCataloguePage() {
     categories.get(categorie).push(item);
   });
 
-  const blocs = [...categories.entries()]
-    .sort(([a], [b]) => a.localeCompare(b, 'fr'))
-    .map(([categorie, items], index) => {
-      items.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-      const id = `catalogue-categorie-${slugTexte(categorie)}-${index}`;
-      return `
-        <section class="catalogue-categorie" id="${escapeAttr(id)}">
-          <div class="catalogue-categorie-header">
-            <div>
-              <span class="catalogue-categorie-eyebrow">Catégorie</span>
-              <h3>${escapeHtml(categorie)}</h3>
-            </div>
-            <span class="catalogue-categorie-count">${items.length} objet${items.length > 1 ? 's' : ''}</span>
-          </div>
-          <div class="catalogue-grille">
-            ${items.map(catalogueItemHTML).join('')}
-          </div>
-        </section>`;
-    }).join('');
+  if (state.catalogueCategorieActive !== 'Tout' && !categories.has(state.catalogueCategorieActive)) {
+    state.catalogueCategorieActive = 'Tout';
+  }
 
-  const navigationCategories = [...categories.keys()]
-    .sort((a, b) => a.localeCompare(b, 'fr'))
-    .map((categorie, index) => `<a class="catalogue-categorie-chip" href="#catalogue-categorie-${slugTexte(categorie)}-${index}">${escapeHtml(categorie)}</a>`)
-    .join('');
+  const comparerObjets = (a, b) => {
+    const rangA = ordreRarete[slugTexte(a.rarity || 'Commun')] ?? 99;
+    const rangB = ordreRarete[slugTexte(b.rarity || 'Commun')] ?? 99;
+    return rangA - rangB || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+  };
+
+  const categoriesTriees = [...categories.entries()].sort(([a], [b]) => a.localeCompare(b, 'fr'));
+  const blocs = categoriesTriees.map(([categorie, items]) => {
+    items.sort(comparerObjets);
+    const id = `catalogue-categorie-${slugTexte(categorie)}`;
+    return `
+      <section class="catalogue-categorie" data-categorie="${escapeAttr(categorie)}" id="${escapeAttr(id)}">
+        <div class="catalogue-categorie-header">
+          <div>
+            <span class="catalogue-categorie-eyebrow">Catégorie</span>
+            <h3>${escapeHtml(categorie)}</h3>
+          </div>
+          <span class="catalogue-categorie-count">${items.length} objet${items.length > 1 ? 's' : ''}</span>
+        </div>
+        <div class="catalogue-grille">
+          ${items.map(catalogueItemHTML).join('')}
+        </div>
+      </section>`;
+  }).join('');
+
+  const navigationCategories = [
+    `<button type="button" class="catalogue-categorie-chip${state.catalogueCategorieActive === 'Tout' ? ' active' : ''}" data-categorie="__TOUT__" aria-pressed="${state.catalogueCategorieActive === 'Tout'}">Tout</button>`,
+    ...categoriesTriees.map(([categorie]) => `<button type="button" class="catalogue-categorie-chip${state.catalogueCategorieActive === categorie ? ' active' : ''}" data-categorie="${escapeAttr(categorie)}" aria-pressed="${state.catalogueCategorieActive === categorie}">${escapeHtml(categorie)}</button>`),
+  ].join('');
 
   contenuDiv.innerHTML = `
     <div class="catalogue-actions-bar">
-      <div>
+      <div class="catalogue-actions-summary">
         <strong>📦 Catalogue complet</strong>
         <span>${state.catalogue.length} objet${state.catalogue.length > 1 ? 's' : ''} dans ${categories.size} catégorie${categories.size > 1 ? 's' : ''}</span>
       </div>
       <div class="catalogue-actions">
-        <button class="btn-principal" onclick="ouvrirEditeurCatalogue(null)">＋ Ajouter un objet</button>
-        <button class="btn-secondaire btn-danger" onclick="supprimerTousLesObjets()" ${state.catalogue.length ? '' : 'disabled'}>🗑️ Tout supprimer</button>
+        <button type="button" class="btn-principal" onclick="ouvrirEditeurCatalogue(null)">＋ Ajouter un objet</button>
+        <button type="button" class="btn-secondaire btn-danger" onclick="supprimerTousLesObjets()" ${state.catalogue.length ? '' : 'disabled'}>🗑️ Tout supprimer</button>
       </div>
     </div>
-    ${navigationCategories ? `<div class="catalogue-categories-nav">${navigationCategories}</div>` : ''}
+    <div class="catalogue-categories-nav" aria-label="Filtrer par catégorie">${navigationCategories}</div>
     ${blocs || '<div class="etat-vide"><div class="etat-vide-icone">📦</div><p>Catalogue vide.</p><span class="etat-vide-sub">Ajoute ton premier objet avec le bouton ci-dessus.</span></div>'}
-    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun objet ne correspond à cette recherche.</div>
+    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun objet ne correspond à cette recherche ou catégorie.</div>
   `;
+
+  contenuDiv.querySelectorAll('.catalogue-categorie-chip').forEach(button => {
+    button.addEventListener('click', () => selectionnerCategorieCatalogue(button.dataset.categorie === '__TOUT__' ? 'Tout' : button.dataset.categorie));
+  });
+  filtrerListe();
+}
+
+function selectionnerCategorieCatalogue(categorie) {
+  state.catalogueCategorieActive = categorie || 'Tout';
+  document.querySelectorAll('.catalogue-categorie-chip').forEach(button => {
+    const active = button.dataset.categorie === (state.catalogueCategorieActive === 'Tout' ? '__TOUT__' : state.catalogueCategorieActive);
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  filtrerListe();
 }
 
 // -----------------------------------------------------------------------
@@ -561,13 +587,17 @@ function filtrerListe() {
 
   if (state.collectionActuelle === 'catalogue') {
     document.querySelectorAll('.catalogue-item').forEach(item => {
-      const correspond = !q || (item.dataset.nom || '').includes(q);
+      const section = item.closest('.catalogue-categorie');
+      const bonneCategorie = state.catalogueCategorieActive === 'Tout' || section?.dataset.categorie === state.catalogueCategorieActive;
+      const correspondRecherche = !q || (item.dataset.nom || '').includes(q);
+      const correspond = bonneCategorie && correspondRecherche;
       item.classList.toggle('masquee', !correspond);
       if (correspond) visibles += 1;
     });
     document.querySelectorAll('.catalogue-categorie').forEach(section => {
       const itemsVisibles = section.querySelectorAll('.catalogue-item:not(.masquee)').length;
-      section.classList.toggle('masquee', itemsVisibles === 0);
+      const bonneCategorie = state.catalogueCategorieActive === 'Tout' || section.dataset.categorie === state.catalogueCategorieActive;
+      section.classList.toggle('masquee', !bonneCategorie || itemsVisibles === 0);
     });
   } else if (state.collectionActuelle === 'crafts') {
     document.querySelectorAll('.craft-card').forEach(card => {
