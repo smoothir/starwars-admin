@@ -369,7 +369,7 @@ function renderCataloguePage() {
       </div>
     </div>
     <div class="catalogue-categories-nav" aria-label="Filtrer par catégorie">${navigationCategories}</div>
-    ${blocs || '<div class="etat-vide"><div class="etat-vide-icone">📦</div><p>Catalogue vide.</p><span class="etat-vide-sub">Ajoute ton premier objet avec le bouton ci-dessus.</span></div>'}
+    <div id="catalogue-categories-contenu"></div>
     <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun objet ne correspond à cette recherche ou catégorie.</div>
   `;
 
