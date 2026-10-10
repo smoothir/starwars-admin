@@ -30,10 +30,42 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-deconnexion').addEventListener('click', deconnexion);
+  initialiserMenuLateral();
 
   afficherErreurAuthEventuelle();
   verifierSessionExistante();
 });
+
+
+// Navigation latérale repliable (préférence conservée sur cet appareil).
+function initialiserMenuLateral() {
+  const shell = document.getElementById('app-shell');
+  const bouton = document.getElementById('btn-sidebar-toggle');
+  const nav = document.getElementById('sidebar-nav');
+  if (!shell || !bouton || !nav) return;
+
+  let saved = null;
+  try { saved = localStorage.getItem('starwars-admin-sidebar-collapsed'); } catch { /* stockage indisponible */ }
+  const mobile = window.matchMedia('(max-width: 760px)').matches;
+
+  const appliquer = (replie) => {
+    shell.classList.toggle('sidebar-collapsed', replie);
+    bouton.setAttribute('aria-expanded', String(!replie));
+    bouton.setAttribute('aria-label', replie ? 'Agrandir le menu' : 'Réduire le menu');
+    bouton.title = replie ? 'Agrandir le menu' : 'Réduire le menu';
+    try { localStorage.setItem('starwars-admin-sidebar-collapsed', replie ? '1' : '0'); } catch { /* stockage indisponible */ }
+  };
+
+  appliquer(saved === null ? mobile : saved === '1');
+  bouton.addEventListener('click', () => {
+    appliquer(!shell.classList.contains('sidebar-collapsed'));
+  });
+
+  nav.querySelectorAll('.nav-btn').forEach((btn) => {
+    const label = btn.querySelector('.nav-label')?.textContent?.trim();
+    if (label) btn.title = label;
+  });
+}
 
 // Si on revient d'un /auth/discord/callback qui a échoué (pas membre, pas le
 // rôle Staff, requête expirée...), le serveur nous redirige vers "/?auth_error=...".

@@ -45,39 +45,54 @@
           <button class="topbar-side btn-deconnexion" id="btn-deconnexion" title="Se déconnecter">Déconnexion</button>
         </div>
       </div>
+</header>
 
-      <nav class="topbar-nav">
+<aside id="sidebar-nav" class="sidebar-nav" aria-label="Navigation principale">
+      <div class="sidebar-nav-head">
+        <span class="sidebar-title">Pages</span>
+        <button type="button" class="sidebar-toggle" id="btn-sidebar-toggle" aria-label="Réduire le menu" aria-expanded="true" title="Réduire ou agrandir le menu">
+          <img src="/iconpages.png" alt="">
+        </button>
+      </div>
+      <nav class="topbar-nav" aria-label="Pages du site">
         <button class="nav-btn" data-collection="profils" onclick="chargerDonnees('profils')">
+          <span class="nav-icon" aria-hidden="true">👤</span>
           <span class="nav-label">Profils RP</span>
           <span class="nav-count" id="count-profils"></span>
         </button>
         <button class="nav-btn" data-collection="inventaire" onclick="chargerDonnees('inventaire')">
+          <span class="nav-icon" aria-hidden="true">🎒</span>
           <span class="nav-label">Inventaire</span>
           <span class="nav-count" id="count-inventaire"></span>
         </button>
         <button class="nav-btn" data-collection="catalogue" onclick="chargerDonnees('catalogue')">
-          <span class="nav-label">📦 Catalogue</span>
+          <span class="nav-icon" aria-hidden="true">📦</span>
+          <span class="nav-label">Catalogue</span>
           <span class="nav-count" id="count-catalogue"></span>
         </button>
         <button class="nav-btn" data-collection="crafts" onclick="chargerDonnees('crafts')">
-          <span class="nav-label">🛠️ Crafts</span>
+          <span class="nav-icon" aria-hidden="true">🛠️</span>
+          <span class="nav-label">Crafts</span>
           <span class="nav-count" id="count-crafts"></span>
         </button>
         <button class="nav-btn" data-collection="production" onclick="chargerDonnees('production')">
-          <span class="nav-label">🏭 Production</span>
+          <span class="nav-icon" aria-hidden="true">🏭</span>
+          <span class="nav-label">Production</span>
           <span class="nav-count" id="count-production"></span>
         </button>
         <button class="nav-btn" data-collection="personnel" onclick="chargerDonnees('personnel')">
-          <span class="nav-label">👥 Personnel</span>
+          <span class="nav-icon" aria-hidden="true">👥</span>
+          <span class="nav-label">Personnel</span>
           <span class="nav-count" id="count-personnel"></span>
         </button>
         <button class="nav-btn" data-collection="admin" onclick="chargerDonnees('admin')" id="nav-admin" hidden>
-          <span class="nav-label">🛡️ Admin</span>
+          <span class="nav-icon" aria-hidden="true">🛡️</span>
+          <span class="nav-label">Admin</span>
         </button>
       </nav>
-    </header>
+    </aside>
 
-    <main class="main-area">
+        <main class="main-area">
       <div class="ambient-glow"></div>
 
       <header class="main-header">

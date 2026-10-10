@@ -115,6 +115,13 @@ if (itemImageDir) {
 } else {
   console.warn('⚠️ Aucun dossier image trouvé. Définis ITEM_IMAGE_DIR ou BOT_IMAGE_DIR si nécessaire.');
 }
+// Icone du bouton de navigation : le fichier est placé à la racine de web/.
+app.get('/iconpages.png', (req, res) => {
+  const iconPath = path.join(__dirname, 'iconpages.png');
+  if (!fs.existsSync(iconPath)) return res.sendStatus(404);
+  return res.sendFile(iconPath);
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Qui est connecte (utilise par le site au chargement pour savoir si une
