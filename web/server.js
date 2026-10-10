@@ -27,6 +27,9 @@ const {
   EQUIPMENT_SLOT_LABELS,
   ITEM_RARITIES,
   getCatalog,
+  getCatalogMetadata,
+  getCatalogImageData,
+  getInventory,
   addCatalogItem,
   updateCatalogItem,
   removeCatalogItem,
@@ -37,7 +40,7 @@ const {
   setItemQuantity,
 } = require('../Data/invStore.js');
 const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup } = require('../Data/adminStore.js');
-const { getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection } = require('../Data/mongo.js');
+const { getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection } = require('../Data/mongo.js');
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
@@ -744,6 +747,32 @@ app.delete('/api/personnel-types/:id', async (req, res) => {
 // INVENTAIRE catalogue d'objets + inventaires par personnage
 // ---------------------------------------------------------------------------
 
+// Métadonnées du catalogue pour les pages de listes : les images base64 sont
+// servies à part afin d'éviter de transférer plusieurs mégaoctets à chaque page.
+app.get('/api/inventaire/catalogue/meta', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await getCatalogMetadata());
+  } catch (err) {
+    console.error('Chargement des métadonnées du catalogue impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/inventaire/catalogue/:itemId/image', async (req, res) => {
+  try {
+    const image = await getCatalogImageData(req.params.itemId);
+    if (!image) return res.sendStatus(404);
+    res.set('Content-Type', image.contentType);
+    res.set('Cache-Control', 'private, max-age=60');
+    res.set('X-Content-Type-Options', 'nosniff');
+    return res.send(image.data);
+  } catch (err) {
+    console.error('Chargement de l’image du catalogue impossible :', err);
+    return res.sendStatus(500);
+  }
+});
+
 app.get('/api/inventaire/catalogue', async (req, res) => {
   try {
     res.json(await getCatalog());
@@ -807,6 +836,34 @@ app.get('/api/inventaire', async (req, res) => {
     res.json(await listAllInventories());
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// La page Inventaire n'a besoin que du total par personnage. L'agrégation
+// évite d'envoyer chaque item de chaque inventaire au navigateur d'un coup.
+app.get('/api/inventaire/resumes', async (req, res) => {
+  try {
+    const col = await getInvCollection();
+    const summaries = await col.aggregate([
+      { $project: { _id: 1, entries: { $objectToArray: { $ifNull: ['$items', {}] } } } },
+      { $project: { _id: 1, total: { $sum: '$entries.v' } } },
+    ]).toArray();
+    res.set('Cache-Control', 'no-store');
+    res.json(summaries);
+  } catch (err) {
+    console.error('Chargement des résumés d’inventaire impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/inventaire/:profileId', async (req, res) => {
+  try {
+    const inventory = await getInventory(req.params.profileId);
+    res.set('Cache-Control', 'no-store');
+    res.json(inventory);
+  } catch (err) {
+    console.error('Chargement d’un inventaire impossible :', err);
     res.status(500).json({ error: err.message });
   }
 });

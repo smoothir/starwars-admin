@@ -177,48 +177,113 @@ function toItem(doc) {
  * Retourne le catalogue (trié par catégorie puis nom). Amorçage et migration
  * identiques à ceux du bot (une seule fois à vie, marqueurs dédiés).
  */
+let catalogInitializationPromise = null;
+
+async function ensureCatalogInitialized(col) {
+  if (catalogInitializationPromise) return catalogInitializationPromise;
+  catalogInitializationPromise = (async () => {
+    const dejaAmorce = await col.findOne({ _id: SEED_MARKER_ID }, { projection: { _id: 1 } });
+    if (!dejaAmorce) {
+      if (DEFAULT_CATALOG.length > 0) {
+        const operations = DEFAULT_CATALOG.map(it => ({
+          updateOne: { filter: { _id: it.id }, update: { $setOnInsert: { ...it, _id: it.id } }, upsert: true },
+        }));
+        await col.bulkWrite(operations, { ordered: false });
+      }
+      await col.updateOne({ _id: SEED_MARKER_ID }, { $setOnInsert: { seededAt: new Date() } }, { upsert: true });
+    }
+
+    const dejaMigre = await col.findOne({ _id: MIGRATION_MARKER_ID }, { projection: { _id: 1 } });
+    if (!dejaMigre) {
+      const migration = DEFAULT_CATALOG.map(it => ({
+        updateOne: {
+          filter: { _id: it.id, usable: { $exists: false } },
+          update: { $set: { slot: it.slot, image: it.image, usable: it.usable } },
+        },
+      }));
+      if (migration.length > 0) await col.bulkWrite(migration, { ordered: false });
+      await col.updateOne({ _id: MIGRATION_MARKER_ID }, { $setOnInsert: { migratedAt: new Date() } }, { upsert: true });
+    }
+
+    const dejaMigreRarete = await col.findOne({ _id: RARITY_MIGRATION_MARKER_ID }, { projection: { _id: 1 } });
+    if (!dejaMigreRarete) {
+      await col.updateMany(
+        { _id: { $not: RESERVED_ID }, rarity: { $exists: false } },
+        { $set: { rarity: 'Commun' } },
+      );
+      await col.updateOne(
+        { _id: RARITY_MIGRATION_MARKER_ID },
+        { $setOnInsert: { migratedAt: new Date() } },
+        { upsert: true },
+      );
+    }
+  })().catch(error => {
+    catalogInitializationPromise = null;
+    throw error;
+  });
+  return catalogInitializationPromise;
+}
+
 async function getCatalog() {
   const col = await getItemCatalogCollection();
-  const dejaAmorce = await col.findOne({ _id: SEED_MARKER_ID });
-  if (!dejaAmorce) {
-    if (DEFAULT_CATALOG.length > 0) {
-      const operations = DEFAULT_CATALOG.map(it => ({
-        updateOne: { filter: { _id: it.id }, update: { $setOnInsert: { ...it, _id: it.id } }, upsert: true },
-      }));
-      await col.bulkWrite(operations, { ordered: false });
-    }
-    await col.updateOne({ _id: SEED_MARKER_ID }, { $setOnInsert: { seededAt: new Date() } }, { upsert: true });
-  }
-
-  const dejaMigre = await col.findOne({ _id: MIGRATION_MARKER_ID });
-  if (!dejaMigre) {
-    const migration = DEFAULT_CATALOG.map(it => ({
-      updateOne: {
-        filter: { _id: it.id, usable: { $exists: false } },
-        update: { $set: { slot: it.slot, image: it.image, usable: it.usable } },
-      },
-    }));
-    if (migration.length > 0) await col.bulkWrite(migration, { ordered: false });
-    await col.updateOne({ _id: MIGRATION_MARKER_ID }, { $setOnInsert: { migratedAt: new Date() } }, { upsert: true });
-  }
-
-  const dejaMigreRarete = await col.findOne({ _id: RARITY_MIGRATION_MARKER_ID });
-  if (!dejaMigreRarete) {
-    await col.updateMany(
-      { _id: { $not: RESERVED_ID }, rarity: { $exists: false } },
-      { $set: { rarity: 'Commun' } },
-    );
-    await col.updateOne(
-      { _id: RARITY_MIGRATION_MARKER_ID },
-      { $setOnInsert: { migratedAt: new Date() } },
-      { upsert: true },
-    );
-  }
-
+  await ensureCatalogInitialized(col);
   const docs = (await col.find({ _id: { $not: RESERVED_ID } }).toArray()).filter(d => !isReservedId(d._id));
   return docs
     .map(toItem)
     .sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name));
+}
+
+/**
+ * Version légère du catalogue destinée aux listes du site.
+ * Les images base64 ne sont jamais renvoyées dans le JSON : elles deviennent
+ * une URL chargée séparément par le navigateur au moment où l'image apparaît.
+ */
+async function getCatalogMetadata() {
+  const col = await getItemCatalogCollection();
+  await ensureCatalogInitialized(col);
+  const embeddedImage = {
+    $regexMatch: {
+      input: { $convert: { input: '$image', to: 'string', onError: '', onNull: '' } },
+      regex: '^data:image/(png|jpeg|webp|gif);base64,',
+    },
+  };
+  const docs = await col.aggregate([
+    { $match: { _id: { $not: RESERVED_ID } } },
+    { $project: {
+      _id: 1,
+      name: 1,
+      emoji: 1,
+      category: 1,
+      rarity: 1,
+      description: 1,
+      useAction: 1,
+      slot: 1,
+      usable: 1,
+      statBonus: 1,
+      image: {
+        $cond: [
+          embeddedImage,
+          { $concat: ['/api/inventaire/catalogue/', { $toString: '$_id' }, '/image'] },
+          '$image',
+        ],
+      },
+    } },
+  ]).toArray();
+  return docs
+    .filter(doc => !isReservedId(doc._id))
+    .map(toItem)
+    .sort((a, b) => (a.category || '').localeCompare(b.category || '') || String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
+}
+
+/** Données binaires d'une image intégrée en base, sans charger tout le catalogue. */
+async function getCatalogImageData(itemId) {
+  if (!itemId || isReservedId(itemId)) return null;
+  const col = await getItemCatalogCollection();
+  const doc = await col.findOne({ _id: String(itemId) }, { projection: { image: 1 } });
+  if (!doc || typeof doc.image !== 'string') return null;
+  const match = doc.image.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return null;
+  return { contentType: match[1], data: Buffer.from(match[2], 'base64') };
 }
 
 async function getItem(itemId) {
@@ -429,6 +494,8 @@ module.exports = {
   ITEM_RARITIES,
   normalizeUseAction,
   getCatalog,
+  getCatalogMetadata,
+  getCatalogImageData,
   getItem,
   addCatalogItem,
   updateCatalogItem,

@@ -3,6 +3,7 @@ const state = {
   isFounder: false,
   catalogue: [],
   catalogueCategorieActive: 'Tout',
+  catalogueCategories: [],
   crafts: [],
   craftActuel: null,
   productions: [],
@@ -266,8 +267,8 @@ async function chargerInventairePage() {
 
   try {
     const [catalogue, inventaires, profils] = await Promise.all([
-      apiFetch('/api/inventaire/catalogue').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
-      apiFetch('/api/inventaire').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      apiFetch('/api/inventaire/catalogue/meta').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      apiFetch('/api/inventaire/resumes').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
       state.cache.profils.length ? Promise.resolve(state.cache.profils) : apiFetch('/api/profils').then(r => r.json()),
     ]);
     state.catalogue = catalogueValide(catalogue);
@@ -285,7 +286,7 @@ async function chargerInventairePage() {
 
 function renderInventairePage() {
   const quantiteParProfil = new Map(
-    (state.cache.inventaires || []).map(inv => [inv._id, Object.values(inv.items || {}).reduce((a, b) => a + b, 0)])
+    (state.cache.inventaires || []).map(inv => [inv._id, Number.isFinite(Number(inv.total)) ? Number(inv.total) : Object.values(inv.items || {}).reduce((a, b) => a + b, 0)])
   );
 
   document.getElementById('contenu').innerHTML = `
@@ -311,7 +312,7 @@ async function chargerCataloguePage() {
   contenuDiv.innerHTML = Array.from({ length: 4 }).map(() => '<div class="squelette"></div>').join('');
 
   try {
-    const catalogue = await apiFetch('/api/inventaire/catalogue').then(r => {
+    const catalogue = await apiFetch('/api/inventaire/catalogue/meta').then(r => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     });
@@ -348,23 +349,8 @@ function renderCataloguePage() {
   };
 
   const categoriesTriees = [...categories.entries()].sort(([a], [b]) => a.localeCompare(b, 'fr'));
-  const blocs = categoriesTriees.map(([categorie, items]) => {
-    items.sort(comparerObjets);
-    const id = `catalogue-categorie-${slugTexte(categorie)}`;
-    return `
-      <section class="catalogue-categorie" data-categorie="${escapeAttr(categorie)}" id="${escapeAttr(id)}">
-        <div class="catalogue-categorie-header">
-          <div>
-            <span class="catalogue-categorie-eyebrow">Catégorie</span>
-            <h3>${escapeHtml(categorie)}</h3>
-          </div>
-          <span class="catalogue-categorie-count">${items.length} objet${items.length > 1 ? 's' : ''}</span>
-        </div>
-        <div class="catalogue-grille">
-          ${items.map(catalogueItemHTML).join('')}
-        </div>
-      </section>`;
-  }).join('');
+  categoriesTriees.forEach(([, items]) => items.sort(comparerObjets));
+  state.catalogueCategories = categoriesTriees;
 
   const navigationCategories = [
     `<button type="button" class="catalogue-categorie-chip${state.catalogueCategorieActive === 'Tout' ? ' active' : ''}" data-categorie="__TOUT__" aria-pressed="${state.catalogueCategorieActive === 'Tout'}">Tout</button>`,
@@ -390,7 +376,34 @@ function renderCataloguePage() {
   contenuDiv.querySelectorAll('.catalogue-categorie-chip').forEach(button => {
     button.addEventListener('click', () => selectionnerCategorieCatalogue(button.dataset.categorie === '__TOUT__' ? 'Tout' : button.dataset.categorie));
   });
+  renderCatalogueCategoriesContent();
   filtrerListe();
+}
+
+function renderCatalogueCategoriesContent() {
+  const target = document.getElementById('catalogue-categories-contenu');
+  if (!target) return;
+  const categories = state.catalogueCategories || [];
+  const aAfficher = state.catalogueCategorieActive === 'Tout'
+    ? categories
+    : categories.filter(([categorie]) => categorie === state.catalogueCategorieActive);
+  if (!aAfficher.length) {
+    target.innerHTML = '<div class="etat-vide"><div class="etat-vide-icone">📦</div><p>Aucun objet dans cette catégorie.</p></div>';
+    return;
+  }
+  target.innerHTML = aAfficher.map(([categorie, items]) => {
+    const id = `catalogue-categorie-${slugTexte(categorie)}`;
+    return `
+      <section class="catalogue-categorie" data-categorie="${escapeAttr(categorie)}" id="${escapeAttr(id)}">
+        <div class="catalogue-categorie-header">
+          <div><span class="catalogue-categorie-eyebrow">Catégorie</span><h3>${escapeHtml(categorie)}</h3></div>
+          <span class="catalogue-categorie-count">${items.length} objet${items.length > 1 ? 's' : ''}</span>
+        </div>
+        <div class="catalogue-grille">${items.map(catalogueItemHTML).join('')}</div>
+      </section>`;
+  }).join('');
+  initScrollReveal(target);
+  initMagneticButtons(target);
 }
 
 function selectionnerCategorieCatalogue(categorie) {
@@ -400,6 +413,7 @@ function selectionnerCategorieCatalogue(categorie) {
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   });
+  renderCatalogueCategoriesContent();
   filtrerListe();
 }
 
@@ -410,7 +424,7 @@ async function chargerCraftsPage() {
   const contenuDiv = document.getElementById('contenu');
   contenuDiv.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
   try {
-    const [craftResponse, catalogueResponse] = await Promise.all([apiFetch('/api/crafts'), apiFetch('/api/inventaire/catalogue')]);
+    const [craftResponse, catalogueResponse] = await Promise.all([apiFetch('/api/crafts'), apiFetch('/api/inventaire/catalogue/meta')]);
     if (!craftResponse.ok) throw new Error(`HTTP ${craftResponse.status}`);
     if (!catalogueResponse.ok) throw new Error(`HTTP ${catalogueResponse.status}`);
     state.crafts = await craftResponse.json();
@@ -561,8 +575,8 @@ function fermerCataloguePanel() {
 
 async function rafraichirCataloguePanel() {
   const [catalogue, inventaires] = await Promise.all([
-    apiFetch('/api/inventaire/catalogue').then(r => r.json()),
-    apiFetch('/api/inventaire').then(r => r.json()),
+    apiFetch('/api/inventaire/catalogue/meta').then(r => r.json()),
+    apiFetch('/api/inventaire/resumes').then(r => r.json()),
   ]);
   state.catalogue = catalogueValide(catalogue);
   state.cache.inventaires = inventaires;
@@ -584,6 +598,7 @@ function normaliserImageNavigateur(image) {
   if (typeof image !== 'string' || !image.trim()) return null;
   const value = image.trim();
   if (/^https?:\/\//i.test(value) || /^data:image\//i.test(value)) return value;
+  if (/^\/api\/inventaire\/catalogue\/[A-Za-z0-9_-]+\/image$/i.test(value)) return value;
   if (/^\/?image\//i.test(value)) return `/${encodeURI(value.replace(/^\/+/, ''))}`;
   return null;
 }
@@ -595,7 +610,7 @@ function imageUtilisable(image) {
 function itemVisuelHTML(item) {
   const imageSrc = normaliserImageNavigateur(item?.image);
   if (imageSrc) {
-    return `<span class="item-emoji"><img class="item-img" src="${escapeAttr(imageSrc)}" alt=""></span>`;
+    return `<span class="item-emoji"><img class="item-img" src="${escapeAttr(imageSrc)}" alt="" loading="lazy" decoding="async"></span>`;
   }
   return `<span class="item-emoji">${item?.emoji || '❔'}</span>`;
 }
@@ -1322,18 +1337,32 @@ async function supprimerTousLesObjets() {
 // -----------------------------------------------------------------------
 // Panneau d'édition - inventaire d'un personnage
 // -----------------------------------------------------------------------
-function ouvrirInventairePersonnage(profileId) {
+async function ouvrirInventairePersonnage(profileId) {
   const profile = state.cache.profils.find(p => p._id === profileId);
   if (!profile) return;
-  const inventoryDoc = (state.cache.inventaires || []).find(inv => inv._id === profileId);
 
   state.itemActuel = { type: 'inventaire', id: profileId };
   document.getElementById('panneau-eyebrow').textContent = 'Inventaire';
   document.getElementById('panneau-titre').textContent = profile.nomPrenom || profile._id;
-  document.getElementById('panneau-corps').innerHTML = panneauInventairePersonnage(profile, inventoryDoc);
-
+  document.getElementById('panneau-corps').innerHTML = '<div class="squelette"></div><div class="squelette"></div>';
   document.getElementById('overlay').classList.add('visible');
   document.getElementById('panneau-edition').classList.add('ouvert');
+
+  try {
+    const response = await apiFetch(`/api/inventaire/${encodeURIComponent(profileId)}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const inventoryDoc = await response.json();
+    if (state.itemActuel?.type !== 'inventaire' || state.itemActuel.id !== profileId) return;
+    const current = state.cache.inventaires || [];
+    const summary = current.find(inv => inv._id === profileId);
+    state.cache.inventaires = [
+      ...current.filter(inv => inv._id !== profileId),
+      { ...inventoryDoc, total: summary?.total ?? Object.values(inventoryDoc.items || {}).reduce((a, b) => a + b, 0) },
+    ];
+    document.getElementById('panneau-corps').innerHTML = panneauInventairePersonnage(profile, inventoryDoc);
+  } catch (error) {
+    document.getElementById('panneau-corps').innerHTML = `<div class="etat-vide"><p>Impossible de charger cet inventaire.</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+  }
 }
 
 function panneauInventairePersonnage(profile, inventoryDoc) {
@@ -1370,7 +1399,7 @@ function panneauInventairePersonnage(profile, inventoryDoc) {
 }
 
 async function rafraichirInventairePersonnage(profileId) {
-  const inventaires = await apiFetch('/api/inventaire').then(r => r.json());
+  const inventaires = await apiFetch('/api/inventaire/resumes').then(r => r.json());
   state.cache.inventaires = inventaires;
   majBadgeQuantitePersonnage(profileId);
   ouvrirInventairePersonnage(profileId);
@@ -1382,7 +1411,7 @@ function majBadgeQuantitePersonnage(profileId) {
   const ligne = document.querySelector(`.ligne-personnage[data-id="${cssAttrEscape(profileId)}"]`);
   if (!ligne) return;
   const inv = (state.cache.inventaires || []).find(i => i._id === profileId);
-  const total = inv ? Object.values(inv.items || {}).reduce((a, b) => a + b, 0) : 0;
+  const total = inv ? (Number.isFinite(Number(inv.total)) ? Number(inv.total) : Object.values(inv.items || {}).reduce((a, b) => a + b, 0)) : 0;
   const badge = ligne.querySelector('.badge');
   if (badge) badge.textContent = `${total} objet${total > 1 ? 's' : ''}`;
 }
@@ -1520,7 +1549,7 @@ async function chargerDefinitionsProduction(section) {
     const [productionResponse, personnelResponse, catalogueResponse] = await Promise.all([
       apiFetch('/api/productions'),
       apiFetch('/api/personnel-types'),
-      apiFetch('/api/inventaire/catalogue'),
+      apiFetch('/api/inventaire/catalogue/meta'),
     ]);
     for (const response of [productionResponse, personnelResponse, catalogueResponse]) {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
