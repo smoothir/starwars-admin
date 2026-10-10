@@ -1718,3 +1718,145 @@ html { font-size: 14px; }
   .search-wrap { width: 100%; }
   .search-wrap input, .search-wrap input:focus { width: 100%; max-width: 100%; }
 }
+
+/* =====================================================================
+   Production & Personnel — cartes homogènes avec les autres sections
+   ===================================================================== */
+.production-intro {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 17px 19px;
+  margin-bottom: 22px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+.production-intro-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: #050505;
+  font-size: 1.45rem;
+}
+.production-intro > div:last-child { min-width: 0; }
+.production-intro strong { display: block; color: #fff; font-size: .92rem; }
+.production-intro p { margin: 5px 0 0; color: var(--text-secondary); font-size: .74rem; line-height: 1.5; }
+.production-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 0 15px;
+}
+.production-section-heading > div { min-width: 0; }
+.production-section-heading h3 { color: #fff; font-size: .96rem; }
+.production-section-heading p { margin: 5px 0 0; color: var(--text-secondary); font-size: .72rem; line-height: 1.45; }
+.production-section-heading > .btn-principal { flex: 0 0 auto; padding: 11px 15px; font-size: .73rem; }
+.production-grid,
+.personnel-types-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 14px;
+}
+.production-card,
+.personnel-type-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.production-card:hover,
+.personnel-type-card:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-soft);
+  transform: translateY(-2px);
+}
+.production-card[data-nom].masquee,
+.personnel-type-card[data-nom].masquee { display: none; }
+.production-card-head { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
+.production-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: #050505;
+  font-size: 1.28rem;
+}
+.production-card-title { flex: 1; min-width: 0; }
+.production-card-title h3 { color: #fff; font-size: .88rem; line-height: 1.4; overflow-wrap: anywhere; }
+.production-card-title p { margin: 5px 0 0; color: var(--text-secondary); font-size: .71rem; line-height: 1.45; overflow-wrap: anywhere; }
+.production-time {
+  flex: 0 0 auto;
+  max-width: 44%;
+  padding: 5px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-size: .64rem;
+  line-height: 1.3;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.production-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 9px;
+  margin-top: 15px;
+}
+.production-columns-three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.production-preview {
+  min-width: 0;
+  padding: 10px 11px;
+  background: rgba(255,255,255,.025);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.production-preview > strong { display: block; color: var(--text-secondary); font-size: .63rem; line-height: 1.45; text-transform: uppercase; letter-spacing: .04em; }
+.production-preview ul { display: flex; flex-direction: column; gap: 6px; list-style: none; padding: 0; margin: 9px 0 0; }
+.production-preview li { display: flex; align-items: flex-start; gap: 6px; color: var(--text-primary); font-size: .7rem; line-height: 1.4; overflow-wrap: anywhere; }
+.production-preview li span { margin-left: auto; color: var(--text-secondary); font-weight: 700; white-space: nowrap; }
+.production-preview p { margin: 6px 0 0; color: var(--text-secondary); font-size: .69rem; line-height: 1.45; }
+.production-preview .personnel-role-general { margin-bottom: 0; }
+.production-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; padding-top: 15px; }
+.production-actions .btn-secondaire { min-height: 34px; padding: 0 12px; font-size: .7rem; }
+.production-item-list { display: flex; flex-direction: column; gap: 8px; }
+.production-item-row { display: grid; grid-template-columns: minmax(0, 1fr) 82px 40px; align-items: center; gap: 8px; }
+.production-item-row select,
+.production-item-row input { width: 100%; min-width: 0; padding: 9px 10px; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font: inherit; font-size: .77rem; }
+.production-item-row .btn-secondaire { min-height: 36px; padding: 0; }
+.production-add-row { width: 100%; min-height: 38px; margin-top: 8px; border-style: dashed; }
+#panneau-catalogue:has(#production-requirements),
+#panneau-catalogue:has(#personnel-purchase-cost) { width: min(780px, 96vw); }
+#panneau-catalogue:has(#production-requirements) .panneau-corps,
+#panneau-catalogue:has(#personnel-purchase-cost) .panneau-corps { padding-bottom: 48px; }
+@media (max-width: 1050px) {
+  .production-grid, .personnel-types-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .production-intro { align-items: flex-start; }
+  .production-section-heading { align-items: stretch; flex-direction: column; }
+  .production-section-heading > .btn-principal { width: 100%; }
+  .production-columns, .production-columns-three { grid-template-columns: 1fr; }
+  .production-card-head { flex-wrap: wrap; }
+  .production-time { max-width: 100%; margin-left: auto; }
+  .production-item-row { grid-template-columns: minmax(0, 1fr) 64px 36px; gap: 5px; }
+  .production-item-row select, .production-item-row input { padding: 9px 6px; font-size: .72rem; }
+  .production-actions .btn-secondaire { flex: 1; }
+}

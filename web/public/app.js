@@ -1,5 +1,6 @@
 const state = {
   cache: { profils: [], inventaires: [] },
+  isFounder: false,
   catalogue: [],
   catalogueCategorieActive: 'Tout',
   crafts: [],
@@ -94,6 +95,7 @@ async function verifierSessionExistante() {
 }
 
 function afficherUtilisateurConnecte(me) {
+  state.isFounder = me?.isFounder === true;
   const badge = document.getElementById('topbar-user');
   if (!me.username) { badge.hidden = true; return; }
   document.getElementById('user-nom').textContent = me.username;
@@ -377,7 +379,7 @@ function renderCataloguePage() {
       </div>
       <div class="catalogue-actions">
         <button type="button" class="btn-principal" onclick="ouvrirEditeurCatalogue(null)">＋ Ajouter un objet</button>
-        <button type="button" class="btn-secondaire btn-danger" onclick="supprimerTousLesObjets()" ${state.catalogue.length ? '' : 'disabled'}>🗑️ Tout supprimer</button>
+        ${state.isFounder ? `<button type="button" class="btn-secondaire btn-danger" onclick="supprimerTousLesObjets()" ${state.catalogue.length ? '' : 'disabled'}>🗑️ Tout supprimer</button>` : ''}
       </div>
     </div>
     <div class="catalogue-categories-nav" aria-label="Filtrer par catégorie">${navigationCategories}</div>

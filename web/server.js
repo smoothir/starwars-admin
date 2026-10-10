@@ -19,6 +19,7 @@ const {
   STAT_MAX,
 } = require('../Data/profileStore.js');
 const config = require('../Data/config.js');
+const FOUNDER_DISCORD_ID = '391515665271357441';
 const { getFactions, findGradeByRoleId } = require('../Data/factionHelper.js');
 const { findAvatar, upsertAvatarImage } = require('../Data/avatarStore.js');
 const {
@@ -137,6 +138,7 @@ app.get('/api/me', (req, res) => {
       via: 'discord',
       ...req.session.user,
       isSuperAdmin: req.session.user.id === config.SUPER_ADMIN_ID,
+      isFounder: req.session.user.id === FOUNDER_DISCORD_ID,
     });
   }
   res.json({ authenticated: false });
@@ -775,6 +777,9 @@ app.patch('/api/inventaire/catalogue/:itemId', async (req, res) => {
 });
 
 app.delete('/api/inventaire/catalogue', async (req, res) => {
+  if (req.session.user?.id !== FOUNDER_DISCORD_ID) {
+    return res.status(403).json({ error: 'Action réservée au fondateur.' });
+  }
   try {
     const nb = await clearCatalog();
     logFromReq(req, 'catalogue_vide', `A vidé tout le catalogue (${nb} objet${nb > 1 ? 's' : ''} supprimé${nb > 1 ? 's' : ''}).`);
