@@ -402,8 +402,7 @@ function renderCatalogueCategoriesContent() {
         <div class="catalogue-grille">${items.map(catalogueItemHTML).join('')}</div>
       </section>`;
   }).join('');
-  initScrollReveal(target);
-  initMagneticButtons(target);
+  // Les utilitaires d’animation ont été retirés lors de l’optimisation du chargement.
 }
 
 function selectionnerCategorieCatalogue(categorie) {
