@@ -106,7 +106,7 @@ function afficherUtilisateurConnecte(me) {
 }
 
 // -----------------------------------------------------------------------
-// Écran de connexion — Discord uniquement (rôle Staff vérifié côté serveur)
+// Écran de connexion - Discord uniquement (rôle Staff vérifié côté serveur)
 // -----------------------------------------------------------------------
 function deconnexion() {
   fetch('/auth/logout', { method: 'POST' })
@@ -203,7 +203,7 @@ async function chargerDonnees(collection) {
   } else if (collection === 'admin') {
     searchWrap.hidden = true;
     document.getElementById('titre-section').textContent = 'Admin';
-    document.getElementById('sous-titre').textContent = 'Connexions et journal des actions — visible par le créateur uniquement.';
+    document.getElementById('sous-titre').textContent = 'Connexions et journal des actions - visible par le créateur uniquement.';
     await chargerAdminPage();
   }
 }
@@ -404,7 +404,7 @@ function selectionnerCategorieCatalogue(categorie) {
 }
 
 // -----------------------------------------------------------------------
-// Recettes de craft — administration du panneau Atelier Discord.
+// Recettes de craft - administration du panneau Atelier Discord.
 // -----------------------------------------------------------------------
 async function chargerCraftsPage() {
   const contenuDiv = document.getElementById('contenu');
@@ -456,13 +456,13 @@ function craftCardHTML(recipe) {
   const name = recipe.name || 'Recette sans nom';
   return `<article class="craft-card" data-nom="${escapeAttr(`${name} ${recipe.description || ''}`.toLowerCase())}">
     <div class="craft-card-head"><span class="craft-icon">${escapeHtml(recipe.emoji || '⚙️')}</span><div class="craft-card-title"><h3>${escapeHtml(name)}</h3><p>${escapeHtml(recipe.description || 'Aucune description.')}</p></div><span class="craft-duration">⏱ ${escapeHtml(dureeCraftTexte(recipe.durationMinutes))}</span></div>
-    <div class="craft-columns"><div class="craft-items-preview"><strong>📥 Ingrédients nécessaires</strong><ul>${craftObjetsTexte(recipe.requirements) || '<li>—</li>'}</ul></div><div class="craft-items-preview craft-output-preview"><strong>📦 Objets produits</strong><ul>${craftObjetsTexte(recipe.outputs) || '<li>—</li>'}</ul></div></div>
+    <div class="craft-columns"><div class="craft-items-preview"><strong>📥 Ingrédients nécessaires</strong><ul>${craftObjetsTexte(recipe.requirements) || '<li>-</li>'}</ul></div><div class="craft-items-preview craft-output-preview"><strong>📦 Objets produits</strong><ul>${craftObjetsTexte(recipe.outputs) || '<li>-</li>'}</ul></div></div>
     <div class="craft-card-actions"><button class="btn-secondaire" onclick="ouvrirEditeurCraft('${jsAttr(recipe._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerCraft('${jsAttr(recipe._id)}')">Supprimer</button></div></article>`;
 }
 
 function optionsCatalogueCraft(selectedId) {
   return '<option value="">Choisir un objet…</option>' + state.catalogue.map(item =>
-    `<option value="${escapeAttr(item.id)}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name} — ${item.id}`)}</option>`
+    `<option value="${escapeAttr(item.id)}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name} - ${item.id}`)}</option>`
   ).join('');
 }
 
@@ -476,7 +476,7 @@ function ouvrirEditeurCraft(recipeId) {
   state.craftActuel = recipe?._id || null;
   document.getElementById('overlay-catalogue').classList.add('visible');
   document.getElementById('panneau-catalogue').classList.add('ouvert');
-  document.getElementById('panneau-catalogue-titre').textContent = recipe ? `Modifier — ${recipe.name}` : 'Nouvelle recette de craft';
+  document.getElementById('panneau-catalogue-titre').textContent = recipe ? `Modifier - ${recipe.name}` : 'Nouvelle recette de craft';
   const duration = Math.max(1, Number(recipe?.durationMinutes) || 60);
   const requirements = recipe?.requirements?.length ? recipe.requirements : [{ itemId: '', quantity: 1 }];
   const outputs = recipe?.outputs?.length ? recipe.outputs : [{ itemId: '', quantity: 1 }];
@@ -847,9 +847,9 @@ async function restaurerBackup(backupId) {
 }
 
 function formatDateLog(value) {
-  if (!value) return '—';
+  if (!value) return '-';
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
+  if (Number.isNaN(d.getTime())) return '-';
   return d.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
@@ -1501,7 +1501,7 @@ async function fetchJSON(url, body, method = 'PATCH') {
 }
 
 // -----------------------------------------------------------------------
-// Production & personnel automatique — administrés depuis le site.
+// Production & personnel automatique - administrés depuis le site.
 // La durée de chaque production et de chaque métier est configurable ; les
 // besoins et les sorties sont multipliés par la quantité lancée côté bot.
 // -----------------------------------------------------------------------
@@ -1557,7 +1557,7 @@ function formaterDureeProduction(minutesValue) {
 
 function objetsProductionHTML(rows) {
   const values = Array.isArray(rows) ? rows : [];
-  if (!values.length) return '<li>—</li>';
+  if (!values.length) return '<li>-</li>';
   return values.map(row => {
     const item = state.catalogue.find(entry => entry.id === row.itemId);
     return `<li>${escapeHtml(item?.emoji || '📦')} ${escapeHtml(item?.name || row.itemId)} <span>×${Number(row.quantity) || 1}</span></li>`;
@@ -1609,7 +1609,7 @@ function renderPersonnelPage() {
 
 function optionsCatalogueProduction(selectedId) {
   return '<option value="">Choisir un objet…</option>' + state.catalogue.map(item =>
-    `<option value="${escapeAttr(item.id)}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name} — ${item.id}`)}</option>`
+    `<option value="${escapeAttr(item.id)}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name} - ${item.id}`)}</option>`
   ).join('');
 }
 
@@ -1645,7 +1645,7 @@ function ouvrirEditeurProduction(recipeId) {
   state.personnelTypeActuel = null;
   document.getElementById('overlay-catalogue').classList.add('visible');
   document.getElementById('panneau-catalogue').classList.add('ouvert');
-  document.getElementById('panneau-catalogue-titre').textContent = recipe ? `Modifier — ${recipe.name}` : 'Nouvelle production';
+  document.getElementById('panneau-catalogue-titre').textContent = recipe ? `Modifier - ${recipe.name}` : 'Nouvelle production';
   const requirements = recipe?.requirements?.length ? recipe.requirements : [{ itemId: '', quantity: 1 }];
   const outputs = recipe?.outputs?.length ? recipe.outputs : [{ itemId: '', quantity: 1 }];
   document.getElementById('panneau-catalogue-corps').innerHTML = `
@@ -1665,7 +1665,7 @@ function ouvrirEditeurPersonnelType(typeId) {
   state.personnelTypeActuel = type?._id || null;
   document.getElementById('overlay-catalogue').classList.add('visible');
   document.getElementById('panneau-catalogue').classList.add('ouvert');
-  document.getElementById('panneau-catalogue-titre').textContent = type ? `Modifier — ${type.name}` : 'Nouveau personnel';
+  document.getElementById('panneau-catalogue-titre').textContent = type ? `Modifier - ${type.name}` : 'Nouveau personnel';
   const purchaseCost = type?.purchaseCost || [];
   const dailyUpkeep = type?.dailyUpkeep?.length ? type.dailyUpkeep : [{ itemId: '', quantity: 1 }];
   const productionOptions = state.productions.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr'))
@@ -1679,7 +1679,7 @@ function ouvrirEditeurPersonnelType(typeId) {
     <div class="section-titre">🌙 Entretien quotidien</div><p class="section-note">Ces objets sont consommés une fois par jour à 00 h, heure de Paris. S’ils manquent, le personnel est mis en pause jusqu’au ravitaillement.</p>
     <div id="personnel-daily-upkeep" class="production-item-list">${dailyUpkeep.map(row => ligneObjetProductionHTML('dailyUpkeep', row)).join('')}</div><button type="button" class="btn-secondaire production-add-row" onclick="ajouterLigneProduction('dailyUpkeep')">＋ Ajouter un consommable quotidien</button>
     <div class="section-titre">🏭 Production associée (configurée par le staff)</div>
-    <div class="champ"><label for="f-personnel-production">Production sur laquelle ce métier travaille</label><select id="f-personnel-production"><option value="">Aucune — métier général sans production automatique</option>${productionOptions}</select></div>
+    <div class="champ"><label for="f-personnel-production">Production sur laquelle ce métier travaille</label><select id="f-personnel-production"><option value="">Aucune - métier général sans production automatique</option>${productionOptions}</select></div>
     <p class="section-note">Exemple : associe « Mineur » à « Kessel ». Tous les mineurs recrutés travailleront automatiquement sur Kessel, avec ses ingrédients, ses résultats et sa durée configurés dans l’onglet Production. Laisse « Aucune » pour un métier général sans production automatique.</p>
     <div class="actions-panneau"><button class="btn-principal" id="btn-enregistrer-personnel" onclick="sauvegarderPersonnelType()">${type ? 'Enregistrer les modifications' : 'Créer le personnel'}</button></div>`;
 }
@@ -1755,7 +1755,7 @@ async function supprimerPersonnelType(id) {
 // Confirmation (remplace window.confirm par une modale du même style que le
 // reste du site). confirmerAction() retourne une Promise<boolean> : true si
 // la personne a cliqué "Valider", false sinon (Annuler, croix, clic dehors,
-// touche Échap) — s'utilise avec await, comme confirm() mais async.
+// touche Échap) - s'utilise avec await, comme confirm() mais async.
 // -----------------------------------------------------------------------
 let _resoudreConfirmEnCours = null;
 
