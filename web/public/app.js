@@ -1057,7 +1057,7 @@ function panneauCatalogueItem(item) {
   return `
     <div class="section-titre">${isNew ? '➕ Nouvel objet' : "✏️ Modifier l'objet"}</div>
     <div class="grille-champs">
-      <div class="champ"><label for="f-item-id">Identifiant (ID)</label><input type="text" id="f-item-id" value="${escapeAttr(item?.id || '')}" placeholder="ex. casque_rare" pattern="[A-Za-z0-9_-]+"><p class="section-note">L'ID permet d'avoir plusieurs objets avec le même nom. Exemple : casque_commun, casque_rare, casque_epique.</p></div>
+      <div class="champ"><label for="f-item-id">Identifiant (ID)</label><input type="text" id="f-item-id" value="${escapeAttr(item?.id || '')}" placeholder="ex. casque_rare" pattern="[A-Za-z0-9_-]+"></div>
       <div class="champ"><label for="f-item-name">Nom</label><input type="text" id="f-item-name" value="${escapeAttr(item?.name || '')}"></div>
       <div class="champ"><label for="f-item-emoji">Emoji</label><input type="text" id="f-item-emoji" value="${escapeAttr(item?.emoji || '')}" maxlength="4"></div>
       <div class="champ"><label for="f-item-category">Catégorie</label><input type="text" id="f-item-category" value="${escapeAttr(item?.category || '')}" placeholder="Arme, Équipement, Ressource..."></div>
@@ -1897,10 +1897,9 @@ function boutiqueCardHTML(entry) {
   const blocAchat = `<div class="production-preview"><strong>🛒 Prix d'achat (joueur)</strong><ul><li>${fourchetteBoutique(entry.minPrice, entry.maxPrice)}</li></ul></div>`;
   const blocVente = `<div class="production-preview"><strong>💰 Prix de vente (rachat par le marchand)</strong><ul><li>${fourchetteBoutique(entry.rachatMinPrice, entry.rachatMaxPrice)}</li></ul></div>`;
   const prix = type === 'achetable' ? blocAchat : type === 'vendable' ? blocVente : blocAchat + blocVente;
-  const notePrix = type === 'mixte' ? '<p class="section-note">Ancien format (achat + rachat) : enregistre l\'objet pour le passer en achetable ou vendable.</p>' : '';
   return `<article class="production-card boutique-card${masque ? ' boutique-masque' : ''}" data-nom="${escapeAttr(`${nom} ${entry.id} ${item?.category || ''}`.toLowerCase())}">
     <div class="production-card-head"><span class="production-icon">${escapeHtml(item?.emoji || '📦')}</span><div class="production-card-title"><h3>${escapeHtml(nom)}</h3><p>${escapeHtml(item ? `${item.category || 'Autre'} · ${item.rarity || 'Commun'}` : 'Objet absent du catalogue')}</p></div><span class="production-time">${masque ? '🚫 Masqué' : stock > 0 ? `📦 Stock : ${stock}` : '❌ Rupture'}</span></div>
-    <div class="production-columns">${prix}</div>${notePrix}
+    <div class="production-columns">${prix}</div>
     <div class="production-actions"><button class="btn-secondaire" onclick="ouvrirEditeurBoutique('${jsAttr(entry.id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="retirerBoutiqueItem('${jsAttr(entry.id)}')">Retirer</button></div>
   </article>`;
 }
@@ -1917,7 +1916,7 @@ function renderBoutiquePage() {
     <div class="production-intro"><div class="production-intro-icon">🏪</div><div><strong>Boutique galactique</strong><p>Deux catégories distinctes : les objets <b>achetables</b> (le joueur les achète au marchand, avec un prix d'achat) et les objets <b>vendables</b> (le joueur les revend au marchand, avec un prix de vente / rachat). Les changements apparaissent dans Discord en moins d'une minute.</p></div></div>
     <div class="production-section-heading"><div><h3>🛒 Achetable</h3><p>Objets que les joueurs peuvent acheter. Le prix baisse quand le stock monte : prix maximum à 0 en stock, prix minimum à 20 en stock ou plus.</p></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'achetable')">＋ Ajouter un objet achetable</button></div>
     <div class="production-grid">${achetables.map(boutiqueCardHTML).join('') || vide('Aucun objet achetable.', 'Ajoute un objet du catalogue que les joueurs pourront acheter.')}</div>
-    <div class="production-section-heading"><div><h3>💰 Vendable</h3><p>Objets que les joueurs peuvent vendre au marchand (rachat). Le prix de vente suit aussi le stock du marchand.</p></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'vendable')">＋ Ajouter un objet vendable</button></div>
+    <div class="production-section-heading"><div><h3>💰 Vendable</h3><p>Objets que les joueurs peuvent vendre au marchand (rachat).</p></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'vendable')">＋ Ajouter un objet vendable</button></div>
     <div class="production-grid">${vendables.map(boutiqueCardHTML).join('') || vide('Aucun objet vendable.', 'Ajoute un objet du catalogue que le marchand rachètera aux joueurs.')}</div>
     <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>`;
 }

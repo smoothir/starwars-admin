@@ -312,6 +312,7 @@ h1, h2, h3, h4 {
   min-width: 18px;
   text-align: center;
 }
+.nav-count:empty { display: none; }
 .nav-btn.active .nav-count { background: rgba(255,255,255,0.18); color: #ffffff; }
 
 .status-dot {
