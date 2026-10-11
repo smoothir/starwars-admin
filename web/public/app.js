@@ -10,6 +10,8 @@ const state = {
   personnelTypes: [],
   productionActuelle: null,
   personnelTypeActuel: null,
+  boutique: [],
+  boutiqueActuelle: null,
   statuts: [],
   listes: { relationFactions: [], relationLevels: [], defaultStats: [], statMax: 10 },
   collectionActuelle: null,
@@ -201,6 +203,14 @@ async function chargerDonnees(collection) {
     document.getElementById('titre-section').textContent = 'Personnel & métiers';
     document.getElementById('sous-titre').textContent = 'Configure les membres du personnel achetables, leurs coûts, leurs tâches et leur entretien quotidien.';
     await chargerPersonnelPage();
+  } else if (collection === 'boutique') {
+    searchWrap.hidden = false;
+    const rechercheInput = document.getElementById('recherche');
+    rechercheInput.value = '';
+    rechercheInput.placeholder = 'Rechercher un objet de la boutique...';
+    document.getElementById('titre-section').textContent = 'Boutique';
+    document.getElementById('sous-titre').textContent = 'Objets, prix et stock de la boutique Discord. Les achats et ventes se font sur le bot.';
+    await chargerBoutiquePage();
   } else if (collection === 'admin') {
     searchWrap.hidden = true;
     document.getElementById('titre-section').textContent = 'Admin';
@@ -685,6 +695,12 @@ function filtrerListe() {
     });
   } else if (state.collectionActuelle === 'production') {
     document.querySelectorAll('.production-card').forEach(card => {
+      const correspond = !q || (card.dataset.nom || '').includes(q);
+      card.classList.toggle('masquee', !correspond);
+      if (correspond) visibles += 1;
+    });
+  } else if (state.collectionActuelle === 'boutique') {
+    document.querySelectorAll('.boutique-card').forEach(card => {
       const correspond = !q || (card.dataset.nom || '').includes(q);
       card.classList.toggle('masquee', !correspond);
       if (correspond) visibles += 1;
@@ -1829,3 +1845,120 @@ function escapeHtml(str) {
 }
 function escapeAttr(str) { return escapeHtml(str); }
 function jsAttr(str) { return String(str ?? '').replace(/'/g, "\\'"); }
+
+// -----------------------------------------------------------------------
+// BOUTIQUE : objets, prix et stock (affichage / achats / ventes sur Discord)
+// -----------------------------------------------------------------------
+async function chargerBoutiquePage() {
+  const contenuDiv = document.getElementById('contenu');
+  contenuDiv.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
+  try {
+    const [boutiqueResponse, catalogueResponse] = await Promise.all([
+      apiFetch('/api/boutique'),
+      apiFetch('/api/inventaire/catalogue/meta'),
+    ]);
+    for (const response of [boutiqueResponse, catalogueResponse]) {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    }
+    const items = await boutiqueResponse.json();
+    state.boutique = Array.isArray(items) ? items : [];
+    state.catalogue = catalogueValide(await catalogueResponse.json());
+    majCompteur('boutique', state.boutique.length);
+    renderBoutiquePage();
+    setStatutConnexion(true);
+  } catch (error) {
+    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de chargement</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    setStatutConnexion(false);
+    console.error('Erreur chargement boutique:', error);
+  }
+}
+
+function formaterCreditsBoutique(value) {
+  return `${Math.max(0, Math.round(Number(value) || 0)).toLocaleString('fr-FR')} 💰`;
+}
+
+function fourchetteBoutique(min, max) {
+  return Number(min) === Number(max) ? formaterCreditsBoutique(min) : `${formaterCreditsBoutique(min)} → ${formaterCreditsBoutique(max)}`;
+}
+
+function boutiqueCardHTML(entry) {
+  const item = state.catalogue.find(it => it.id === entry.id);
+  const nom = item?.name || entry.id;
+  const masque = entry.enabled === false;
+  const stock = Math.max(0, Number(entry.stock) || 0);
+  return `<article class="production-card boutique-card${masque ? ' boutique-masque' : ''}" data-nom="${escapeAttr(`${nom} ${entry.id} ${item?.category || ''}`.toLowerCase())}">
+    <div class="production-card-head"><span class="production-icon">${escapeHtml(item?.emoji || '📦')}</span><div class="production-card-title"><h3>${escapeHtml(nom)}</h3><p>${escapeHtml(item ? `${item.category || 'Autre'} · ${item.rarity || 'Commun'}` : 'Objet absent du catalogue')}</p></div><span class="production-time">${masque ? '🚫 Masqué' : stock > 0 ? `📦 Stock : ${stock}` : '❌ Rupture'}</span></div>
+    <div class="production-columns"><div class="production-preview"><strong>🛒 Prix d'achat (joueur)</strong><ul><li>${fourchetteBoutique(entry.minPrice, entry.maxPrice)}</li></ul></div><div class="production-preview"><strong>💰 Prix de rachat (marchand)</strong><ul><li>${fourchetteBoutique(entry.rachatMinPrice, entry.rachatMaxPrice)}</li></ul></div></div>
+    <div class="production-actions"><button class="btn-secondaire" onclick="ouvrirEditeurBoutique('${jsAttr(entry.id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="retirerBoutiqueItem('${jsAttr(entry.id)}')">Retirer</button></div>
+  </article>`;
+}
+
+function renderBoutiquePage() {
+  const items = state.boutique.slice().sort((a, b) => {
+    const ia = state.catalogue.find(it => it.id === a.id); const ib = state.catalogue.find(it => it.id === b.id);
+    return String(ia?.category || '').localeCompare(String(ib?.category || ''), 'fr') || String(ia?.name || a.id).localeCompare(String(ib?.name || b.id), 'fr');
+  });
+  document.getElementById('contenu').innerHTML = `
+    <div class="production-intro"><div class="production-intro-icon">🏪</div><div><strong>Boutique galactique</strong><p>Choisis ici les objets vendus, leurs fourchettes de prix et leur stock. Le bot affiche la boutique et gère les achats, ventes et échanges ; il met à jour le stock. Les changements apparaissent dans Discord en moins d'une minute.</p></div></div>
+    <div class="production-section-heading"><div><h3>🛒 Objets de la boutique</h3><p>Le prix baisse quand le stock monte : prix maximum à 0 en stock, prix minimum à 20 en stock ou plus.</p></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null)">＋ Ajouter un objet</button></div>
+    <div class="production-grid">${items.map(boutiqueCardHTML).join('') || '<div class="etat-vide"><p>Aucun objet en boutique.</p><span class="etat-vide-sub">Ajoute un objet du catalogue pour le proposer aux joueurs.</span></div>'}</div>
+    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>`;
+}
+
+function ouvrirEditeurBoutique(itemId) {
+  const entry = itemId ? state.boutique.find(it => it.id === itemId) : null;
+  if (itemId && !entry) return toast('Objet introuvable dans la boutique.', 'erreur');
+  state.boutiqueActuelle = entry?.id || null;
+  document.getElementById('overlay-catalogue').classList.add('visible');
+  document.getElementById('panneau-catalogue').classList.add('ouvert');
+  const catItem = entry ? state.catalogue.find(it => it.id === entry.id) : null;
+  document.getElementById('panneau-catalogue-titre').textContent = entry ? `Modifier - ${catItem?.name || entry.id}` : 'Ajouter à la boutique';
+  const dejaPresents = new Set(state.boutique.map(it => it.id));
+  const options = '<option value="">Choisir un objet…</option>' + state.catalogue
+    .filter(it => String(it.id).toLowerCase() !== 'credits_de_la_nouvelle_republique' && !dejaPresents.has(it.id))
+    .map(it => `<option value="${escapeAttr(it.id)}">${escapeHtml(`${it.emoji || '📦'} ${it.name} - ${it.id}`)}</option>`).join('');
+  const champObjet = entry
+    ? `<div class="champ"><label>Objet</label><input type="text" value="${escapeAttr(`${catItem?.emoji || '📦'} ${catItem?.name || entry.id}`)}" disabled></div>`
+    : `<div class="champ"><label for="f-boutique-item">Objet du catalogue</label><select id="f-boutique-item">${options}</select></div>`;
+  const nb = (id, label, value) => `<div class="champ"><label for="${id}">${label}</label><input id="${id}" type="number" min="1" step="1" value="${Math.max(1, Number(value) || 1)}"></div>`;
+  document.getElementById('panneau-catalogue-corps').innerHTML = `
+    <div class="section-titre">${entry ? '✏️ Modifier l\'objet' : '➕ Ajouter un objet'}</div>
+    ${champObjet}
+    <div class="grille-champs"><div class="champ"><label for="f-boutique-stock">Stock du marchand</label><input id="f-boutique-stock" type="number" min="0" max="1000000" step="1" value="${Math.max(0, Number(entry?.stock) || 0)}"></div><div class="champ"><label for="f-boutique-enabled">Visibilité</label><select id="f-boutique-enabled"><option value="1" ${entry?.enabled === false ? '' : 'selected'}>Visible dans la boutique</option><option value="0" ${entry?.enabled === false ? 'selected' : ''}>Masqué</option></select></div></div>
+    <div class="section-titre">🛒 Prix d'achat (ce que paie le joueur)</div>
+    <div class="grille-champs">${nb('f-boutique-min', 'Prix minimum (stock élevé)', entry?.minPrice ?? 100)}${nb('f-boutique-max', 'Prix maximum (rupture)', entry?.maxPrice ?? 250)}</div>
+    <div class="section-titre">💰 Prix de rachat (ce que paie le marchand)</div>
+    <div class="grille-champs">${nb('f-boutique-rachat-min', 'Rachat minimum (stock élevé)', entry?.rachatMinPrice ?? 50)}${nb('f-boutique-rachat-max', 'Rachat maximum (rupture)', entry?.rachatMaxPrice ?? 125)}</div>
+    <p class="section-note">Le stock est aussi modifié par le bot à chaque achat, vente ou échange : si tu le changes ici, la nouvelle valeur remplace le stock actuel.</p>
+    <div class="actions-panneau"><button class="btn-principal" id="btn-enregistrer-boutique" onclick="sauvegarderBoutiqueItem()">${entry ? 'Enregistrer les modifications' : 'Ajouter à la boutique'}</button></div>`;
+}
+
+async function sauvegarderBoutiqueItem() {
+  const button = document.getElementById('btn-enregistrer-boutique');
+  if (!button) return;
+  const original = button.textContent;
+  button.disabled = true; button.textContent = 'Enregistrement…';
+  try {
+    const id = state.boutiqueActuelle || val('f-boutique-item');
+    if (!id) throw new Error('Choisis un objet du catalogue.');
+    const payload = {
+      stock: Number(val('f-boutique-stock')),
+      enabled: val('f-boutique-enabled') !== '0',
+      minPrice: Number(val('f-boutique-min')), maxPrice: Number(val('f-boutique-max')),
+      rachatMinPrice: Number(val('f-boutique-rachat-min')), rachatMaxPrice: Number(val('f-boutique-rachat-max')),
+    };
+    await fetchJSON(`/api/boutique/${encodeURIComponent(id)}`, payload, 'PUT');
+    toast(state.boutiqueActuelle ? 'Objet de la boutique modifié.' : 'Objet ajouté à la boutique.', 'succes');
+    fermerCataloguePanel();
+    await chargerBoutiquePage();
+  } catch (error) { toast(`Échec : ${error.message}`, 'erreur'); }
+  finally { button.disabled = false; button.textContent = original; }
+}
+
+async function retirerBoutiqueItem(id) {
+  const item = state.catalogue.find(it => it.id === id);
+  const ok = await confirmerAction({ titre: 'Retirer de la boutique', message: `Retirer « ${item?.name || id} » de la boutique ? L'objet reste dans le catalogue.`, texteValider: 'Retirer' });
+  if (!ok) return;
+  try { await fetchJSON(`/api/boutique/${encodeURIComponent(id)}`, null, 'DELETE'); toast('Objet retiré de la boutique.', 'succes'); await chargerBoutiquePage(); }
+  catch (error) { toast(`Échec : ${error.message}`, 'erreur'); }
+}

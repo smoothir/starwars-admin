@@ -41,7 +41,7 @@ const {
   setItemQuantity,
 } = require('../Data/invStore.js');
 const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup } = require('../Data/adminStore.js');
-const { getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection } = require('../Data/mongo.js');
+const { getBoutiqueItemsCollection, getBoutiqueStateCollection, getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection } = require('../Data/mongo.js');
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
@@ -907,6 +907,92 @@ app.delete('/api/inventaire/:profileId/items/:itemId', async (req, res) => {
 });
 
 const PORT = process.env.PORT || process.env.WEB_PORT || 3000;
+// ---------------------------------------------------------------------------
+// BOUTIQUE — objets, prix et stock gérés ici ; le bot Discord affiche la
+// boutique et gère les achats / ventes / échanges (il met à jour le stock).
+// Chaque modification incrémente "version" : le bot la détecte (≈30 s) et
+// réactualise le message de la boutique dans Discord.
+// ---------------------------------------------------------------------------
+const BOUTIQUE_CURRENCY_ITEM_ID = 'credits_de_la_nouvelle_republique';
+
+function entierBoutique(value, label, { min = 0, max = 100000000 } = {}) {
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n) || n < min || n > max) {
+    throw new Error(`${label} doit être un nombre entier entre ${min.toLocaleString('fr-FR')} et ${max.toLocaleString('fr-FR')}.`);
+  }
+  return n;
+}
+
+async function normaliserBoutiqueItem(itemId, body) {
+  const id = String(itemId || '').trim();
+  if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('Identifiant d\'objet invalide.');
+  if (id.toLowerCase() === BOUTIQUE_CURRENCY_ITEM_ID) throw new Error('La monnaie ne peut pas être vendue dans la boutique.');
+  const known = await getExistingCatalogIds([id]);
+  if (!known.has(id)) throw new Error(`L'objet « ${id} » n'existe pas dans le catalogue.`);
+
+  const b = body || {};
+  const minPrice = entierBoutique(b.minPrice, 'Le prix d\'achat minimum', { min: 1 });
+  const maxPrice = entierBoutique(b.maxPrice, 'Le prix d\'achat maximum', { min: 1 });
+  const rachatMinPrice = entierBoutique(b.rachatMinPrice, 'Le prix de rachat minimum', { min: 1 });
+  const rachatMaxPrice = entierBoutique(b.rachatMaxPrice, 'Le prix de rachat maximum', { min: 1 });
+  if (minPrice > maxPrice) throw new Error('Le prix d\'achat minimum ne peut pas dépasser le maximum.');
+  if (rachatMinPrice > rachatMaxPrice) throw new Error('Le prix de rachat minimum ne peut pas dépasser le maximum.');
+  return {
+    id,
+    data: {
+      stock: entierBoutique(b.stock, 'Le stock', { min: 0, max: 1000000 }),
+      minPrice, maxPrice, rachatMinPrice, rachatMaxPrice,
+      enabled: b.enabled !== false,
+      updatedAt: new Date(),
+    },
+  };
+}
+
+async function signalerChangementBoutique() {
+  await (await getBoutiqueStateCollection()).updateOne(
+    { _id: 'meta' }, { $inc: { version: 1 }, $setOnInsert: { messageId: null } }, { upsert: true },
+  );
+}
+
+app.get('/api/boutique', async (req, res) => {
+  try {
+    const docs = await (await getBoutiqueItemsCollection()).find({}).toArray();
+    res.json(docs.map(({ _id, ...rest }) => ({ id: String(_id), ...rest })));
+  } catch (err) {
+    console.error('Chargement de la boutique impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Ajout ou modification d'un objet de la boutique (upsert).
+app.put('/api/boutique/:itemId', async (req, res) => {
+  try {
+    const { id, data } = await normaliserBoutiqueItem(req.params.itemId, req.body);
+    const col = await getBoutiqueItemsCollection();
+    const existait = await col.findOne({ _id: id }, { projection: { _id: 1 } });
+    await col.updateOne({ _id: id }, { $set: data, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
+    await signalerChangementBoutique();
+    logFromReq(req, existait ? 'boutique_modifiee' : 'boutique_ajoutee', `${existait ? 'A modifié' : 'A ajouté'} l'objet « ${id} » dans la boutique.`);
+    res.json({ id, ...data });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/boutique/:itemId', async (req, res) => {
+  try {
+    const col = await getBoutiqueItemsCollection();
+    const result = await col.deleteOne({ _id: req.params.itemId });
+    if (!result.deletedCount) return res.status(404).json({ error: 'Objet introuvable dans la boutique.' });
+    await signalerChangementBoutique();
+    logFromReq(req, 'boutique_retiree', `A retiré l'objet « ${req.params.itemId} » de la boutique.`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+
 app.listen(PORT, () => {
   console.log(`✅ Site admin lancé sur http://localhost:${PORT}`);
 });

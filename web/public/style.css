@@ -1873,3 +1873,5 @@ html { font-size: 14px; }
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
   font-weight: 600;
 }
+
+.boutique-card.boutique-masque { opacity: .55; }

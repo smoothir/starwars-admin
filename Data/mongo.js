@@ -22,6 +22,8 @@ const COLLECTION_SITE_BACKUPS = 'site_backups';
 const COLLECTION_CRAFT_RECIPES = 'craft_recipes';
 const COLLECTION_PRODUCTION_RECIPES = 'production_recipes';
 const COLLECTION_PERSONNEL_TYPES = 'personnel_types';
+const COLLECTION_BOUTIQUE_ITEMS = 'boutique_items';
+const COLLECTION_BOUTIQUE_STATE = 'boutique_state';
 
 let client = null;
 let db = null;
@@ -248,6 +250,22 @@ async function getCraftRecipesCollection() {
 }
 
 /** Recettes de production (30 min par unité), partagées avec le bot. */
+/**
+ * Collection "boutique_items" : réglages de la boutique (_id = itemId, stock,
+ * minPrice/maxPrice d'achat, rachatMinPrice/rachatMaxPrice, enabled). Modifiée
+ * depuis le site, lue et mise à jour (stock) par le bot.
+ */
+async function getBoutiqueItemsCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_BOUTIQUE_ITEMS);
+}
+
+/** Collection "boutique_state" : { _id: 'meta', messageId, version }. */
+async function getBoutiqueStateCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_BOUTIQUE_STATE);
+}
+
 async function getProductionRecipesCollection() {
   const database = await connect();
   return database.collection(COLLECTION_PRODUCTION_RECIPES);
@@ -281,6 +299,8 @@ module.exports = {
   getSiteLogsCollection,
   getSiteBackupsCollection,
   getCraftRecipesCollection,
+  getBoutiqueItemsCollection,
+  getBoutiqueStateCollection,
   getProductionRecipesCollection,
   getPersonnelTypesCollection,
 };
