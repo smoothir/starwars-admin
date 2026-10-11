@@ -1881,34 +1881,54 @@ function fourchetteBoutique(min, max) {
   return Number(min) === Number(max) ? formaterCreditsBoutique(min) : `${formaterCreditsBoutique(min)} → ${formaterCreditsBoutique(max)}`;
 }
 
+// Type d'un objet : "achetable" (le joueur achète), "vendable" (le joueur vend /
+// rachat par le marchand) ou "mixte" (anciens objets sans type : achat + rachat).
+function typeBoutique(entry) {
+  if (entry?.type === 'achetable' || entry?.type === 'vendable') return entry.type;
+  return 'mixte';
+}
+
 function boutiqueCardHTML(entry) {
   const item = state.catalogue.find(it => it.id === entry.id);
   const nom = item?.name || entry.id;
   const masque = entry.enabled === false;
   const stock = Math.max(0, Number(entry.stock) || 0);
+  const type = typeBoutique(entry);
+  const blocAchat = `<div class="production-preview"><strong>🛒 Prix d'achat (joueur)</strong><ul><li>${fourchetteBoutique(entry.minPrice, entry.maxPrice)}</li></ul></div>`;
+  const blocVente = `<div class="production-preview"><strong>💰 Prix de vente (rachat par le marchand)</strong><ul><li>${fourchetteBoutique(entry.rachatMinPrice, entry.rachatMaxPrice)}</li></ul></div>`;
+  const prix = type === 'achetable' ? blocAchat : type === 'vendable' ? blocVente : blocAchat + blocVente;
+  const notePrix = type === 'mixte' ? '<p class="section-note">Ancien format (achat + rachat) : enregistre l\'objet pour le passer en achetable ou vendable.</p>' : '';
   return `<article class="production-card boutique-card${masque ? ' boutique-masque' : ''}" data-nom="${escapeAttr(`${nom} ${entry.id} ${item?.category || ''}`.toLowerCase())}">
     <div class="production-card-head"><span class="production-icon">${escapeHtml(item?.emoji || '📦')}</span><div class="production-card-title"><h3>${escapeHtml(nom)}</h3><p>${escapeHtml(item ? `${item.category || 'Autre'} · ${item.rarity || 'Commun'}` : 'Objet absent du catalogue')}</p></div><span class="production-time">${masque ? '🚫 Masqué' : stock > 0 ? `📦 Stock : ${stock}` : '❌ Rupture'}</span></div>
-    <div class="production-columns"><div class="production-preview"><strong>🛒 Prix d'achat (joueur)</strong><ul><li>${fourchetteBoutique(entry.minPrice, entry.maxPrice)}</li></ul></div><div class="production-preview"><strong>💰 Prix de rachat (marchand)</strong><ul><li>${fourchetteBoutique(entry.rachatMinPrice, entry.rachatMaxPrice)}</li></ul></div></div>
+    <div class="production-columns">${prix}</div>${notePrix}
     <div class="production-actions"><button class="btn-secondaire" onclick="ouvrirEditeurBoutique('${jsAttr(entry.id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="retirerBoutiqueItem('${jsAttr(entry.id)}')">Retirer</button></div>
   </article>`;
 }
 
 function renderBoutiquePage() {
-  const items = state.boutique.slice().sort((a, b) => {
+  const trier = (a, b) => {
     const ia = state.catalogue.find(it => it.id === a.id); const ib = state.catalogue.find(it => it.id === b.id);
     return String(ia?.category || '').localeCompare(String(ib?.category || ''), 'fr') || String(ia?.name || a.id).localeCompare(String(ib?.name || b.id), 'fr');
-  });
+  };
+  const achetables = state.boutique.filter(it => typeBoutique(it) !== 'vendable').sort(trier);
+  const vendables = state.boutique.filter(it => typeBoutique(it) === 'vendable').sort(trier);
+  const vide = (titre, sous) => `<div class="etat-vide"><p>${titre}</p><span class="etat-vide-sub">${sous}</span></div>`;
   document.getElementById('contenu').innerHTML = `
-    <div class="production-intro"><div class="production-intro-icon">🏪</div><div><strong>Boutique galactique</strong><p>Choisis ici les objets vendus, leurs fourchettes de prix et leur stock. Le bot affiche la boutique et gère les achats, ventes et échanges ; il met à jour le stock. Les changements apparaissent dans Discord en moins d'une minute.</p></div></div>
-    <div class="production-section-heading"><div><h3>🛒 Objets de la boutique</h3><p>Le prix baisse quand le stock monte : prix maximum à 0 en stock, prix minimum à 20 en stock ou plus.</p></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null)">＋ Ajouter un objet</button></div>
-    <div class="production-grid">${items.map(boutiqueCardHTML).join('') || '<div class="etat-vide"><p>Aucun objet en boutique.</p><span class="etat-vide-sub">Ajoute un objet du catalogue pour le proposer aux joueurs.</span></div>'}</div>
+    <div class="production-intro"><div class="production-intro-icon">🏪</div><div><strong>Boutique galactique</strong><p>Deux catégories distinctes : les objets <b>achetables</b> (le joueur les achète au marchand, avec un prix d'achat) et les objets <b>vendables</b> (le joueur les revend au marchand, avec un prix de vente / rachat). Les changements apparaissent dans Discord en moins d'une minute.</p></div></div>
+    <div class="production-section-heading"><div><h3>🛒 Achetable</h3><p>Objets que les joueurs peuvent acheter. Le prix baisse quand le stock monte : prix maximum à 0 en stock, prix minimum à 20 en stock ou plus.</p></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'achetable')">＋ Ajouter un objet achetable</button></div>
+    <div class="production-grid">${achetables.map(boutiqueCardHTML).join('') || vide('Aucun objet achetable.', 'Ajoute un objet du catalogue que les joueurs pourront acheter.')}</div>
+    <div class="production-section-heading"><div><h3>💰 Vendable</h3><p>Objets que les joueurs peuvent vendre au marchand (rachat). Le prix de vente suit aussi le stock du marchand.</p></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'vendable')">＋ Ajouter un objet vendable</button></div>
+    <div class="production-grid">${vendables.map(boutiqueCardHTML).join('') || vide('Aucun objet vendable.', 'Ajoute un objet du catalogue que le marchand rachètera aux joueurs.')}</div>
     <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>`;
 }
 
-function ouvrirEditeurBoutique(itemId) {
+function ouvrirEditeurBoutique(itemId, typeInitial = 'achetable') {
   const entry = itemId ? state.boutique.find(it => it.id === itemId) : null;
   if (itemId && !entry) return toast('Objet introuvable dans la boutique.', 'erreur');
   state.boutiqueActuelle = entry?.id || null;
+  const typeEntree = entry ? typeBoutique(entry) : typeInitial;
+  const typeEdition = typeEntree === 'vendable' ? 'vendable' : 'achetable';
+  state.boutiqueTypeEdition = typeEdition;
   document.getElementById('overlay-catalogue').classList.add('visible');
   document.getElementById('panneau-catalogue').classList.add('ouvert');
   const catItem = entry ? state.catalogue.find(it => it.id === entry.id) : null;
@@ -1925,12 +1945,25 @@ function ouvrirEditeurBoutique(itemId) {
     <div class="section-titre">${entry ? '✏️ Modifier l\'objet' : '➕ Ajouter un objet'}</div>
     ${champObjet}
     <div class="grille-champs"><div class="champ"><label for="f-boutique-stock">Stock du marchand</label><input id="f-boutique-stock" type="number" min="0" max="1000000" step="1" value="${Math.max(0, Number(entry?.stock) || 0)}"></div><div class="champ"><label for="f-boutique-enabled">Visibilité</label><select id="f-boutique-enabled"><option value="1" ${entry?.enabled === false ? '' : 'selected'}>Visible dans la boutique</option><option value="0" ${entry?.enabled === false ? 'selected' : ''}>Masqué</option></select></div></div>
-    <div class="section-titre">🛒 Prix d'achat (ce que paie le joueur)</div>
-    <div class="grille-champs">${nb('f-boutique-min', 'Prix minimum (stock élevé)', entry?.minPrice ?? 100)}${nb('f-boutique-max', 'Prix maximum (rupture)', entry?.maxPrice ?? 250)}</div>
-    <div class="section-titre">💰 Prix de rachat (ce que paie le marchand)</div>
-    <div class="grille-champs">${nb('f-boutique-rachat-min', 'Rachat minimum (stock élevé)', entry?.rachatMinPrice ?? 50)}${nb('f-boutique-rachat-max', 'Rachat maximum (rupture)', entry?.rachatMaxPrice ?? 125)}</div>
+    <div class="champ"><label for="f-boutique-type">Catégorie</label><select id="f-boutique-type" onchange="changerTypeBoutique(this.value)"><option value="achetable" ${typeEdition === 'achetable' ? 'selected' : ''}>🛒 Achetable (le joueur achète)</option><option value="vendable" ${typeEdition === 'vendable' ? 'selected' : ''}>💰 Vendable (le marchand rachète)</option></select></div>
+    <div id="bloc-boutique-achat" ${typeEdition === 'achetable' ? '' : 'hidden'}>
+      <div class="section-titre">🛒 Prix d'achat (ce que paie le joueur)</div>
+      <div class="grille-champs">${nb('f-boutique-min', 'Prix minimum (stock élevé)', entry?.minPrice ?? 100)}${nb('f-boutique-max', 'Prix maximum (rupture)', entry?.maxPrice ?? 250)}</div>
+    </div>
+    <div id="bloc-boutique-vente" ${typeEdition === 'vendable' ? '' : 'hidden'}>
+      <div class="section-titre">💰 Prix de vente (ce que paie le marchand au joueur)</div>
+      <div class="grille-champs">${nb('f-boutique-rachat-min', 'Vente minimum (stock élevé)', entry?.rachatMinPrice ?? 50)}${nb('f-boutique-rachat-max', 'Vente maximum (rupture)', entry?.rachatMaxPrice ?? 125)}</div>
+    </div>
     <p class="section-note">Le stock est aussi modifié par le bot à chaque achat, vente ou échange : si tu le changes ici, la nouvelle valeur remplace le stock actuel.</p>
     <div class="actions-panneau"><button class="btn-principal" id="btn-enregistrer-boutique" onclick="sauvegarderBoutiqueItem()">${entry ? 'Enregistrer les modifications' : 'Ajouter à la boutique'}</button></div>`;
+}
+
+function changerTypeBoutique(type) {
+  state.boutiqueTypeEdition = type === 'vendable' ? 'vendable' : 'achetable';
+  const achat = document.getElementById('bloc-boutique-achat');
+  const vente = document.getElementById('bloc-boutique-vente');
+  if (achat) achat.hidden = state.boutiqueTypeEdition !== 'achetable';
+  if (vente) vente.hidden = state.boutiqueTypeEdition !== 'vendable';
 }
 
 async function sauvegarderBoutiqueItem() {
@@ -1941,12 +1974,19 @@ async function sauvegarderBoutiqueItem() {
   try {
     const id = state.boutiqueActuelle || val('f-boutique-item');
     if (!id) throw new Error('Choisis un objet du catalogue.');
+    const type = val('f-boutique-type') === 'vendable' ? 'vendable' : 'achetable';
     const payload = {
+      type,
       stock: Number(val('f-boutique-stock')),
       enabled: val('f-boutique-enabled') !== '0',
-      minPrice: Number(val('f-boutique-min')), maxPrice: Number(val('f-boutique-max')),
-      rachatMinPrice: Number(val('f-boutique-rachat-min')), rachatMaxPrice: Number(val('f-boutique-rachat-max')),
     };
+    if (type === 'achetable') {
+      payload.minPrice = Number(val('f-boutique-min'));
+      payload.maxPrice = Number(val('f-boutique-max'));
+    } else {
+      payload.rachatMinPrice = Number(val('f-boutique-rachat-min'));
+      payload.rachatMaxPrice = Number(val('f-boutique-rachat-max'));
+    }
     await fetchJSON(`/api/boutique/${encodeURIComponent(id)}`, payload, 'PUT');
     toast(state.boutiqueActuelle ? 'Objet de la boutique modifié.' : 'Objet ajouté à la boutique.', 'succes');
     fermerCataloguePanel();

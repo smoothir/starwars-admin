@@ -931,21 +931,31 @@ async function normaliserBoutiqueItem(itemId, body) {
   if (!known.has(id)) throw new Error(`L'objet « ${id} » n'existe pas dans le catalogue.`);
 
   const b = body || {};
-  const minPrice = entierBoutique(b.minPrice, 'Le prix d\'achat minimum', { min: 1 });
-  const maxPrice = entierBoutique(b.maxPrice, 'Le prix d\'achat maximum', { min: 1 });
-  const rachatMinPrice = entierBoutique(b.rachatMinPrice, 'Le prix de rachat minimum', { min: 1 });
-  const rachatMaxPrice = entierBoutique(b.rachatMaxPrice, 'Le prix de rachat maximum', { min: 1 });
-  if (minPrice > maxPrice) throw new Error('Le prix d\'achat minimum ne peut pas dépasser le maximum.');
-  if (rachatMinPrice > rachatMaxPrice) throw new Error('Le prix de rachat minimum ne peut pas dépasser le maximum.');
-  return {
-    id,
-    data: {
-      stock: entierBoutique(b.stock, 'Le stock', { min: 0, max: 1000000 }),
-      minPrice, maxPrice, rachatMinPrice, rachatMaxPrice,
-      enabled: b.enabled !== false,
-      updatedAt: new Date(),
-    },
-  };
+  // Type : "achetable" (le joueur achète au marchand) ou "vendable" (le joueur
+  // vend au marchand = rachat). Chaque type n'a que ses propres prix.
+  const type = b.type === 'vendable' ? 'vendable' : 'achetable';
+  const stock = entierBoutique(b.stock, 'Le stock', { min: 0, max: 1000000 });
+  const data = { type, stock, enabled: b.enabled !== false, updatedAt: new Date() };
+  const unset = {};
+
+  if (type === 'achetable') {
+    const minPrice = entierBoutique(b.minPrice, 'Le prix d\'achat minimum', { min: 1 });
+    const maxPrice = entierBoutique(b.maxPrice, 'Le prix d\'achat maximum', { min: 1 });
+    if (minPrice > maxPrice) throw new Error('Le prix d\'achat minimum ne peut pas dépasser le maximum.');
+    data.minPrice = minPrice;
+    data.maxPrice = maxPrice;
+    unset.rachatMinPrice = '';
+    unset.rachatMaxPrice = '';
+  } else {
+    const rachatMinPrice = entierBoutique(b.rachatMinPrice, 'Le prix de vente minimum', { min: 1 });
+    const rachatMaxPrice = entierBoutique(b.rachatMaxPrice, 'Le prix de vente maximum', { min: 1 });
+    if (rachatMinPrice > rachatMaxPrice) throw new Error('Le prix de vente minimum ne peut pas dépasser le maximum.');
+    data.rachatMinPrice = rachatMinPrice;
+    data.rachatMaxPrice = rachatMaxPrice;
+    unset.minPrice = '';
+    unset.maxPrice = '';
+  }
+  return { id, data, unset };
 }
 
 async function signalerChangementBoutique() {
@@ -967,10 +977,10 @@ app.get('/api/boutique', async (req, res) => {
 // Ajout ou modification d'un objet de la boutique (upsert).
 app.put('/api/boutique/:itemId', async (req, res) => {
   try {
-    const { id, data } = await normaliserBoutiqueItem(req.params.itemId, req.body);
+    const { id, data, unset } = await normaliserBoutiqueItem(req.params.itemId, req.body);
     const col = await getBoutiqueItemsCollection();
     const existait = await col.findOne({ _id: id }, { projection: { _id: 1 } });
-    await col.updateOne({ _id: id }, { $set: data, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
+    await col.updateOne({ _id: id }, { $set: data, $unset: unset, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
     await signalerChangementBoutique();
     logFromReq(req, existait ? 'boutique_modifiee' : 'boutique_ajoutee', `${existait ? 'A modifié' : 'A ajouté'} l'objet « ${id} » dans la boutique.`);
     res.json({ id, ...data });
