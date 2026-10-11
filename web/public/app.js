@@ -1,5 +1,8 @@
 const state = {
-  cache: { profils: [], inventaires: [] },
+  cache: { profils: [], inventaires: [], inventoryDetails: {} },
+  pageFilters: {},
+  selectedCatalogIds: new Set(),
+  selectedProfileIds: new Set(),
   isFounder: false,
   catalogue: [],
   catalogueCategorieActive: 'Tout',
@@ -92,7 +95,7 @@ async function verifierSessionExistante() {
     if (me.authenticated) {
       afficherUtilisateurConnecte(me);
       afficherApplication();
-      demarrerApplication();
+      demarrerApplication().then(() => chargerDonnees('dashboard'));
     }
   } catch { /* pas connecté : l'écran de connexion reste affiché */ }
 }
@@ -129,7 +132,7 @@ function apiFetch(url, options = {}) {
 }
 
 function demarrerApplication() {
-  Promise.allSettled([
+  return Promise.allSettled([
     apiFetch('/api/profils').then(r => r.json()).then(d => { state.cache.profils = d; majCompteur('profils', d.length); majCompteur('inventaire', d.length); }),
     apiFetch('/api/statuts').then(r => r.json()).then(d => { state.statuts = d; }),
     apiFetch('/api/lists').then(r => r.json()).then(d => { state.listes = d; }),
@@ -146,6 +149,104 @@ function majCompteur(collection, n) {
   if (el) el.textContent = n;
 }
 
+
+const RARETE_ORDRE = { epique: 0, rare: 1, 'peu-commun': 2, commun: 3 };
+
+function pagePrefs(collection) {
+  if (!state.pageFilters[collection]) {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(`starwars-admin-filters:${collection}`) || '{}') || {}; } catch { saved = {}; }
+    state.pageFilters[collection] = saved;
+  }
+  return state.pageFilters[collection];
+}
+
+function getPageFilter(collection, key, fallback = '') {
+  const value = pagePrefs(collection)[key];
+  return value === undefined || value === null ? fallback : String(value);
+}
+
+function setPageFilter(collection, key, value) {
+  const prefs = pagePrefs(collection);
+  prefs[key] = String(value ?? '');
+  try { localStorage.setItem(`starwars-admin-filters:${collection}`, JSON.stringify(prefs)); } catch { /* préférences facultatives */ }
+}
+
+function optionsFiltre(options, current) {
+  return options.map(option => {
+    const value = typeof option === 'string' ? option : option.value;
+    const label = typeof option === 'string' ? option : option.label;
+    return `<option value="${escapeAttr(value)}" ${String(current) === String(value) ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+  }).join('');
+}
+
+function selectFiltreHTML(collection, key, label, options, fallback = '') {
+  return `<label class="filter-control"><span>${escapeHtml(label)}</span><select onchange="changerFiltrePage('${collection}','${key}',this.value)">${optionsFiltre(options, getPageFilter(collection, key, fallback))}</select></label>`;
+}
+
+function toolbarFiltreHTML(collection, controls, extraClass = '') {
+  return `<div class="filters-toolbar ${extraClass}">${controls.join('')}</div>`;
+}
+
+function changerFiltrePage(collection, key, value) {
+  setPageFilter(collection, key, value);
+  if (collection === 'catalogue' && key === 'category') {
+    selectionnerCategorieCatalogue(value || 'Tout');
+    return;
+  }
+  const renderers = {
+    profils: () => renderListeProfils(state.cache.profils || []),
+    catalogue: renderCataloguePage,
+    crafts: renderCraftsPage,
+    production: renderProductionPage,
+    personnel: renderPersonnelPage,
+    boutique: renderBoutiquePage,
+  };
+  renderers[collection]?.();
+  filtrerListe();
+}
+
+function recentDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function afficherListeRecenteDashboard(rows) {
+  if (!rows?.length) return `<div class="etat-vide dashboard-empty"><p>Aucune modification récente.</p></div>`;
+  return `<div class="dashboard-recent-list">${rows.map(row => `
+    <article class="dashboard-recent-item">
+      <span class="dashboard-recent-icon">${LOG_ICONES[row.action] || '•'}</span>
+      <div><strong>${escapeHtml(row.username || 'Inconnu')}</strong><p>${escapeHtml(row.details || row.action || 'Action')}</p><time>${escapeHtml(recentDate(row.timestamp))}</time></div>
+    </article>`).join('')}</div>`;
+}
+
+async function chargerDashboardPage() {
+  const contenuDiv = document.getElementById('contenu');
+  document.getElementById('search-wrap').hidden = true;
+  contenuDiv.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
+  try {
+    const response = await apiFetch('/api/dashboard');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const cards = [
+      ['profils', '👤', 'Personnages', 'profils'], ['objets', '📦', 'Objets', 'catalogue'],
+      ['crafts', '🛠️', 'Recettes de craft', 'crafts'], ['productions', '🏭', 'Productions', 'production'],
+      ['personnel', '👷', 'Métiers', 'personnel'], ['boutique', '🛒', 'Articles boutique', 'boutique'],
+    ];
+    contenuDiv.innerHTML = `
+      <section class="dashboard-welcome"><div><span class="dashboard-eyebrow">CENTRE DE CONTRÔLE</span><h3>Bienvenue dans Mirage Admin</h3><p>Vue d’ensemble du serveur et accès rapide aux outils de gestion.</p></div><button type="button" class="btn-secondaire" onclick="chargerDashboardPage()">↻ Actualiser</button></section>
+      <section class="dashboard-stats">${cards.map(([key, icon, label, page]) => `<button type="button" class="dashboard-stat-card" onclick="chargerDonnees('${page}')"><span>${icon}</span><strong>${Number(data.counts?.[key]) || 0}</strong><small>${label}</small></button>`).join('')}</section>
+      <section class="dashboard-shortcuts"><div class="section-titre">⚡ Accès rapides</div><div class="dashboard-shortcuts-grid">
+        <button class="dashboard-shortcut" onclick="chargerDonnees('profils')">👤 Gérer les profils</button><button class="dashboard-shortcut" onclick="chargerDonnees('inventaire')">🎒 Ouvrir les inventaires</button><button class="dashboard-shortcut" onclick="chargerDonnees('catalogue')">📦 Gérer les objets</button><button class="dashboard-shortcut" onclick="chargerDonnees('crafts')">🛠️ Configurer les crafts</button><button class="dashboard-shortcut" onclick="chargerDonnees('production')">🏭 Gérer les productions</button><button class="dashboard-shortcut" onclick="chargerDonnees('personnel')">👷 Gérer le personnel</button><button class="dashboard-shortcut" onclick="chargerDonnees('boutique')">🛒 Configurer la boutique</button>
+      </div></section>
+      <section class="dashboard-recent"><div class="section-titre">🕘 Dernières modifications</div>${afficherListeRecenteDashboard(data.recent)}</section>`;
+    setStatutConnexion(true);
+  } catch (error) {
+    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Tableau de bord indisponible</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+  }
+}
+
 // -----------------------------------------------------------------------
 // Chargement d'une section : Profils RP, Inventaire, Catalogue ou Admin
 // -----------------------------------------------------------------------
@@ -155,10 +256,14 @@ async function chargerDonnees(collection) {
 
   const searchWrap = document.getElementById('search-wrap');
 
-  if (collection === 'profils') {
+  if (collection === 'dashboard') {
+    document.getElementById('titre-section').textContent = 'Accueil';
+    document.getElementById('sous-titre').textContent = 'Vue générale et raccourcis d’administration.';
+    await chargerDashboardPage();
+  } else if (collection === 'profils') {
     searchWrap.hidden = false;
     const rechercheInput = document.getElementById('recherche');
-    rechercheInput.value = '';
+    rechercheInput.value = getPageFilter('profils', 'q', '');
     rechercheInput.placeholder = 'Rechercher un personnage...';
     document.getElementById('titre-section').textContent = 'Profils RP';
     document.getElementById('sous-titre').textContent = 'Personnages joués sur le serveur.';
@@ -166,7 +271,7 @@ async function chargerDonnees(collection) {
   } else if (collection === 'inventaire') {
     searchWrap.hidden = false;
     const rechercheInput = document.getElementById('recherche');
-    rechercheInput.value = '';
+    rechercheInput.value = getPageFilter('inventaire', 'q', '');
     rechercheInput.placeholder = 'Rechercher un personnage...';
     document.getElementById('titre-section').textContent = 'Inventaire';
     document.getElementById('sous-titre').textContent = 'Inventaires individuels des personnages.';
@@ -174,40 +279,40 @@ async function chargerDonnees(collection) {
   } else if (collection === 'catalogue') {
     searchWrap.hidden = false;
     const rechercheInput = document.getElementById('recherche');
-    rechercheInput.value = '';
-    rechercheInput.placeholder = 'Rechercher un objet...';
+    rechercheInput.value = getPageFilter('catalogue', 'q', '');
+    rechercheInput.placeholder = 'Rechercher par nom ou ID...';
     document.getElementById('titre-section').textContent = "Catalogue d'objets";
     document.getElementById('sous-titre').textContent = 'Tous les objets du serveur, organisés par catégorie et rareté.';
     await chargerCataloguePage();
   } else if (collection === 'crafts') {
     searchWrap.hidden = false;
     const rechercheInput = document.getElementById('recherche');
-    rechercheInput.value = '';
-    rechercheInput.placeholder = 'Rechercher une recette...';
+    rechercheInput.value = getPageFilter('crafts', 'q', '');
+    rechercheInput.placeholder = 'Rechercher une recette ou un ID...';
     document.getElementById('titre-section').textContent = 'Atelier & crafts';
     document.getElementById('sous-titre').textContent = 'Configure les recettes disponibles dans le salon Discord Atelier.';
     await chargerCraftsPage();
   } else if (collection === 'production') {
     searchWrap.hidden = false;
     const rechercheInput = document.getElementById('recherche');
-    rechercheInput.value = '';
-    rechercheInput.placeholder = 'Rechercher une production...';
+    rechercheInput.value = getPageFilter('production', 'q', '');
+    rechercheInput.placeholder = 'Rechercher une production ou un ID...';
     document.getElementById('titre-section').textContent = 'Production';
     document.getElementById('sous-titre').textContent = 'Configure les recettes de production proposées aux joueurs dans Discord.';
     await chargerProductionPage();
   } else if (collection === 'personnel') {
     searchWrap.hidden = false;
     const rechercheInput = document.getElementById('recherche');
-    rechercheInput.value = '';
-    rechercheInput.placeholder = 'Rechercher un métier ou un personnel...';
+    rechercheInput.value = getPageFilter('personnel', 'q', '');
+    rechercheInput.placeholder = 'Rechercher un métier ou un ID...';
     document.getElementById('titre-section').textContent = 'Personnel & métiers';
     document.getElementById('sous-titre').textContent = 'Configure les membres du personnel achetables, leurs coûts, leurs tâches et leur entretien quotidien.';
     await chargerPersonnelPage();
   } else if (collection === 'boutique') {
     searchWrap.hidden = false;
     const rechercheInput = document.getElementById('recherche');
-    rechercheInput.value = '';
-    rechercheInput.placeholder = 'Rechercher un objet de la boutique...';
+    rechercheInput.value = getPageFilter('boutique', 'q', '');
+    rechercheInput.placeholder = 'Rechercher un objet ou un ID...';
     document.getElementById('titre-section').textContent = 'Boutique';
     document.getElementById('sous-titre').textContent = 'Objets, prix et stock de la boutique Discord. Les achats et ventes se font sur le bot.';
     await chargerBoutiquePage();
@@ -239,33 +344,109 @@ async function chargerProfils() {
   }
 }
 
+function champsProfilManquants(profile) {
+  const required = [
+    ['Nom', profile.nomPrenom],
+    ['Faction', profile.categoryName || profile.categoryId],
+    ['Grade', profile.roleName || profile.roleId],
+    ['Statut', profile.statut],
+    ['Faceclaim', profile.faceclaim],
+  ];
+  return required.filter(([, value]) => value === undefined || value === null || String(value).trim() === '').map(([label]) => label);
+}
+
+function toolbarFiltresProfilsHTML() {
+  const factions = [{ value: '', label: 'Toutes les factions' }, ...(state.listes.factions || []).map(f => ({ value: String(f.categoryRoleId || ''), label: f.label }))];
+  const roles = [{ value: '', label: 'Tous les grades' }, ...(state.listes.factions || []).flatMap(f => (f.grades || []).map(g => ({ value: String(g.id), label: `${f.label} — ${g.name}` })))];
+  const statuts = [{ value: '', label: 'Tous les statuts' }, ...(state.statuts || ['Vivant', 'Blessé', 'Prisonnier', 'Mort']).map(value => ({ value, label: value }))];
+  return toolbarFiltreHTML('profils', [
+    selectFiltreHTML('profils', 'faction', 'Faction', factions),
+    selectFiltreHTML('profils', 'grade', 'Grade', roles),
+    selectFiltreHTML('profils', 'statut', 'Statut', statuts),
+    selectFiltreHTML('profils', 'completude', 'Fiche', [{ value: '', label: 'Toutes les fiches' }, { value: 'incomplete', label: 'Incomplètes uniquement' }, { value: 'complete', label: 'Complètes uniquement' }]),
+    `<div class="filter-actions"><span id="compare-selection-count">${state.selectedProfileIds.size} sélectionné(s)</span><button type="button" class="btn-secondaire" id="btn-compare-profils" onclick="ouvrirComparaisonProfils()" ${state.selectedProfileIds.size < 2 ? 'disabled' : ''}>⇄ Comparer</button><button type="button" class="btn-secondaire" onclick="viderComparaisonProfils()" ${state.selectedProfileIds.size ? '' : 'disabled'}>Effacer la sélection</button></div>`,
+  ], 'profiles-filter-toolbar');
+}
+
 function renderListeProfils(data) {
   const contenuDiv = document.getElementById('contenu');
-  if (!data || data.length === 0) {
-    contenuDiv.innerHTML = "<div class='etat-vide'><div class='etat-vide-icone'>🕸️</div><p>Aucune donnée trouvée</p></div>";
-    return;
-  }
-  contenuDiv.innerHTML = data.map((item, i) => ligneHTML(item, i)).join('') +
-    '<div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>';
+  const rows = data || [];
+  contenuDiv.innerHTML = toolbarFiltresProfilsHTML() +
+    (rows.length ? rows.map((item, i) => ligneHTML(item, i)).join('') : "<div class='etat-vide'><div class='etat-vide-icone'>🕸️</div><p>Aucune donnée trouvée</p></div>") +
+    '<div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour ces filtres.</div>';
+  filtrerListe();
 }
 
 function ligneHTML(item, index) {
-  const delay = `${Math.min(index, 14) * 35}ms`;
+  const delay = `${Math.min(index, 14) * 20}ms`;
   const statutBadge = item.statut === 'Vivant' ? 'badge-vert' : item.statut === 'Mort' ? 'badge-sang'
     : item.statut === 'Prisonnier' ? 'badge-acier' : 'badge-or';
+  const missing = champsProfilManquants(item);
+  const profileId = String(item._id);
   return `
-    <div class="ligne" style="--i:${delay}" data-nom="${escapeAttr(((item.nomPrenom || item._id) + ' ' + (item.categoryName || item.roleName || '')).toLowerCase())}">
+    <div class="ligne profil-ligne" style="--i:${delay}" data-id="${escapeAttr(profileId)}" data-faction="${escapeAttr(item.categoryId || '')}" data-grade="${escapeAttr(item.roleId || '')}" data-statut="${escapeAttr(item.statut || '')}" data-incomplet="${missing.length ? '1' : '0'}" data-nom="${escapeAttr(((item.nomPrenom || profileId) + ' ' + profileId + ' ' + (item.surnom || '') + ' ' + (item.faceclaim || '') + ' ' + (item.categoryName || '') + ' ' + (item.roleName || '')).toLowerCase())}">
+      <label class="profile-compare-check" title="Sélectionner pour comparaison"><input type="checkbox" ${state.selectedProfileIds.has(profileId) ? 'checked' : ''} onchange="toggleCompareProfil('${jsAttr(profileId)}', this.checked)"><span></span></label>
       <div class="ligne-sigil">👤</div>
       <div class="ligne-corps">
-        <div class="ligne-nom">${escapeHtml(item.nomPrenom || item._id)}</div>
+        <div class="ligne-nom">${escapeHtml(item.nomPrenom || profileId)} ${item.surnom ? `<span class="profile-nickname">« ${escapeHtml(item.surnom)} »</span>` : ''}</div>
         <div class="ligne-meta">
           <span class="badge ${statutBadge}">${escapeHtml(item.statut || '-')}</span>
-          <span class="badge badge-defaut">${escapeHtml(item.roleName || 'Sans rôle')}${item.categoryName ? ` - ${escapeHtml(item.categoryName)}` : ''}</span>
+          <span class="badge badge-defaut">${escapeHtml(item.roleName || 'Sans rôle')}${item.categoryName ? ` — ${escapeHtml(item.categoryName)}` : ''}</span>
+          ${item.age !== undefined && item.age !== '' ? `<span class="badge badge-defaut">Âge : ${escapeHtml(item.age)}</span>` : ''}
+          ${item.faceclaim ? `<span class="badge badge-defaut">Faceclaim : ${escapeHtml(item.faceclaim)}</span>` : ''}
+          ${item.renommee !== undefined ? `<span class="badge badge-defaut">Renommée : ${escapeHtml(item.renommee)}</span>` : ''}
+          ${missing.length ? `<span class="badge badge-incomplet" title="À compléter : ${escapeAttr(missing.join(', '))}">⚠ Fiche incomplète (${missing.length})</span>` : '<span class="badge badge-complet">✓ Fiche complète</span>'}
         </div>
       </div>
-      <button class="btn-modifier" onclick="ouvrirEditeur('${jsAttr(item._id)}')">Modifier</button>
+      <div class="ligne-actions-profil"><button class="btn-secondaire" onclick="ouvrirHistorique('profil','${jsAttr(profileId)}','${jsAttr(item.nomPrenom || profileId)}')">Historique</button><button class="btn-modifier" onclick="ouvrirEditeur('${jsAttr(profileId)}')">Modifier</button></div>
     </div>`;
 }
+
+function toggleCompareProfil(id, checked) {
+  if (checked) {
+    if (state.selectedProfileIds.size >= 4 && !state.selectedProfileIds.has(id)) {
+      toast('Tu peux comparer jusqu’à 4 profils à la fois.', 'erreur');
+      const checkbox = [...document.querySelectorAll('.profile-compare-check input')].find(input => input.getAttribute('onchange')?.includes(`'${id}'`));
+      if (checkbox) checkbox.checked = false;
+      return;
+    }
+    state.selectedProfileIds.add(id);
+  } else state.selectedProfileIds.delete(id);
+  const count = document.getElementById('compare-selection-count');
+  const compare = document.getElementById('btn-compare-profils');
+  if (count) count.textContent = `${state.selectedProfileIds.size} sélectionné(s)`;
+  if (compare) compare.disabled = state.selectedProfileIds.size < 2;
+  document.querySelectorAll('.profile-compare-check').forEach(label => {
+    const input = label.querySelector('input');
+    if (input) input.disabled = state.selectedProfileIds.size >= 4 && !input.checked;
+  });
+}
+
+function viderComparaisonProfils() {
+  state.selectedProfileIds.clear();
+  renderListeProfils(state.cache.profils || []);
+}
+
+function ouvrirComparaisonProfils() {
+  const selected = [...state.selectedProfileIds].map(id => state.cache.profils.find(profile => String(profile._id) === id)).filter(Boolean);
+  if (selected.length < 2) return toast('Sélectionne au moins deux profils à comparer.', 'erreur');
+  const fields = [
+    ['Faction', p => p.categoryName || '—'], ['Grade', p => p.roleName || '—'], ['Statut', p => p.statut || '—'],
+    ['Âge', p => p.age || '—'], ['Faceclaim', p => p.faceclaim || '—'], ['Surnom', p => p.surnom || '—'],
+    ['Renommée', p => p.renommee ?? '—'], ['Garde personnelle', p => p.gardePersonnelle || '—'],
+    ['Bourse personnelle', p => p.boursePersonnelle || '—'], ['Notes', p => p.notes || '—'],
+    ['Stats', p => Object.entries(p.stats || {}).map(([key, value]) => `${key}: ${value}`).join('\n') || '—'],
+  ];
+  document.getElementById('profile-compare-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'profile-compare-overlay';
+  overlay.className = 'profile-compare-overlay';
+  overlay.innerHTML = `<div class="profile-compare-modal" role="dialog" aria-modal="true"><div class="profile-compare-head"><div><span class="panneau-eyebrow">Comparaison</span><h3>Comparer ${selected.length} profils</h3></div><button type="button" class="btn-fermer" onclick="fermerComparaisonProfils()" aria-label="Fermer">✕</button></div><div class="profile-compare-table-wrap"><table class="profile-compare-table"><thead><tr><th>Champ</th>${selected.map(p => `<th>${escapeHtml(p.nomPrenom || p._id)}</th>`).join('')}</tr></thead><tbody>${fields.map(([label, getter]) => `<tr><th>${escapeHtml(label)}</th>${selected.map(p => `<td>${escapeHtml(getter(p))}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div>`;
+  overlay.addEventListener('click', event => { if (event.target === overlay) fermerComparaisonProfils(); });
+  document.body.appendChild(overlay);
+}
+
+function fermerComparaisonProfils() { document.getElementById('profile-compare-overlay')?.remove(); }
 
 // -----------------------------------------------------------------------
 // Inventaire : les inventaires des personnages s'affichent directement dans
@@ -340,52 +521,54 @@ async function chargerCataloguePage() {
 function renderCataloguePage() {
   const contenuDiv = document.getElementById('contenu');
   const categories = new Map();
-  const ordreRarete = { epique: 0, rare: 1, 'peu-commun': 2, commun: 3 };
-
+  const currentCategory = getPageFilter('catalogue', 'category', state.catalogueCategorieActive || 'Tout');
+  state.catalogueCategorieActive = currentCategory || 'Tout';
   state.catalogue.forEach(item => {
-    const categorie = String(item.category || 'Divers').trim() || 'Divers';
-    if (!categories.has(categorie)) categories.set(categorie, []);
-    categories.get(categorie).push(item);
+    const category = String(item.category || 'Divers').trim() || 'Divers';
+    if (!categories.has(category)) categories.set(category, []);
+    categories.get(category).push(item);
   });
+  if (state.catalogueCategorieActive !== 'Tout' && !categories.has(state.catalogueCategorieActive)) state.catalogueCategorieActive = 'Tout';
 
-  if (state.catalogueCategorieActive !== 'Tout' && !categories.has(state.catalogueCategorieActive)) {
-    state.catalogueCategorieActive = 'Tout';
-  }
-
+  const sort = getPageFilter('catalogue', 'sort', 'rarity');
   const comparerObjets = (a, b) => {
-    const rangA = ordreRarete[slugTexte(a.rarity || 'Commun')] ?? 99;
-    const rangB = ordreRarete[slugTexte(b.rarity || 'Commun')] ?? 99;
-    return rangA - rangB || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+    const rarityA = RARETE_ORDRE[slugTexte(a.rarity || 'Commun')] ?? 99;
+    const rarityB = RARETE_ORDRE[slugTexte(b.rarity || 'Commun')] ?? 99;
+    if (sort === 'name-desc') return String(b.name || '').localeCompare(String(a.name || ''), 'fr') || String(a.id).localeCompare(String(b.id));
+    if (sort === 'id') return String(a.id || '').localeCompare(String(b.id || ''), 'fr', { numeric: true });
+    if (sort === 'name-asc') return String(a.name || '').localeCompare(String(b.name || ''), 'fr') || rarityA - rarityB;
+    return rarityA - rarityB || String(a.name || '').localeCompare(String(b.name || ''), 'fr') || String(a.id || '').localeCompare(String(b.id || ''));
   };
-
   const categoriesTriees = [...categories.entries()].sort(([a], [b]) => a.localeCompare(b, 'fr'));
   categoriesTriees.forEach(([, items]) => items.sort(comparerObjets));
   state.catalogueCategories = categoriesTriees;
 
   const navigationCategories = [
     `<button type="button" class="catalogue-categorie-chip${state.catalogueCategorieActive === 'Tout' ? ' active' : ''}" data-categorie="__TOUT__" aria-pressed="${state.catalogueCategorieActive === 'Tout'}">Tout</button>`,
-    ...categoriesTriees.map(([categorie]) => `<button type="button" class="catalogue-categorie-chip${state.catalogueCategorieActive === categorie ? ' active' : ''}" data-categorie="${escapeAttr(categorie)}" aria-pressed="${state.catalogueCategorieActive === categorie}">${escapeHtml(categorie)}</button>`),
+    ...categoriesTriees.map(([category]) => `<button type="button" class="catalogue-categorie-chip${state.catalogueCategorieActive === category ? ' active' : ''}" data-categorie="${escapeAttr(category)}" aria-pressed="${state.catalogueCategorieActive === category}">${escapeHtml(category)}</button>`),
   ].join('');
+  const slotOptions = [{ value: '', label: 'Tous les emplacements' }, ...(state.listes.equipmentSlots || []).map(slot => ({ value: slot.id, label: slot.label }))];
+  const countSelected = state.selectedCatalogIds.size;
 
   contenuDiv.innerHTML = `
     <div class="catalogue-actions-bar">
-      <div class="catalogue-actions-summary">
-        <strong>📦 Catalogue complet</strong>
-        <span>${state.catalogue.length} objet${state.catalogue.length > 1 ? 's' : ''} dans ${categories.size} catégorie${categories.size > 1 ? 's' : ''}</span>
-      </div>
+      <div class="catalogue-actions-summary"><strong>📦 Catalogue complet</strong><span>${state.catalogue.length} objet${state.catalogue.length > 1 ? 's' : ''} dans ${categories.size} catégorie${categories.size > 1 ? 's' : ''}</span></div>
       <div class="catalogue-actions">
         <button type="button" class="btn-principal" onclick="ouvrirEditeurCatalogue(null)">＋ Ajouter un objet</button>
         ${state.isFounder ? `<button type="button" class="btn-secondaire btn-danger" onclick="supprimerTousLesObjets()" ${state.catalogue.length ? '' : 'disabled'}>🗑️ Tout supprimer</button>` : ''}
       </div>
     </div>
+    ${toolbarFiltreHTML('catalogue', [
+      selectFiltreHTML('catalogue', 'rarity', 'Rareté', [{ value: '', label: 'Toutes les raretés' }, 'Épique', 'Rare', 'Peu commun', 'Commun']),
+      selectFiltreHTML('catalogue', 'slot', 'Emplacement', slotOptions),
+      selectFiltreHTML('catalogue', 'usage', 'Utilisabilité', [{ value: '', label: 'Tous les types' }, { value: 'usable', label: 'Utilisables' }, { value: 'not-usable', label: 'Non utilisables' }, { value: 'equipable', label: 'Équipement' }, { value: 'action', label: 'Avec effet à l’utilisation' }]),
+      selectFiltreHTML('catalogue', 'sort', 'Trier par', [{ value: 'rarity', label: 'Rareté : épique → commun' }, { value: 'name-asc', label: 'Nom A → Z' }, { value: 'name-desc', label: 'Nom Z → A' }, { value: 'id', label: 'Identifiant' }], 'rarity'),
+    ])}
+    <div class="catalogue-bulk-toolbar"><div><strong>☑ Sélection en masse</strong><span id="catalogue-selection-count">${countSelected} objet(s) sélectionné(s)</span></div><div class="catalogue-bulk-actions"><button type="button" class="btn-secondaire" onclick="ouvrirEditionMasseCatalogue()" ${countSelected ? '' : 'disabled'}>Modifier la sélection</button><button type="button" class="btn-secondaire btn-danger" onclick="supprimerSelectionCatalogue()" ${countSelected ? '' : 'disabled'}>Supprimer la sélection</button><button type="button" class="btn-secondaire" onclick="viderSelectionCatalogue()" ${countSelected ? '' : 'disabled'}>Désélectionner</button></div></div>
     <div class="catalogue-categories-nav" aria-label="Filtrer par catégorie">${navigationCategories}</div>
     <div id="catalogue-categories-contenu"></div>
-    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun objet ne correspond à cette recherche ou catégorie.</div>
-  `;
-
-  contenuDiv.querySelectorAll('.catalogue-categorie-chip').forEach(button => {
-    button.addEventListener('click', () => selectionnerCategorieCatalogue(button.dataset.categorie === '__TOUT__' ? 'Tout' : button.dataset.categorie));
-  });
+    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun objet ne correspond à cette recherche ou à ces filtres.</div>`;
+  contenuDiv.querySelectorAll('.catalogue-categorie-chip').forEach(button => button.addEventListener('click', () => selectionnerCategorieCatalogue(button.dataset.categorie === '__TOUT__' ? 'Tout' : button.dataset.categorie)));
   renderCatalogueCategoriesContent();
   filtrerListe();
 }
@@ -394,29 +577,20 @@ function renderCatalogueCategoriesContent() {
   const target = document.getElementById('catalogue-categories-contenu');
   if (!target) return;
   const categories = state.catalogueCategories || [];
-  const aAfficher = state.catalogueCategorieActive === 'Tout'
-    ? categories
-    : categories.filter(([categorie]) => categorie === state.catalogueCategorieActive);
-  if (!aAfficher.length) {
+  const visibleCategories = state.catalogueCategorieActive === 'Tout' ? categories : categories.filter(([category]) => category === state.catalogueCategorieActive);
+  if (!visibleCategories.length) {
     target.innerHTML = '<div class="etat-vide"><div class="etat-vide-icone">📦</div><p>Aucun objet dans cette catégorie.</p></div>';
     return;
   }
-  target.innerHTML = aAfficher.map(([categorie, items]) => {
-    const id = `catalogue-categorie-${slugTexte(categorie)}`;
-    return `
-      <section class="catalogue-categorie" data-categorie="${escapeAttr(categorie)}" id="${escapeAttr(id)}">
-        <div class="catalogue-categorie-header">
-          <div><span class="catalogue-categorie-eyebrow">Catégorie</span><h3>${escapeHtml(categorie)}</h3></div>
-          <span class="catalogue-categorie-count">${items.length} objet${items.length > 1 ? 's' : ''}</span>
-        </div>
-        <div class="catalogue-grille">${items.map(catalogueItemHTML).join('')}</div>
-      </section>`;
+  target.innerHTML = visibleCategories.map(([category, items]) => {
+    const id = `catalogue-categorie-${slugTexte(category)}`;
+    return `<section class="catalogue-categorie" data-categorie="${escapeAttr(category)}" id="${escapeAttr(id)}"><div class="catalogue-categorie-header"><div><span class="catalogue-categorie-eyebrow">Catégorie</span><h3>${escapeHtml(category)}</h3></div><span class="catalogue-categorie-count">${items.length} objet${items.length > 1 ? 's' : ''}</span></div><div class="catalogue-grille">${items.map(catalogueItemHTML).join('')}</div></section>`;
   }).join('');
-  // Les utilitaires d’animation ont été retirés lors de l’optimisation du chargement.
 }
 
-function selectionnerCategorieCatalogue(categorie) {
-  state.catalogueCategorieActive = categorie || 'Tout';
+function selectionnerCategorieCatalogue(category) {
+  state.catalogueCategorieActive = category || 'Tout';
+  setPageFilter('catalogue', 'category', state.catalogueCategorieActive);
   document.querySelectorAll('.catalogue-categorie-chip').forEach(button => {
     const active = button.dataset.categorie === (state.catalogueCategorieActive === 'Tout' ? '__TOUT__' : state.catalogueCategorieActive);
     button.classList.toggle('active', active);
@@ -424,6 +598,75 @@ function selectionnerCategorieCatalogue(categorie) {
   });
   renderCatalogueCategoriesContent();
   filtrerListe();
+}
+
+function toggleCatalogueSelection(id, checked) {
+  if (checked) state.selectedCatalogIds.add(String(id)); else state.selectedCatalogIds.delete(String(id));
+  const count = document.getElementById('catalogue-selection-count');
+  if (count) count.textContent = `${state.selectedCatalogIds.size} objet(s) sélectionné(s)`;
+  const toolbar = document.querySelector('.catalogue-bulk-toolbar');
+  toolbar?.querySelectorAll('button').forEach(button => { if (!button.textContent.includes('Désélectionner')) button.disabled = !state.selectedCatalogIds.size; else button.disabled = !state.selectedCatalogIds.size; });
+}
+
+function viderSelectionCatalogue() {
+  state.selectedCatalogIds.clear();
+  renderCataloguePage();
+}
+
+function ouvrirEditionMasseCatalogue() {
+  const ids = [...state.selectedCatalogIds];
+  if (!ids.length) return toast('Sélectionne au moins un objet.', 'erreur');
+  document.getElementById('overlay-catalogue').classList.add('visible');
+  document.getElementById('panneau-catalogue').classList.add('ouvert');
+  document.getElementById('panneau-catalogue-titre').textContent = `Modifier ${ids.length} objet(s)`;
+  document.getElementById('panneau-catalogue-corps').innerHTML = `
+    <div class="section-titre">🧩 Modification en masse</div><p class="section-note">Les champs laissés sur « Ne pas modifier » seront conservés pour chaque objet sélectionné.</p>
+    <div class="champ"><label for="f-bulk-rarity">Rareté</label><select id="f-bulk-rarity"><option value="">Ne pas modifier</option><option>Épique</option><option>Rare</option><option>Peu commun</option><option>Commun</option></select></div>
+    <div class="champ"><label for="f-bulk-category">Catégorie</label><input id="f-bulk-category" type="text" maxlength="100" placeholder="Laisser vide pour ne pas modifier"></div>
+    <div class="champ"><label for="f-bulk-usable">Statut d’utilisation</label><select id="f-bulk-usable"><option value="">Ne pas modifier</option><option value="1">Utilisable depuis Discord</option><option value="0">Non utilisable</option></select></div>
+    <div class="actions-panneau"><button type="button" class="btn-principal" id="btn-appliquer-bulk-catalogue" onclick="appliquerEditionMasseCatalogue()">Appliquer aux ${ids.length} objets</button></div>`;
+}
+
+async function appliquerEditionMasseCatalogue() {
+  const btn = document.getElementById('btn-appliquer-bulk-catalogue');
+  if (!btn) return;
+  const original = btn.textContent; btn.disabled = true; btn.textContent = 'Application…';
+  try {
+    const fields = {};
+    const rarity = val('f-bulk-rarity');
+    const category = val('f-bulk-category');
+    const usable = val('f-bulk-usable');
+    if (rarity) fields.rarity = rarity;
+    if (category.trim()) fields.category = category.trim();
+    if (usable !== '') fields.usable = usable === '1';
+    if (!Object.keys(fields).length) throw new Error('Choisis au moins un champ à modifier.');
+    const result = await fetchJSON('/api/inventaire/catalogue/bulk', { ids: [...state.selectedCatalogIds], fields }, 'PATCH');
+    toast(`${result.updated} objet(s) modifié(s).`, 'succes');
+    state.selectedCatalogIds.clear();
+    fermerCataloguePanel();
+    await chargerCataloguePage();
+  } catch (error) { toast(`Échec : ${error.message}`, 'erreur'); }
+  finally { btn.disabled = false; btn.textContent = original; }
+}
+
+async function supprimerSelectionCatalogue() {
+  const ids = [...state.selectedCatalogIds];
+  if (!ids.length) return;
+  try {
+    const usageResponse = await apiFetch('/api/inventaire/catalogue/usage');
+    if (!usageResponse.ok) throw new Error(`Impossible de vérifier les références (HTTP ${usageResponse.status}).`);
+    const usageData = await usageResponse.json();
+    const usageById = new Map((usageData.items || []).map(item => [String(item.id), item]));
+    const usages = ids.map(id => ({ id, ...(usageById.get(String(id)) || { total: 0 }) }));
+    const used = usages.filter(item => Number(item.total) > 0);
+    const detail = used.slice(0, 8).map(item => `${item.id}: ${item.inventories?.length || 0} inventaire(s), ${item.crafts?.length || 0} craft(s), ${item.productions?.length || 0} production(s), ${item.boutique ? 'boutique' : 'pas de boutique'}`).join('\n');
+    const message = `Supprimer ${ids.length} objet(s) ?${used.length ? `\n\n${used.length} objet(s) sont utilisés. Les références dans les inventaires, crafts, productions, effets d'objets et boutique seront nettoyées. Les recettes devenues invalides seront désactivées.\n\n${detail}${used.length > 8 ? '\n…' : ''}` : ''}`;
+    if (!await confirmerAction({ titre: 'Supprimer la sélection', message, texteValider: used.length ? 'Nettoyer et supprimer' : 'Supprimer' })) return;
+    const result = await fetchJSON('/api/inventaire/catalogue/bulk', { ids, repairReferences: used.length > 0 }, 'DELETE');
+    toast(`${result.deleted} objet(s) supprimé(s).`, 'succes');
+    state.selectedCatalogIds.clear();
+    await chargerCataloguePage();
+  } catch (error) { toast(`Suppression impossible : ${error.message}`, 'erreur'); }
 }
 
 // -----------------------------------------------------------------------
@@ -468,19 +711,29 @@ function craftObjetsTexte(rows) {
 }
 
 function renderCraftsPage() {
-  const cards = state.crafts.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr')).map(craftCardHTML).join('');
+  const sort = getPageFilter('crafts', 'sort', 'name-asc');
+  const recipes = state.crafts.slice().sort((a, b) => {
+    if (sort === 'duration-asc') return (Number(a.durationMinutes) || 0) - (Number(b.durationMinutes) || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+    if (sort === 'duration-desc') return (Number(b.durationMinutes) || 0) - (Number(a.durationMinutes) || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+    if (sort === 'name-desc') return String(b.name || '').localeCompare(String(a.name || ''), 'fr');
+    return String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+  });
+  const cards = recipes.map(craftCardHTML).join('');
   document.getElementById('contenu').innerHTML = `
-    <div class="crafts-intro"><div class="crafts-intro-icon">🛠️</div><div><strong>Atelier de fabrication</strong><p>Configure les ingrédients, les objets produits et la durée réelle de chaque recette. Les joueurs utilisent ensuite le panneau dans le salon Discord Atelier.</p></div><button class="btn-principal" onclick="ouvrirEditeurCraft(null)">＋ Nouvelle recette</button></div>
+    <div class="crafts-intro"><div class="crafts-intro-icon">🛠️</div><div><strong>Atelier de fabrication</strong><p>Configure les ingrédients, les objets produits et la durée réelle de chaque recette.</p></div><button class="btn-principal" onclick="ouvrirEditeurCraft(null)">＋ Nouvelle recette</button></div>
+    ${toolbarFiltreHTML('crafts', [selectFiltreHTML('crafts', 'enabled', 'Statut', [{ value: '', label: 'Tous les statuts' }, { value: '1', label: 'Actives' }, { value: '0', label: 'Désactivées' }]), selectFiltreHTML('crafts', 'sort', 'Trier par', [{ value: 'name-asc', label: 'Nom A → Z' }, { value: 'name-desc', label: 'Nom Z → A' }, { value: 'duration-asc', label: 'Durée croissante' }, { value: 'duration-desc', label: 'Durée décroissante' }], 'name-asc')])}
     <div class="crafts-grid">${cards || '<div class="etat-vide"><div class="etat-vide-icone">⚙️</div><p>Aucune recette configurée.</p><span class="etat-vide-sub">Crée une recette pour la publier dans le salon Atelier.</span></div>'}</div>
-    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucune recette ne correspond à cette recherche.</div>`;
+    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucune recette ne correspond à cette recherche ou à ces filtres.</div>`;
+  filtrerListe();
 }
 
 function craftCardHTML(recipe) {
   const name = recipe.name || 'Recette sans nom';
-  return `<article class="craft-card" data-nom="${escapeAttr(`${name} ${recipe.description || ''}`.toLowerCase())}">
+  const searchable = `${name} ${recipe._id || ''} ${recipe.description || ''}`.toLowerCase();
+  return `<article class="craft-card" data-id="${escapeAttr(recipe._id)}" data-nom="${escapeAttr(searchable)}" data-duration="${Number(recipe.durationMinutes) || 0}" data-enabled="${recipe.enabled === false ? '0' : '1'}">
     <div class="craft-card-head"><span class="craft-icon">${escapeHtml(recipe.emoji || '⚙️')}</span><div class="craft-card-title"><h3>${escapeHtml(name)}</h3><p>${escapeHtml(recipe.description || 'Aucune description.')}</p></div><span class="craft-duration">⏱ ${escapeHtml(dureeCraftTexte(recipe.durationMinutes))}</span></div>
     <div class="craft-columns"><div class="craft-items-preview"><strong>📥 Ingrédients nécessaires</strong><ul>${craftObjetsTexte(recipe.requirements) || '<li>-</li>'}</ul></div><div class="craft-items-preview craft-output-preview"><strong>📦 Objets produits</strong><ul>${craftObjetsTexte(recipe.outputs) || '<li>-</li>'}</ul></div></div>
-    <div class="craft-card-actions"><button class="btn-secondaire" onclick="ouvrirEditeurCraft('${jsAttr(recipe._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerCraft('${jsAttr(recipe._id)}')">Supprimer</button></div></article>`;
+    <div class="craft-card-actions"><button class="btn-secondaire" onclick="ouvrirHistorique('craft','${jsAttr(recipe._id)}','${jsAttr(name)}')">Historique</button><button class="btn-secondaire" onclick="ouvrirEditeurCraft('${jsAttr(recipe._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerCraft('${jsAttr(recipe._id)}')">Supprimer</button></div></article>`;
 }
 
 function optionsCatalogueCraft(selectedId) {
@@ -636,28 +889,16 @@ function classeRariete(rarity) {
 }
 
 function catalogueItemHTML(item) {
-  const labelSlot = item.slot ? (state.listes.equipmentSlots || []).find(s => s.id === item.slot)?.label || item.slot : null;
+  const labelSlot = item.slot ? (state.listes.equipmentSlots || []).find(slot => slot.id === item.slot)?.label || item.slot : null;
   const rarity = item.rarity || 'Commun';
-  return `
-    <article class="catalogue-item item-row" data-nom="${escapeAttr(String(item.name || '').toLowerCase())}">
-      <div class="catalogue-item-visual">${itemVisuelHTML(item)}</div>
-      <div class="item-corps">
-        <div class="catalogue-item-title-row">
-          <div class="item-nom">${escapeHtml(item.name)}</div>
-          <span class="rarity-badge ${classeRariete(rarity)}">✨ ${escapeHtml(rarity)}</span>
-        </div>
-        <div class="item-description">${escapeHtml(item.description || 'Aucune description.')}</div>
-        <div class="item-meta">
-          ${labelSlot ? `<span class="badge badge-defaut">🧷 ${escapeHtml(labelSlot)}</span>` : ''}
-          ${item.usable ? '<span class="badge badge-defaut">✅ Utilisable</span>' : ''}
-          ${Object.entries(item.statBonus || {}).map(([stat, val]) => `<span class="badge badge-defaut">📊 +${val} ${escapeHtml(stat)}</span>`).join('')}
-        </div>
-      </div>
-      <div class="catalogue-item-actions">
-        <button class="btn-secondaire" onclick="ouvrirEditeurCatalogue('${jsAttr(item.id)}')">Modifier</button>
-        <button class="btn-secondaire btn-danger" onclick="supprimerCatalogueItem('${jsAttr(item.id)}')">Supprimer</button>
-      </div>
-    </article>`;
+  const itemId = String(item.id);
+  const searchable = `${item.name || ''} ${item.id || ''} ${item.category || ''} ${rarity} ${labelSlot || ''}`.toLowerCase();
+  return `<article class="catalogue-item item-row" data-id="${escapeAttr(itemId)}" data-nom="${escapeAttr(searchable)}" data-category="${escapeAttr(item.category || 'Divers')}" data-rarity="${escapeAttr(rarity)}" data-slot="${escapeAttr(item.slot || '')}" data-usable="${item.usable ? '1' : '0'}" data-use-action="${item.useAction ? '1' : '0'}">
+    <label class="catalogue-item-select" title="Sélectionner pour modification en masse"><input type="checkbox" ${state.selectedCatalogIds.has(itemId) ? 'checked' : ''} onchange="toggleCatalogueSelection('${jsAttr(itemId)}',this.checked)"><span></span></label>
+    <div class="catalogue-item-visual">${itemVisuelHTML(item)}</div>
+    <div class="item-corps"><div class="catalogue-item-title-row"><div class="item-nom">${escapeHtml(item.name)}</div><span class="rarity-badge ${classeRariete(rarity)}">✨ ${escapeHtml(rarity)}</span></div><div class="item-description">${escapeHtml(item.description || 'Aucune description.')}</div><div class="item-meta">${labelSlot ? `<span class="badge badge-defaut">🧷 ${escapeHtml(labelSlot)}</span>` : ''}${item.usable ? '<span class="badge badge-defaut">✅ Utilisable</span>' : ''}<span class="badge badge-defaut">ID : ${escapeHtml(item.id)}</span>${Object.entries(item.statBonus || {}).map(([stat, value]) => `<span class="badge badge-defaut">📊 ${value > 0 ? '+' : ''}${value} ${escapeHtml(stat)}</span>`).join('')}</div></div>
+    <div class="catalogue-item-actions"><button class="btn-secondaire" onclick="ouvrirHistorique('catalogue','${jsAttr(itemId)}','${jsAttr(item.name)}')">Historique</button><button class="btn-secondaire" onclick="ouvrirEditeurCatalogue('${jsAttr(itemId)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerCatalogueItem('${jsAttr(itemId)}')">Supprimer</button></div>
+  </article>`;
 }
 
 function ligneInventaireHTML(profile, quantiteTotale, index) {
@@ -676,56 +917,95 @@ function ligneInventaireHTML(profile, quantiteTotale, index) {
 }
 
 function filtrerListe() {
-  const q = document.getElementById('recherche').value.trim().toLowerCase();
+  const recherche = document.getElementById('recherche');
+  const q = (recherche?.value || '').trim().toLowerCase();
+  if (['profils', 'inventaire', 'catalogue', 'crafts', 'production', 'personnel', 'boutique'].includes(state.collectionActuelle)) {
+    setPageFilter(state.collectionActuelle, 'q', q);
+  }
   const aucun = document.getElementById('aucun-resultat');
   let visibles = 0;
+  const prefs = pagePrefs(state.collectionActuelle || '');
 
   if (state.collectionActuelle === 'catalogue') {
+    const rarity = prefs.rarity || '';
+    const slot = prefs.slot || '';
+    const usage = prefs.usage || '';
     document.querySelectorAll('.catalogue-item').forEach(item => {
       const section = item.closest('.catalogue-categorie');
-      const bonneCategorie = state.catalogueCategorieActive === 'Tout' || section?.dataset.categorie === state.catalogueCategorieActive;
-      const correspondRecherche = !q || (item.dataset.nom || '').includes(q);
-      const correspond = bonneCategorie && correspondRecherche;
-      item.classList.toggle('masquee', !correspond);
-      if (correspond) visibles += 1;
+      const categoryOk = state.catalogueCategorieActive === 'Tout' || section?.dataset.categorie === state.catalogueCategorieActive;
+      const queryOk = !q || (item.dataset.nom || '').includes(q);
+      const rarityOk = !rarity || item.dataset.rarity === rarity;
+      const slotOk = !slot || item.dataset.slot === slot;
+      const usableOk = usage === 'usable' ? item.dataset.usable === '1'
+        : usage === 'not-usable' ? item.dataset.usable !== '1'
+        : usage === 'equipable' ? Boolean(item.dataset.slot)
+        : usage === 'action' ? item.dataset.useAction === '1' : true;
+      const matches = categoryOk && queryOk && rarityOk && slotOk && usableOk;
+      item.classList.toggle('masquee', !matches);
+      if (matches) visibles += 1;
     });
     document.querySelectorAll('.catalogue-categorie').forEach(section => {
-      const itemsVisibles = section.querySelectorAll('.catalogue-item:not(.masquee)').length;
-      const bonneCategorie = state.catalogueCategorieActive === 'Tout' || section.dataset.categorie === state.catalogueCategorieActive;
-      section.classList.toggle('masquee', !bonneCategorie || itemsVisibles === 0);
+      const anyVisible = section.querySelectorAll('.catalogue-item:not(.masquee)').length > 0;
+      section.classList.toggle('masquee', !anyVisible);
     });
-  } else if (state.collectionActuelle === 'crafts') {
-    document.querySelectorAll('.craft-card').forEach(card => {
-      const correspond = !q || (card.dataset.nom || '').includes(q);
-      card.classList.toggle('masquee', !correspond);
-      if (correspond) visibles += 1;
+  } else if (state.collectionActuelle === 'profils') {
+    const faction = prefs.faction || '';
+    const grade = prefs.grade || '';
+    const status = prefs.statut || '';
+    const completion = prefs.completude || '';
+    document.querySelectorAll('.profil-ligne').forEach(card => {
+      const queryOk = !q || (card.dataset.nom || '').includes(q);
+      const factionOk = !faction || card.dataset.faction === faction;
+      const gradeOk = !grade || card.dataset.grade === grade;
+      const statusOk = !status || card.dataset.statut === status;
+      const completenessOk = !completion || (completion === 'incomplete' ? card.dataset.incomplet === '1' : card.dataset.incomplet !== '1');
+      const matches = queryOk && factionOk && gradeOk && statusOk && completenessOk;
+      card.classList.toggle('masquee', !matches);
+      if (matches) visibles += 1;
     });
-  } else if (state.collectionActuelle === 'production') {
-    document.querySelectorAll('.production-card').forEach(card => {
-      const correspond = !q || (card.dataset.nom || '').includes(q);
-      card.classList.toggle('masquee', !correspond);
-      if (correspond) visibles += 1;
+  } else if (state.collectionActuelle === 'crafts' || state.collectionActuelle === 'production') {
+    const selector = state.collectionActuelle === 'crafts' ? '.craft-card' : '.production-card';
+    const enabled = prefs.enabled || '';
+    document.querySelectorAll(selector).forEach(card => {
+      const queryOk = !q || (card.dataset.nom || '').includes(q);
+      const enabledOk = !enabled || card.dataset.enabled === enabled;
+      const matches = queryOk && enabledOk;
+      card.classList.toggle('masquee', !matches);
+      if (matches) visibles += 1;
     });
   } else if (state.collectionActuelle === 'boutique') {
+    const category = prefs.category || '';
+    const rarity = prefs.rarity || '';
+    const side = prefs.side || '';
+    const enabled = prefs.enabled || '';
     document.querySelectorAll('.boutique-tuile').forEach(card => {
-      const correspond = !q || (card.dataset.nom || '').includes(q);
-      card.classList.toggle('masquee', !correspond);
-      if (correspond) visibles += 1;
+      const queryOk = !q || (card.dataset.nom || '').includes(q);
+      const categoryOk = !category || card.dataset.category === category;
+      const rarityOk = !rarity || card.dataset.rarity === rarity;
+      const sideOk = !side || card.dataset.side === side;
+      const enabledOk = !enabled || card.dataset.enabled === enabled;
+      const matches = queryOk && categoryOk && rarityOk && sideOk && enabledOk;
+      card.classList.toggle('masquee', !matches);
+      if (matches) visibles += 1;
     });
   } else if (state.collectionActuelle === 'personnel') {
+    const production = prefs.production || '';
+    const enabled = prefs.enabled || '';
     document.querySelectorAll('.personnel-type-card').forEach(card => {
-      const correspond = !q || (card.dataset.nom || '').includes(q);
-      card.classList.toggle('masquee', !correspond);
-      if (correspond) visibles += 1;
+      const queryOk = !q || (card.dataset.nom || '').includes(q);
+      const productionOk = !production || (production === '__GENERAL__' ? card.dataset.hasProduction !== '1' : card.dataset.production === production);
+      const enabledOk = !enabled || card.dataset.enabled === enabled;
+      const matches = queryOk && productionOk && enabledOk;
+      card.classList.toggle('masquee', !matches);
+      if (matches) visibles += 1;
     });
   } else {
-    document.querySelectorAll('.contenu .ligne').forEach(l => {
-      const correspond = !q || (l.dataset.nom || '').includes(q);
-      l.classList.toggle('masquee', !correspond);
-      if (correspond) visibles += 1;
+    document.querySelectorAll('.contenu .ligne').forEach(card => {
+      const matches = !q || (card.dataset.nom || '').includes(q);
+      card.classList.toggle('masquee', !matches);
+      if (matches) visibles += 1;
     });
   }
-
   if (aucun) aucun.hidden = visibles !== 0;
 }
 
@@ -881,6 +1161,62 @@ async function restaurerBackup(backupId) {
   } catch (error) {
     toast(`Échec de la restauration : ${error.message}`, 'erreur');
   }
+}
+
+function ouvrirHistorique(entityType, entityId, entityName = '') {
+  state.currentHistory = { entityType, entityId: String(entityId), entityName };
+  document.getElementById('overlay-catalogue').classList.add('visible');
+  document.getElementById('panneau-catalogue').classList.add('ouvert');
+  document.getElementById('panneau-catalogue-titre').textContent = `Historique — ${entityName || entityId}`;
+  document.getElementById('panneau-catalogue-corps').innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
+  chargerHistorique(entityType, String(entityId));
+}
+
+async function chargerHistorique(entityType, entityId) {
+  const body = document.getElementById('panneau-catalogue-corps');
+  if (!body) return;
+  try {
+    const response = await apiFetch(`/api/history?type=${encodeURIComponent(entityType)}&id=${encodeURIComponent(entityId)}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const entries = await response.json();
+    if (state.currentHistory?.entityType !== entityType || state.currentHistory?.entityId !== entityId) return;
+    body.innerHTML = `<div class="history-panel-intro"><strong>🕘 Modifications enregistrées</strong><p>Les snapshots permettent de rétablir une version précise sans restaurer toute la base.</p></div>${entries.map(historyCardHTML).join('') || '<div class="etat-vide"><p>Aucune modification historique trouvée.</p></div>'}`;
+  } catch (error) {
+    body.innerHTML = `<div class="etat-vide"><p>Impossible de charger l’historique.</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+  }
+}
+
+function historyCardHTML(entry) {
+  const changes = (entry.changes || []).map(change => `<div class="history-change"><strong>${escapeHtml(change.field)}</strong><div class="history-change-values"><span class="history-old">${escapeHtml(change.before || '—')}</span><span class="history-arrow">→</span><span class="history-new">${escapeHtml(change.after || '—')}</span></div></div>`).join('');
+  const actor = entry.actor?.username || 'Inconnu';
+  const action = String(entry.action || 'modification').replace(/_/g, ' ');
+  return `<article class="history-card"><div class="history-card-head"><div><strong>${escapeHtml(actor)}</strong><span class="history-action-label">${escapeHtml(action)}</span></div><time>${escapeHtml(formatDateLog(entry.timestamp))}</time></div><div class="history-diff-list">${changes || '<p class="section-note">Aucun champ affichable dans le détail.</p>'}</div><div class="history-card-actions">${entry.canRestore ? `<button type="button" class="btn-secondaire" onclick="restaurerHistorique('${jsAttr(entry.id)}','${jsAttr(entry.entityType)}','${jsAttr(entry.entityId)}')">↶ Restaurer cette version</button>` : ''}</div></article>`;
+}
+
+async function restaurerHistorique(historyId, entityType, entityId) {
+  const ok = await confirmerAction({ titre: 'Restaurer cette version', message: 'Cette action rétablit uniquement cet objet, cette recette, cet inventaire ou ce profil à l’état enregistré. L’état actuel sera lui aussi conservé dans l’historique.', texteValider: 'Restaurer cette version' });
+  if (!ok) return;
+  try {
+    await fetchJSON(`/api/history/${encodeURIComponent(historyId)}/restore`, {}, 'POST');
+    toast('Version restaurée. L’opération reste visible dans l’historique.', 'succes');
+    if (entityType === 'catalogue') {
+      await chargerCataloguePage();
+    } else if (entityType === 'inventaire') {
+      await chargerInventairePage();
+      if (state.cache.profils.some(profile => String(profile._id) === String(entityId))) ouvrirInventairePersonnage(String(entityId));
+    } else if (entityType === 'profil') {
+      await chargerProfils();
+    } else if (entityType === 'craft') {
+      await chargerCraftsPage();
+    } else if (entityType === 'production') {
+      await chargerProductionPage();
+    } else if (entityType === 'personnel') {
+      await chargerPersonnelPage();
+    } else if (entityType === 'boutique') {
+      await chargerBoutiquePage();
+    }
+    if (state.currentHistory) await chargerHistorique(state.currentHistory.entityType, state.currentHistory.entityId);
+  } catch (error) { toast(`Restauration impossible : ${error.message}`, 'erreur'); }
 }
 
 function formatDateLog(value) {
@@ -1323,37 +1659,53 @@ async function sauvegarderCatalogueItem(itemId) {
   }
 }
 
+function texteReferencesObjet(usage) {
+  if (!usage || !Number(usage.total)) return 'Aucune référence détectée.';
+  const lines = [];
+  if (usage.inventories?.length) lines.push(`Inventaires (${usage.inventories.length}) : ${usage.inventories.slice(0, 5).map(row => `${row.profileName} ×${row.quantity || 0}${row.equipmentSlots?.length ? ` [équipé : ${row.equipmentSlots.join(', ')}]` : ''}`).join(', ')}${usage.inventories.length > 5 ? ', …' : ''}`);
+  if (usage.crafts?.length) lines.push(`Crafts (${usage.crafts.length}) : ${usage.crafts.slice(0, 5).map(row => row.name).join(', ')}${usage.crafts.length > 5 ? ', …' : ''}`);
+  if (usage.productions?.length) lines.push(`Productions (${usage.productions.length}) : ${usage.productions.slice(0, 5).map(row => row.name).join(', ')}${usage.productions.length > 5 ? ', …' : ''}`);
+  if (usage.boutique) lines.push(`Boutique : stock ${usage.boutique.stock || 0}`);
+  if (usage.itemUseActions?.length) lines.push(`Effets d’objets (${usage.itemUseActions.length}) : ${usage.itemUseActions.slice(0, 5).map(row => row.name).join(', ')}`);
+  return lines.join('\n');
+}
+
 async function supprimerCatalogueItem(itemId) {
-  const ok = await confirmerAction({
-    titre: "Supprimer l'objet",
-    message: 'Supprimer cet objet du catalogue ? Les personnages qui le possèdent garderont son entrée (avec sa quantité), affichée avec un nom générique.',
-    texteValider: 'Supprimer',
-  });
-  if (!ok) return;
   try {
-    await fetchJSON(`/api/inventaire/catalogue/${encodeURIComponent(itemId)}`, null, 'DELETE');
+    const usageResponse = await apiFetch(`/api/inventaire/catalogue/${encodeURIComponent(itemId)}/usage`);
+    if (!usageResponse.ok) throw new Error(`Impossible de vérifier les références (HTTP ${usageResponse.status}).`);
+    const usage = await usageResponse.json();
+    const hasReferences = Number(usage.total) > 0;
+    const message = hasReferences
+      ? `Supprimer cet objet du catalogue ? Il est encore utilisé :\n\n${texteReferencesObjet(usage)}\n\nSi tu continues, ces références seront nettoyées automatiquement. Les recettes qui n’auront plus d’ingrédients ou de résultats seront désactivées.`
+      : 'Supprimer cet objet du catalogue ? Aucune référence active n’a été détectée.';
+    const ok = await confirmerAction({ titre: "Supprimer l'objet", message, texteValider: hasReferences ? 'Nettoyer les références et supprimer' : 'Supprimer' });
+    if (!ok) return;
+    await fetchJSON(`/api/inventaire/catalogue/${encodeURIComponent(itemId)}`, hasReferences ? { repairReferences: true } : null, 'DELETE');
     toast('Objet supprimé du catalogue.', 'succes');
-    await rafraichirCataloguePanel();
+    state.selectedCatalogIds.delete(String(itemId));
+    await chargerCataloguePage();
   } catch (error) {
     toast(`Échec de la suppression : ${error.message}`, 'erreur');
   }
 }
 
 async function supprimerTousLesObjets() {
-  if (!state.catalogue.length) return;
-  const ok = await confirmerAction({
-    titre: 'Vider le catalogue',
-    message: `Supprimer les ${state.catalogue.length} objets du catalogue ? Les personnages qui en possèdent garderont leur quantité, affichée avec un nom générique. Cette action est irréversible.`,
-    texteValider: 'Tout supprimer',
-  });
-  if (!ok) return;
+  if (!state.catalogue.length || !state.isFounder) return;
   try {
-    await fetchJSON('/api/inventaire/catalogue', null, 'DELETE');
+    const usageResponse = await apiFetch('/api/inventaire/catalogue/usage');
+    const usageData = usageResponse.ok ? await usageResponse.json() : { items: [] };
+    const used = (usageData.items || []).filter(entry => Number(entry.total) > 0);
+    const totalReferences = used.reduce((sum, entry) => sum + Number(entry.total || 0), 0);
+    const summary = used.slice(0, 8).map(entry => `${entry.name || entry.id} : ${entry.total} référence(s)`).join('\n');
+    const message = `Supprimer les ${state.catalogue.length} objets du catalogue ? Cette action est irréversible.\n\n${used.length ? `${used.length} objet(s) sont encore référencés (${totalReferences} références). Les inventaires, recettes, effets d’objets et réglages boutique seront nettoyés ; les recettes invalidées seront désactivées.\n\n${summary}${used.length > 8 ? '\n…' : ''}` : 'Aucune référence active n’a été détectée.'}`;
+    const ok = await confirmerAction({ titre: 'Vider le catalogue', message, texteValider: 'Nettoyer et tout supprimer' });
+    if (!ok) return;
+    await fetchJSON('/api/inventaire/catalogue', { repairReferences: used.length > 0 }, 'DELETE');
     toast('Catalogue vidé.', 'succes');
-    await rafraichirCataloguePanel();
-  } catch (error) {
-    toast(`Échec de la suppression : ${error.message}`, 'erreur');
-  }
+    state.selectedCatalogIds.clear();
+    await chargerCataloguePage();
+  } catch (error) { toast(`Échec : ${error.message}`, 'erreur'); }
 }
 
 // -----------------------------------------------------------------------
@@ -1389,35 +1741,27 @@ async function ouvrirInventairePersonnage(profileId) {
 
 function panneauInventairePersonnage(profile, inventoryDoc) {
   const items = inventoryDoc?.items || {};
-  const entrees = Object.entries(items);
+  const entries = Object.entries(items).sort(([idA], [idB]) => {
+    const a = state.catalogue.find(item => item.id === idA) || { id: idA, rarity: 'Commun', name: idA };
+    const b = state.catalogue.find(item => item.id === idB) || { id: idB, rarity: 'Commun', name: idB };
+    return (RARETE_ORDRE[slugTexte(a.rarity)] ?? 9) - (RARETE_ORDRE[slugTexte(b.rarity)] ?? 9) || String(a.name).localeCompare(String(b.name), 'fr');
+  });
 
-  const lignes = entrees.map(([itemId, qty]) => {
-    const catalogItem = state.catalogue.find(it => it.id === itemId) || { id: itemId, name: itemId, emoji: '❔' };
-    return `
-      <div class="item-row">
-        ${itemVisuelHTML(catalogItem)}
-        <div class="item-corps">
-          <div class="item-nom">${escapeHtml(catalogItem.name)}</div>
-          <div class="item-meta"><span class="badge badge-defaut">✨ ${escapeHtml(catalogItem.rarity || 'Commun')}</span></div>
-        </div>
-        <input type="number" min="0" class="qte-input" id="qte-${escapeAttr(itemId)}" value="${qty}">
-        <button class="btn-secondaire" onclick="modifierQuantiteItem('${jsAttr(profile._id)}', '${jsAttr(itemId)}')">OK</button>
-        <button class="btn-secondaire btn-danger" onclick="supprimerItemPersonnage('${jsAttr(profile._id)}', '${jsAttr(itemId)}')">✕</button>
-      </div>`;
+  const lignes = entries.map(([itemId, qty]) => {
+    const catalogItem = state.catalogue.find(item => item.id === itemId) || { id: itemId, name: itemId, emoji: '❔' };
+    return `<div class="item-row inventory-bulk-row" data-item-id="${escapeAttr(itemId)}"><label class="bulk-check-label" title="Sélectionner pour modification groupée"><input class="bulk-existing-check" type="checkbox" data-item-id="${escapeAttr(itemId)}"><span></span></label>${itemVisuelHTML(catalogItem)}<div class="item-corps"><div class="item-nom">${escapeHtml(catalogItem.name)}</div><div class="item-meta"><span class="badge badge-defaut">✨ ${escapeHtml(catalogItem.rarity || 'Commun')}</span><span class="badge badge-defaut">ID : ${escapeHtml(itemId)}</span></div></div><input type="number" min="0" max="1000000" class="qte-input" id="qte-${escapeAttr(itemId)}" value="${Math.max(0, Number(qty) || 0)}"><button class="btn-secondaire" onclick="modifierQuantiteItem('${jsAttr(profile._id)}', '${jsAttr(itemId)}')">OK</button><button class="btn-secondaire btn-danger" onclick="supprimerItemPersonnage('${jsAttr(profile._id)}', '${jsAttr(itemId)}')">✕</button></div>`;
   }).join('');
 
-  const optionsCatalogue = catalogueTrie().map(it => `<option value="${escapeAttr(it.id)}">${escapeHtml(it.emoji || '')} ${escapeHtml(it.name)}</option>`).join('');
+  const optionsCatalogue = catalogueTrie().map(item => `<option value="${escapeAttr(item.id)}">${escapeHtml(item.emoji || '')} ${escapeHtml(item.name)} — ${escapeHtml(item.id)}</option>`).join('');
+  const bulkAddRows = catalogueTrie().map(item => `<label class="inventory-bulk-add-row"><input class="bulk-add-check" type="checkbox" data-item-id="${escapeAttr(item.id)}"><span class="inventory-bulk-add-name">${escapeHtml(item.emoji || '📦')} ${escapeHtml(item.name)} <small>${escapeHtml(item.id)}</small></span><input type="number" class="bulk-add-quantity" data-item-id="${escapeAttr(item.id)}" min="1" max="1000000" value="1" aria-label="Quantité de ${escapeAttr(item.name)}"></label>`).join('');
 
   return `
-    <div class="section-titre">🎒 Objets possédés</div>
+    <div class="inventory-panel-heading"><div class="section-titre">🎒 Objets possédés</div><button class="btn-secondaire" onclick="ouvrirHistorique('inventaire','${jsAttr(profile._id)}','Inventaire ${jsAttr(profile.nomPrenom || profile._id)}')">Historique</button></div>
     <div id="inv-items-liste">${lignes || '<p class="section-note">Inventaire vide.</p>'}</div>
-
+    ${entries.length ? `<div class="inventory-bulk-actions"><span>Sélectionne plusieurs objets pour changer leurs quantités.</span><button type="button" class="btn-secondaire" onclick="modifierQuantitesSelectionnees('${jsAttr(profile._id)}')">Enregistrer les quantités sélectionnées</button></div>` : ''}
+    <details class="inventory-bulk-add"><summary>＋ Ajouter plusieurs objets en une fois</summary><div class="inventory-bulk-add-list">${bulkAddRows || '<p class="section-note">Catalogue vide.</p>'}</div><button type="button" class="btn-principal" onclick="ajouterPlusieursItemsPersonnage('${jsAttr(profile._id)}')">Ajouter la sélection à l’inventaire</button></details>
     <div class="section-titre" style="margin-top:26px">➕ Ajouter un objet</div>
-    <div class="ligne-ajout">
-      <select id="f-ajout-item">${optionsCatalogue || '<option value="">Catalogue vide</option>'}</select>
-      <input type="number" id="f-ajout-qte" min="1" value="1" style="flex:0 0 70px">
-      <button class="btn-secondaire" onclick="ajouterItemPersonnage('${jsAttr(profile._id)}')">Ajouter</button>
-    </div>`;
+    <div class="ligne-ajout"><select id="f-ajout-item">${optionsCatalogue || '<option value="">Catalogue vide</option>'}</select><input type="number" id="f-ajout-qte" min="1" max="1000000" value="1" style="flex:0 0 70px"><button class="btn-secondaire" onclick="ajouterItemPersonnage('${jsAttr(profile._id)}')">Ajouter</button></div>`;
 }
 
 async function rafraichirInventairePersonnage(profileId) {
@@ -1475,6 +1819,30 @@ async function ajouterItemPersonnage(profileId) {
   } catch (error) {
     toast(`Échec : ${error.message}`, 'erreur');
   }
+}
+
+async function modifierQuantitesSelectionnees(profileId) {
+  const selected = [...document.querySelectorAll('.bulk-existing-check:checked')];
+  const items = selected.map(check => ({ itemId: check.dataset.itemId, quantity: Number(document.getElementById(`qte-${check.dataset.itemId}`)?.value) }));
+  if (!items.length) return toast('Sélectionne au moins un objet à modifier.', 'erreur');
+  if (items.some(row => !Number.isFinite(row.quantity) || row.quantity < 0 || row.quantity > 1000000)) return toast('Toutes les quantités doivent être comprises entre 0 et 1 000 000.', 'erreur');
+  try {
+    await fetchJSON(`/api/inventaire/${encodeURIComponent(profileId)}/items/bulk`, { items }, 'PATCH');
+    toast(`${items.length} quantité(s) mise(s) à jour.`, 'succes');
+    await rafraichirInventairePersonnage(profileId);
+  } catch (error) { toast(`Échec : ${error.message}`, 'erreur'); }
+}
+
+async function ajouterPlusieursItemsPersonnage(profileId) {
+  const selected = [...document.querySelectorAll('.bulk-add-check:checked')];
+  const items = selected.map(check => ({ itemId: check.dataset.itemId, quantity: Number(document.querySelector(`.bulk-add-quantity[data-item-id="${cssAttrEscape(check.dataset.itemId)}"]`)?.value) }));
+  if (!items.length) return toast('Sélectionne au moins un objet à ajouter.', 'erreur');
+  if (items.some(row => !Number.isFinite(row.quantity) || row.quantity < 1 || row.quantity > 1000000)) return toast('Toutes les quantités doivent être comprises entre 1 et 1 000 000.', 'erreur');
+  try {
+    await fetchJSON(`/api/inventaire/${encodeURIComponent(profileId)}/items/bulk`, { items }, 'POST');
+    toast(`${items.length} type(s) d’objet(s) ajouté(s).`, 'succes');
+    await rafraichirInventairePersonnage(profileId);
+  } catch (error) { toast(`Échec : ${error.message}`, 'erreur'); }
 }
 
 // -----------------------------------------------------------------------
@@ -1617,10 +1985,11 @@ function objetsProductionHTML(rows) {
 
 function productionCardHTML(recipe) {
   const duration = formaterDureeProduction(recipe.minutesPerUnit || 30);
-  return `<article class="production-card" data-nom="${escapeAttr(`${recipe.name || ''} ${recipe.description || ''}`.toLowerCase())}">
+  const searchable = `${recipe.name || ''} ${recipe._id || ''} ${recipe.description || ''}`.toLowerCase();
+  return `<article class="production-card" data-id="${escapeAttr(recipe._id)}" data-nom="${escapeAttr(searchable)}" data-duration="${Number(recipe.minutesPerUnit) || 30}" data-enabled="${recipe.enabled === false ? '0' : '1'}">
     <div class="production-card-head"><span class="production-icon">${escapeHtml(recipe.emoji || '🏭')}</span><div class="production-card-title"><h3>${escapeHtml(recipe.name || 'Production sans nom')}</h3><p>${escapeHtml(recipe.description || 'Aucune description.')}</p></div><span class="production-time">⏱ ${escapeHtml(duration)} / unité</span></div>
     <div class="production-columns"><div class="production-preview"><strong>📥 Nécessaire par unité</strong><ul>${objetsProductionHTML(recipe.requirements)}</ul></div><div class="production-preview"><strong>📦 Produit par unité</strong><ul>${objetsProductionHTML(recipe.outputs)}</ul></div></div>
-    <div class="production-actions"><button class="btn-secondaire" onclick="ouvrirEditeurProduction('${jsAttr(recipe._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerProduction('${jsAttr(recipe._id)}')">Supprimer</button></div>
+    <div class="production-actions"><button class="btn-secondaire" onclick="ouvrirHistorique('production','${jsAttr(recipe._id)}','${jsAttr(recipe.name || 'Production')}')">Historique</button><button class="btn-secondaire" onclick="ouvrirEditeurProduction('${jsAttr(recipe._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerProduction('${jsAttr(recipe._id)}')">Supprimer</button></div>
   </article>`;
 }
 
@@ -1629,33 +1998,46 @@ function personnelTypeCardHTML(type) {
   const affectation = production
     ? `<strong>${escapeHtml(production.emoji || '🏭')} ${escapeHtml(production.name)}</strong><p class="personnel-role-general">Ce métier travaillera automatiquement sur cette production.</p>`
     : '<strong>Aucune production automatique</strong><p class="personnel-role-general">Métier général : il peut être recruté sans lancer de cycle de production.</p>';
-  const cols = `
-    <div class="production-preview"><strong>🪙 Coût de recrutement</strong><ul>${type.purchaseCost?.length ? objetsProductionHTML(type.purchaseCost) : '<li>Gratuit</li>'}</ul></div>
-    <div class="production-preview"><strong>🌙 Entretien quotidien à 00 h (Paris)</strong><ul>${objetsProductionHTML(type.dailyUpkeep)}</ul></div>
-    <div class="production-preview"><strong>🏭 Production associée par le staff</strong>${affectation}</div>`;
-  return `<article class="personnel-type-card" data-nom="${escapeAttr(`${type.name || ''} ${type.description || ''}`.toLowerCase())}">
+  const cols = `<div class="production-preview"><strong>🪙 Coût de recrutement</strong><ul>${type.purchaseCost?.length ? objetsProductionHTML(type.purchaseCost) : '<li>Gratuit</li>'}</ul></div><div class="production-preview"><strong>🌙 Entretien quotidien à 00 h (Paris)</strong><ul>${objetsProductionHTML(type.dailyUpkeep)}</ul></div><div class="production-preview"><strong>🏭 Production associée par le staff</strong>${affectation}</div>`;
+  const searchable = `${type.name || ''} ${type._id || ''} ${type.description || ''} ${production?.name || ''}`.toLowerCase();
+  return `<article class="personnel-type-card" data-id="${escapeAttr(type._id)}" data-nom="${escapeAttr(searchable)}" data-production="${escapeAttr(type.productionRecipeId || '')}" data-has-production="${production ? '1' : '0'}" data-enabled="${type.enabled === false ? '0' : '1'}" data-cost="${(type.purchaseCost || []).reduce((sum, row) => sum + (Number(row.quantity) || 0), 0)}">
     <div class="production-card-head"><span class="production-icon">${escapeHtml(type.emoji || '👷')}</span><div class="production-card-title"><h3>${escapeHtml(type.name || 'Personnel')}</h3><p>${escapeHtml(type.description || 'Aucune description.')}</p></div><span class="production-time">${production ? `🏭 ${escapeHtml(production.name)}` : 'Métier général'}</span></div>
     <div class="production-columns production-columns-three">${cols}</div>
-    <div class="production-actions"><button class="btn-secondaire" onclick="ouvrirEditeurPersonnelType('${jsAttr(type._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerPersonnelType('${jsAttr(type._id)}')">Supprimer</button></div>
+    <div class="production-actions"><button class="btn-secondaire" onclick="ouvrirHistorique('personnel','${jsAttr(type._id)}','${jsAttr(type.name || 'Personnel')}')">Historique</button><button class="btn-secondaire" onclick="ouvrirEditeurPersonnelType('${jsAttr(type._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerPersonnelType('${jsAttr(type._id)}')">Supprimer</button></div>
   </article>`;
 }
 
 function renderProductionPage() {
-  const productions = state.productions.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
+  const sort = getPageFilter('production', 'sort', 'name-asc');
+  const productions = state.productions.slice().sort((a, b) => {
+    if (sort === 'duration-asc') return (Number(a.minutesPerUnit) || 0) - (Number(b.minutesPerUnit) || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+    if (sort === 'duration-desc') return (Number(b.minutesPerUnit) || 0) - (Number(a.minutesPerUnit) || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+    if (sort === 'name-desc') return String(b.name || '').localeCompare(String(a.name || ''), 'fr');
+    return String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+  });
   document.getElementById('contenu').innerHTML = `
     <div class="production-intro"><div class="production-intro-icon">🏭</div><div><strong>Production</strong><p>Les joueurs choisissent une recette et une quantité dans le salon Discord dédié. Chaque recette possède sa propre durée configurable.</p></div></div>
     <div class="production-section-heading"><div><h3>🏭 Productions disponibles</h3><p>Configure les ingrédients, les résultats et le temps nécessaire par unité.</p></div><button class="btn-principal" onclick="ouvrirEditeurProduction(null)">＋ Nouvelle production</button></div>
-    <div class="production-grid">${productions.map(productionCardHTML).join('') || '<div class="etat-vide"><p>Aucune production configurée.</p><span class="etat-vide-sub">Crée une production à proposer aux joueurs.</span></div>'}</div>
-    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>`;
+    ${toolbarFiltreHTML('production', [selectFiltreHTML('production', 'enabled', 'Statut', [{ value: '', label: 'Tous les statuts' }, { value: '1', label: 'Actives' }, { value: '0', label: 'Désactivées' }]), selectFiltreHTML('production', 'sort', 'Trier par', [{ value: 'name-asc', label: 'Nom A → Z' }, { value: 'name-desc', label: 'Nom Z → A' }, { value: 'duration-asc', label: 'Durée croissante' }, { value: 'duration-desc', label: 'Durée décroissante' }], 'name-asc')])}
+    <div class="production-grid">${productions.map(productionCardHTML).join('') || '<div class="etat-vide"><p>Aucune production configurée.</p><span class="etat-vide-sub">Crée une production à proposer aux joueurs.</span></div>'}</div><div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche ou ces filtres.</div>`;
+  filtrerListe();
 }
 
 function renderPersonnelPage() {
-  const types = state.personnelTypes.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
+  const sort = getPageFilter('personnel', 'sort', 'name-asc');
+  const types = state.personnelTypes.slice().sort((a, b) => {
+    if (sort === 'cost-asc') return (a.purchaseCost || []).reduce((sum, row) => sum + Number(row.quantity || 0), 0) - (b.purchaseCost || []).reduce((sum, row) => sum + Number(row.quantity || 0), 0) || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+    if (sort === 'cost-desc') return (b.purchaseCost || []).reduce((sum, row) => sum + Number(row.quantity || 0), 0) - (a.purchaseCost || []).reduce((sum, row) => sum + Number(row.quantity || 0), 0) || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+    if (sort === 'name-desc') return String(b.name || '').localeCompare(String(a.name || ''), 'fr');
+    return String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+  });
+  const productionOptions = [{ value: '', label: 'Tous les métiers' }, { value: '__GENERAL__', label: 'Métier général' }, ...state.productions.map(row => ({ value: String(row._id), label: row.name || row._id }))];
   document.getElementById('contenu').innerHTML = `
-    <div class="production-intro"><div class="production-intro-icon">👥</div><div><strong>Personnel & métiers</strong><p>Configure les métiers achetables : mineur, pilote, droïde, garde, technicien ou tout rôle personnalisé. Au recrutement, le joueur affecte ce personnel à une production créée dans l’onglet Production.</p></div></div>
-    <div class="production-section-heading"><div><h3>👷 Personnel achetable</h3><p>Chaque membre est affecté à un personnage et à une production (ex. Kessel). Les besoins par cycle et la durée proviennent de la production ; l’entretien du personnel est prélevé chaque jour à minuit, heure de Paris.</p></div><button class="btn-principal" onclick="ouvrirEditeurPersonnelType(null)">＋ Nouveau type de personnel</button></div>
-    <div class="personnel-types-grid">${types.map(personnelTypeCardHTML).join('') || '<div class="etat-vide"><p>Aucun personnel configuré.</p><span class="etat-vide-sub">Crée un type de personnel pour le rendre achetable dans Discord.</span></div>'}</div>
-    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>`;
+    <div class="production-intro"><div class="production-intro-icon">👥</div><div><strong>Personnel & métiers</strong><p>Configure les métiers achetables, leurs coûts, leurs tâches et leur entretien quotidien.</p></div></div>
+    <div class="production-section-heading"><div><h3>👷 Personnel achetable</h3><p>Chaque métier peut être associé à une production sur le site.</p></div><button class="btn-principal" onclick="ouvrirEditeurPersonnelType(null)">＋ Nouveau type de personnel</button></div>
+    ${toolbarFiltreHTML('personnel', [selectFiltreHTML('personnel', 'production', 'Affectation', productionOptions), selectFiltreHTML('personnel', 'enabled', 'Statut', [{ value: '', label: 'Tous les statuts' }, { value: '1', label: 'Actifs' }, { value: '0', label: 'Désactivés' }]), selectFiltreHTML('personnel', 'sort', 'Trier par', [{ value: 'name-asc', label: 'Nom A → Z' }, { value: 'name-desc', label: 'Nom Z → A' }, { value: 'cost-asc', label: 'Coût de recrutement croissant' }, { value: 'cost-desc', label: 'Coût de recrutement décroissant' }], 'name-asc')])}
+    <div class="personnel-types-grid">${types.map(personnelTypeCardHTML).join('') || '<div class="etat-vide"><p>Aucun personnel configuré.</p><span class="etat-vide-sub">Crée un type de personnel pour le rendre achetable dans Discord.</span></div>'}</div><div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche ou ces filtres.</div>`;
+  filtrerListe();
 }
 
 function optionsCatalogueProduction(selectedId) {
@@ -1919,27 +2301,37 @@ function boutiqueCardHTML(entry, side) {
   const masque = entry.enabled === false;
   const stock = Math.max(0, Number(entry.stock) || 0);
   const etat = masque ? '🚫 Masqué' : stock > 0 ? `📦 ${stock}` : '❌ Rupture';
-  return `<button type="button" class="boutique-tuile${masque ? ' boutique-masque' : ''}" onclick="ouvrirEditeurBoutique('${jsAttr(entry.id)}', '${side}')" data-nom="${escapeAttr(`${nom} ${entry.id} ${item?.category || ''}`.toLowerCase())}" title="${escapeAttr(nom)}">
-    <span class="boutique-tuile-icone">${escapeHtml(item?.emoji || '📦')}</span>
-    <span class="boutique-tuile-nom">${escapeHtml(nom)}</span>
-    <span class="boutique-tuile-stock">${etat}</span>
+  const typeLabel = typeBoutique(entry);
+  const searchable = `${nom} ${entry.id} ${item?.category || ''} ${item?.rarity || ''} ${typeLabel}`.toLowerCase();
+  return `<button type="button" class="boutique-tuile${masque ? ' boutique-masque' : ''}" onclick="ouvrirEditeurBoutique('${jsAttr(entry.id)}', '${side}')" data-id="${escapeAttr(entry.id)}" data-nom="${escapeAttr(searchable)}" data-category="${escapeAttr(item?.category || 'Divers')}" data-rarity="${escapeAttr(item?.rarity || 'Commun')}" data-side="${side}" data-type="${typeLabel}" data-stock="${stock}" data-enabled="${masque ? '0' : '1'}" data-price="${Number(side === 'vendable' ? entry.rachatMinPrice : entry.minPrice) || 0}" title="${escapeAttr(nom)}">
+    <span class="boutique-tuile-icone">${escapeHtml(item?.emoji || '📦')}</span><span class="boutique-tuile-nom">${escapeHtml(nom)}</span><span class="boutique-tuile-stock">${etat}</span><span class="boutique-tuile-id">${escapeHtml(entry.id)} · ${escapeHtml(item?.rarity || 'Commun')}</span>
   </button>`;
 }
 
 function renderBoutiquePage() {
-  const nomDe = e => String(state.catalogue.find(it => it.id === e.id)?.name || e.id);
-  const parPrix = (min, max) => (a, b) =>
-    (Number(a[min]) || 0) - (Number(b[min]) || 0) || (Number(a[max]) || 0) - (Number(b[max]) || 0)
-    || nomDe(a).localeCompare(nomDe(b), 'fr');
-  const achetables = state.boutique.filter(estAchetable).sort(parPrix('minPrice', 'maxPrice'));
-  const vendables = state.boutique.filter(estVendable).sort(parPrix('rachatMinPrice', 'rachatMaxPrice'));
-  const vide = texte => `<div class="etat-vide boutique-vide"><p>${texte}</p></div>`;
+  const sort = getPageFilter('boutique', 'sort', 'price-asc');
+  const nomDe = entry => String(state.catalogue.find(item => item.id === entry.id)?.name || entry.id);
+  const compare = (a, b, side) => {
+    if (sort === 'name-desc') return nomDe(b).localeCompare(nomDe(a), 'fr');
+    if (sort === 'name-asc') return nomDe(a).localeCompare(nomDe(b), 'fr');
+    if (sort === 'stock-desc') return (Number(b.stock) || 0) - (Number(a.stock) || 0) || nomDe(a).localeCompare(nomDe(b), 'fr');
+    if (sort === 'stock-asc') return (Number(a.stock) || 0) - (Number(b.stock) || 0) || nomDe(a).localeCompare(nomDe(b), 'fr');
+    const key = side === 'vendable' ? 'rachatMinPrice' : 'minPrice';
+    return (Number(a[key]) || 0) - (Number(b[key]) || 0) || nomDe(a).localeCompare(nomDe(b), 'fr');
+  };
+  const achetables = state.boutique.filter(estAchetable).sort((a, b) => compare(a, b, 'achetable'));
+  const vendables = state.boutique.filter(estVendable).sort((a, b) => compare(a, b, 'vendable'));
+  const categories = [...new Set(state.boutique.map(entry => state.catalogue.find(item => item.id === entry.id)?.category || 'Divers'))].sort((a, b) => a.localeCompare(b, 'fr'));
+  const rarities = ['Épique', 'Rare', 'Peu commun', 'Commun'];
+  const categoryOptions = [{ value: '', label: 'Toutes les catégories' }, ...categories.map(value => ({ value, label: value }))];
+  const vide = text => `<div class="etat-vide boutique-vide"><p>${text}</p></div>`;
   document.getElementById('contenu').innerHTML = `
-    <div class="production-section-heading"><div><h3>🛒 Achetable</h3></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'achetable')">＋ Ajouter</button></div>
-    <div class="boutique-grille">${achetables.map(e => boutiqueCardHTML(e, 'achetable')).join('') || vide('Aucun objet achetable.')}</div>
-    <div class="production-section-heading"><div><h3>💰 Vendable</h3></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'vendable')">＋ Ajouter</button></div>
-    <div class="boutique-grille">${vendables.map(e => boutiqueCardHTML(e, 'vendable')).join('') || vide('Aucun objet vendable.')}</div>
-    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>`;
+    <div class="production-intro"><div class="production-intro-icon">🛒</div><div><strong>Boutique</strong><p>Configure les objets proposés, leur stock partagé et les fourchettes de prix qui sont utilisées par le marchand Discord.</p></div></div>
+    ${toolbarFiltreHTML('boutique', [selectFiltreHTML('boutique', 'category', 'Catégorie', categoryOptions), selectFiltreHTML('boutique', 'rarity', 'Rareté', [{ value: '', label: 'Toutes les raretés' }, ...rarities.map(value => ({ value, label: value }))]), selectFiltreHTML('boutique', 'side', 'Type', [{ value: '', label: 'Achetable et vendable' }, { value: 'achetable', label: 'Achetable' }, { value: 'vendable', label: 'Vendable' }]), selectFiltreHTML('boutique', 'enabled', 'Visibilité', [{ value: '', label: 'Tous' }, { value: '1', label: 'Visibles' }, { value: '0', label: 'Masqués' }]), selectFiltreHTML('boutique', 'sort', 'Trier par', [{ value: 'price-asc', label: 'Prix croissant' }, { value: 'stock-desc', label: 'Stock décroissant' }, { value: 'stock-asc', label: 'Stock croissant' }, { value: 'name-asc', label: 'Nom A → Z' }, { value: 'name-desc', label: 'Nom Z → A' }], 'price-asc')])}
+    <div class="production-section-heading"><div><h3>🛒 Achetable</h3></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'achetable')">＋ Ajouter</button></div><div class="boutique-grille">${achetables.map(entry => boutiqueCardHTML(entry, 'achetable')).join('') || vide('Aucun objet achetable.')}</div>
+    <div class="production-section-heading"><div><h3>💰 Vendable</h3></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'vendable')">＋ Ajouter</button></div><div class="boutique-grille">${vendables.map(entry => boutiqueCardHTML(entry, 'vendable')).join('') || vide('Aucun objet vendable.')}</div>
+    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun objet ne correspond à cette recherche ou à ces filtres.</div>`;
+  filtrerListe();
 }
 
 function ouvrirEditeurBoutique(itemId, side = 'achetable') {

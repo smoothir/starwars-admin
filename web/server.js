@@ -41,7 +41,7 @@ const {
   setItemQuantity,
 } = require('../Data/invStore.js');
 const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup } = require('../Data/adminStore.js');
-const { getBoutiqueItemsCollection, getBoutiqueStateCollection, getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection } = require('../Data/mongo.js');
+const { connect, getItemCatalogCollection, getBoutiqueItemsCollection, getBoutiqueStateCollection, getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection } = require('../Data/mongo.js');
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
@@ -154,11 +154,257 @@ app.use('/api', (req, res, next) => {
   return res.status(401).json({ error: 'Authentification requise.' });
 });
 
+
+app.get('/api/dashboard', async (req, res) => {
+  try {
+    const db = await connect();
+    const [profiles, objects, crafts, productions, personnel, boutique, recent] = await Promise.all([
+      db.collection('profils').countDocuments({}),
+      db.collection('item_catalog').countDocuments({ _id: { $not: /^__/ } }),
+      db.collection('craft_recipes').countDocuments({}),
+      db.collection('production_recipes').countDocuments({}),
+      db.collection('personnel_types').countDocuments({}),
+      db.collection('boutique_items').countDocuments({}),
+      listLogs(10),
+    ]);
+    res.set('Cache-Control', 'no-store');
+    res.json({ counts: { profils: profiles, objets: objects, crafts, productions, personnel, boutique }, recent: recent.map(row => ({ username: row.username, action: row.action, details: row.details, timestamp: row.timestamp })) });
+  } catch (err) {
+    console.error('Chargement du tableau de bord impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/history', async (req, res) => {
+  try {
+    const entityType = String(req.query.type || '').trim();
+    const entityId = String(req.query.id || '').trim();
+    if (!entityType || !entityId) return res.status(400).json({ error: 'Type et identifiant requis.' });
+    const history = (await connect()).collection(HISTORY_COLLECTION);
+    const rows = await history.find({ entityType, $or: [{ entityId }, { beforeId: entityId }, { afterId: entityId }] }).sort({ timestamp: -1 }).limit(50).toArray();
+    res.json(rows.map(row => ({
+      id: String(row._id), entityType: row.entityType, entityId: row.entityId, entityName: row.entityName,
+      action: row.action, actor: row.actor, timestamp: row.timestamp,
+      changes: historyDiff(row.beforeDocument, row.afterDocument),
+      beforeExists: row.beforeDocument != null,
+      afterExists: row.afterDocument != null,
+      canRestore: Object.prototype.hasOwnProperty.call(row, 'beforeDocument'),
+    })));
+  } catch (err) {
+    console.error('Chargement de l’historique impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/history/:historyId/restore', async (req, res) => {
+  try {
+    const db = await connect();
+    const historyCol = db.collection(HISTORY_COLLECTION);
+    const event = await historyCol.findOne({ _id: String(req.params.historyId) });
+    if (!event) return res.status(404).json({ error: 'Entrée d’historique introuvable.' });
+    if (!HISTORY_ALLOWED_COLLECTIONS.has(event.collectionName) || !Object.prototype.hasOwnProperty.call(event, 'beforeDocument')) {
+      return res.status(400).json({ error: 'Cette modification ne peut pas être restaurée individuellement.' });
+    }
+    const collection = db.collection(event.collectionName);
+    const beforeCurrent = event.afterId || event.entityId;
+    const currentDoc = beforeCurrent ? await collection.findOne({ _id: beforeCurrent }) : null;
+    const snapshot = event.beforeDocument;
+    let restoredDoc = null;
+
+    if (event.collectionName === 'item_catalog') {
+      if (snapshot == null) {
+        if (currentDoc) {
+          const usage = await usageOfCatalogItem(String(currentDoc._id));
+          if (usage.total > 0) {
+            return res.status(409).json({ error: `Impossible d’annuler cette création : l’objet est encore utilisé (${usage.total} référence(s)). Supprime ou corrige d’abord ces références depuis le catalogue.`, usage });
+          }
+          await removeCatalogItem(String(currentDoc._id));
+        }
+      } else {
+        const payload = snapshotCatalogPayload(snapshot);
+        if (currentDoc) restoredDoc = await updateCatalogItem(String(currentDoc._id), payload);
+        else restoredDoc = await addCatalogItem(payload);
+        restoredDoc = await collection.findOne({ _id: String(restoredDoc?.id || payload.id) });
+      }
+    } else {
+      if (snapshot == null) {
+        if (currentDoc) await collection.deleteOne({ _id: currentDoc._id });
+      } else {
+        if (currentDoc && String(currentDoc._id) !== String(snapshot._id)) await collection.deleteOne({ _id: currentDoc._id });
+        await collection.replaceOne({ _id: snapshot._id }, snapshot, { upsert: true });
+        restoredDoc = snapshot;
+      }
+    }
+
+    await recordEntityHistory(req, {
+      entityType: event.entityType, collectionName: event.collectionName,
+      beforeDocument: currentDoc || null, afterDocument: restoredDoc,
+      action: 'restauration_individuelle', entityName: event.entityName,
+    });
+    await historyCol.updateOne({ _id: event._id }, { $set: { restoredAt: new Date(), restoredBy: req.session.user?.id || null } });
+    await logAction({ ...req.session.user, action: 'historique_restaure', details: `A restauré une modification de ${event.entityName}.` });
+    res.json({ ok: true, entityType: event.entityType, entityId: String(restoredDoc?._id || snapshot?._id || event.entityId) });
+  } catch (err) {
+    console.error('Restauration individuelle impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Petit raccourci pour journaliser une action depuis une route : reprend
 // automatiquement l'identité de la personne connectée (req.session.user).
 function logFromReq(req, action, details) {
   logAction({ ...req.session.user, action, details }).catch((err) => console.error('logAction échoué :', err.message));
 }
+
+
+const HISTORY_COLLECTION = 'site_change_history';
+const HISTORY_ALLOWED_COLLECTIONS = new Set(['profils', 'item_catalog', 'craft_recipes', 'production_recipes', 'personnel_types', 'boutique_items', 'inv']);
+
+async function recordEntityHistory(req, { entityType, collectionName, beforeDocument, afterDocument, action, entityName }) {
+  try {
+    const history = (await connect()).collection(HISTORY_COLLECTION);
+    const before = beforeDocument === undefined ? null : beforeDocument;
+    const after = afterDocument === undefined ? null : afterDocument;
+    const beforeId = before?._id != null ? String(before._id) : null;
+    const afterId = after?._id != null ? String(after._id) : null;
+    await history.insertOne({
+      _id: `change_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`,
+      entityType,
+      collectionName,
+      entityId: afterId || beforeId || '',
+      beforeId,
+      afterId,
+      entityName: String(entityName || after?.name || before?.name || after?.nomPrenom || before?.nomPrenom || afterId || beforeId || 'Élément'),
+      action,
+      beforeDocument: before,
+      afterDocument: after,
+      actor: {
+        discordId: req.session.user?.id || null,
+        username: req.session.user?.username || 'Inconnu',
+        avatar: req.session.user?.avatar || null,
+      },
+      timestamp: new Date(),
+    });
+  } catch (error) {
+    // L’historique ne doit pas faire échouer l’opération principale.
+    console.error('Enregistrement de l’historique impossible :', error?.message || error);
+  }
+}
+
+function historyValue(value, key = '') {
+  if (value === undefined) return '—';
+  if (key.toLowerCase().includes('image')) return value ? 'Image présente' : 'Aucune image';
+  if (value === null || value === '') return '—';
+  if (value instanceof Date) return value.toLocaleString('fr-FR');
+  if (typeof value === 'object') {
+    const text = JSON.stringify(value);
+    return text.length > 500 ? `${text.slice(0, 497)}…` : text;
+  }
+  const text = String(value);
+  return text.length > 500 ? `${text.slice(0, 497)}…` : text;
+}
+
+function historyDiff(before, after) {
+  const oldDoc = before && typeof before === 'object' ? before : {};
+  const newDoc = after && typeof after === 'object' ? after : {};
+  const keys = [...new Set([...Object.keys(oldDoc), ...Object.keys(newDoc)])]
+    .filter(key => !['_id', 'createdAt', 'updatedAt', '__v'].includes(key));
+  return keys.map(key => {
+    const oldValue = historyValue(oldDoc[key], key);
+    const newValue = historyValue(newDoc[key], key);
+    return oldValue === newValue ? null : { field: key, before: oldValue, after: newValue };
+  }).filter(Boolean).slice(0, 30);
+}
+
+function snapshotCatalogPayload(document) {
+  if (!document) return null;
+  const { _id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction } = document;
+  return { id: String(_id), name, emoji, category, rarity, description, image: image ?? null, slot: slot ?? null, usable: Boolean(usable), statBonus: statBonus || {}, useAction: useAction ?? null };
+}
+
+async function usageOfCatalogItems(itemIds) {
+  const ids = [...new Set((itemIds || []).map(value => String(value || '')).filter(Boolean))];
+  const result = new Map(ids.map(id => [id, { inventories: [], crafts: [], productions: [], boutique: null, itemUseActions: [], total: 0 }]));
+  if (!ids.length) return result;
+  const idSet = new Set(ids);
+  const [inventories, profiles, crafts, productions, shopDocs, itemUseActions] = await Promise.all([
+    (await getInvCollection()).find({}, { projection: { _id: 1, items: 1, equipement: 1 } }).toArray(),
+    listAllProfiles(),
+    (await getCraftRecipesCollection()).find({ $or: [{ requirements: { $elemMatch: { itemId: { $in: ids } } } }, { outputs: { $elemMatch: { itemId: { $in: ids } } } }] }, { projection: { _id: 1, name: 1, requirements: 1, outputs: 1, enabled: 1 } }).toArray(),
+    (await getProductionRecipesCollection()).find({ $or: [{ requirements: { $elemMatch: { itemId: { $in: ids } } } }, { outputs: { $elemMatch: { itemId: { $in: ids } } } }] }, { projection: { _id: 1, name: 1, requirements: 1, outputs: 1, enabled: 1 } }).toArray(),
+    (await getBoutiqueItemsCollection()).find({ _id: { $in: ids } }, { projection: { _id: 1, enabled: 1, type: 1, stock: 1 } }).toArray(),
+    (await getItemCatalogCollection()).find({ 'useAction.itemId': { $in: ids } }, { projection: { _id: 1, name: 1, 'useAction.itemId': 1 } }).toArray(),
+  ]);
+  const profileMap = new Map(profiles.map(profile => [String(profile._id), profile]));
+  for (const inventory of inventories) {
+    const equippedById = new Map();
+    for (const [slot, itemId] of Object.entries(inventory.equipement || {})) {
+      const id = String(itemId || '');
+      if (idSet.has(id)) equippedById.set(id, [...(equippedById.get(id) || []), slot]);
+    }
+    const heldIds = new Set();
+    for (const [rawId, rawQuantity] of Object.entries(inventory.items || {})) {
+      const id = String(rawId);
+      const quantity = Number(rawQuantity) || 0;
+      if (!idSet.has(id) || (!quantity && !equippedById.has(id))) continue;
+      const profile = profileMap.get(String(inventory._id));
+      result.get(id).inventories.push({ profileId: String(inventory._id), profileName: profile?.nomPrenom || String(inventory._id), quantity, equipmentSlots: equippedById.get(id) || [] });
+      heldIds.add(id);
+    }
+    for (const [id, equipmentSlots] of equippedById.entries()) {
+      if (heldIds.has(id)) continue;
+      const profile = profileMap.get(String(inventory._id));
+      result.get(id).inventories.push({ profileId: String(inventory._id), profileName: profile?.nomPrenom || String(inventory._id), quantity: 0, equipmentSlots });
+    }
+  }
+  const appendRecipeUsage = (rows, targetKey) => {
+    for (const row of rows) {
+      const referenced = new Set([...(row.requirements || []), ...(row.outputs || [])].map(item => String(item.itemId || '')).filter(id => idSet.has(id)));
+      for (const id of referenced) result.get(id)[targetKey].push({ id: String(row._id), name: row.name || String(row._id), enabled: row.enabled !== false });
+    }
+  };
+  appendRecipeUsage(crafts, 'crafts');
+  appendRecipeUsage(productions, 'productions');
+  for (const doc of shopDocs) result.get(String(doc._id)).boutique = { id: String(doc._id), stock: Number(doc.stock) || 0, enabled: doc.enabled !== false };
+  for (const doc of itemUseActions) {
+    const id = String(doc.useAction?.itemId || '');
+    if (result.has(id)) result.get(id).itemUseActions.push({ id: String(doc._id), name: doc.name || String(doc._id) });
+  }
+  for (const usage of result.values()) usage.total = usage.inventories.length + usage.crafts.length + usage.productions.length + (usage.boutique ? 1 : 0) + usage.itemUseActions.length;
+  return result;
+}
+
+async function usageOfCatalogItem(itemId) {
+  const result = await usageOfCatalogItems([String(itemId || '')]);
+  return result.get(String(itemId || '')) || { inventories: [], crafts: [], productions: [], boutique: null, itemUseActions: [], total: 0 };
+}
+
+async function repairCatalogItemReferences(itemId) {
+  const id = String(itemId || '');
+  const now = new Date();
+  const invCol = await getInvCollection();
+  await invCol.updateMany({ [`items.${id}`]: { $exists: true } }, { $unset: { [`items.${id}`]: '' }, $set: { updatedAt: now } });
+  for (const slot of EQUIPMENT_SLOTS) {
+    await invCol.updateMany({ [`equipement.${slot}`]: id }, { $unset: { [`equipement.${slot}`]: '' }, $set: { updatedAt: now } });
+  }
+
+  const recipeCollections = [await getCraftRecipesCollection(), await getProductionRecipesCollection()];
+  for (const col of recipeCollections) {
+    const docs = await col.find({ $or: [{ requirements: { $elemMatch: { itemId: id } } }, { outputs: { $elemMatch: { itemId: id } } }] }).toArray();
+    for (const doc of docs) {
+      const requirements = (Array.isArray(doc.requirements) ? doc.requirements : []).filter(row => String(row.itemId) !== id);
+      const outputs = (Array.isArray(doc.outputs) ? doc.outputs : []).filter(row => String(row.itemId) !== id);
+      const update = { requirements, outputs, updatedAt: now };
+      if (!requirements.length || !outputs.length) update.enabled = false;
+      await col.updateOne({ _id: doc._id }, { $set: update });
+    }
+  }
+  await (await getItemCatalogCollection()).updateMany({ 'useAction.itemId': id }, { $set: { useAction: null, updatedAt: now } });
+  const shop = await getBoutiqueItemsCollection();
+  const shopResult = await shop.deleteOne({ _id: id });
+  if (shopResult.deletedCount) await (await getBoutiqueStateCollection()).updateOne({ _id: 'meta' }, { $inc: { version: 1 }, $setOnInsert: { messageId: null } }, { upsert: true });
+}
+
 
 // ---------------------------------------------------------------------------
 // PANEL ADMIN (créateur uniquement) : qui se connecte, combien de fois, et
@@ -420,6 +666,7 @@ app.patch('/api/profils/:id', async (req, res) => {
     }
 
     const updated = await updateProfileFields(req.params.id, fields);
+    await recordEntityHistory(req, { entityType: 'profil', collectionName: 'profils', beforeDocument: profile, afterDocument: updated, action: 'modifie', entityName: updated?.nomPrenom || profile.nomPrenom || req.params.id });
     logFromReq(req, 'profil_modifie', `A modifié le profil de ${profile.nomPrenom || req.params.id}.`);
     res.json(updated);
   } catch (err) {
@@ -528,7 +775,8 @@ app.post('/api/crafts', async (req, res) => {
     const id = `craft_${crypto.randomBytes(10).toString('hex')}`;
     const document = { _id: id, ...recipe, createdAt: new Date() };
     await col.insertOne(document);
-    logFromReq(req, 'craft_cree', `A créé la recette de craft « ${document.name} ».`);
+    await recordEntityHistory(req, { entityType: 'craft', collectionName: 'craft_recipes', beforeDocument: null, afterDocument: document, action: 'cree', entityName: document.name });
+    logFromReq(req, 'craft_cree', `A créé la recette de craft « ${document.name} ».`)
     res.status(201).json(document);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -538,6 +786,8 @@ app.post('/api/crafts', async (req, res) => {
 app.patch('/api/crafts/:id', async (req, res) => {
   try {
     const col = await getCraftRecipesCollection();
+    const before = await col.findOne({ _id: req.params.id });
+    if (!before) return res.status(404).json({ error: 'Recette introuvable.' });
     const recipe = await normaliserRecetteCraft(req.body);
     const result = await col.findOneAndUpdate(
       { _id: req.params.id },
@@ -545,7 +795,8 @@ app.patch('/api/crafts/:id', async (req, res) => {
       { returnDocument: 'after' },
     );
     if (!result) return res.status(404).json({ error: 'Recette introuvable.' });
-    logFromReq(req, 'craft_modifie', `A modifié la recette de craft « ${result.name} ».`);
+    await recordEntityHistory(req, { entityType: 'craft', collectionName: 'craft_recipes', beforeDocument: before, afterDocument: result, action: 'modifie', entityName: result.name });
+    logFromReq(req, 'craft_modifie', `A modifié la recette de craft « ${result.name} ».`)
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -558,7 +809,8 @@ app.delete('/api/crafts/:id', async (req, res) => {
     const recipe = await col.findOne({ _id: req.params.id });
     if (!recipe) return res.status(404).json({ error: 'Recette introuvable.' });
     await col.deleteOne({ _id: req.params.id });
-    logFromReq(req, 'craft_supprime', `A supprimé la recette de craft « ${recipe.name} ».`);
+    await recordEntityHistory(req, { entityType: 'craft', collectionName: 'craft_recipes', beforeDocument: recipe, afterDocument: null, action: 'supprime', entityName: recipe.name });
+    logFromReq(req, 'craft_supprime', `A supprimé la recette de craft « ${recipe.name} ».`)
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -654,7 +906,8 @@ app.post('/api/productions', async (req, res) => {
     const definition = await normaliserProduction(req.body);
     const document = { _id: `production_${crypto.randomBytes(10).toString('hex')}`, ...definition, createdAt: new Date() };
     await col.insertOne(document);
-    logFromReq(req, 'production_creee', `A créé la production « ${document.name} ».`);
+    await recordEntityHistory(req, { entityType: 'production', collectionName: 'production_recipes', beforeDocument: null, afterDocument: document, action: 'cree', entityName: document.name });
+    logFromReq(req, 'production_creee', `A créé la production « ${document.name} ».`)
     res.status(201).json(document);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -664,10 +917,13 @@ app.post('/api/productions', async (req, res) => {
 app.patch('/api/productions/:id', async (req, res) => {
   try {
     const col = await getProductionRecipesCollection();
+    const before = await col.findOne({ _id: req.params.id });
+    if (!before) return res.status(404).json({ error: 'Production introuvable.' });
     const definition = await normaliserProduction(req.body);
     const result = await col.findOneAndUpdate({ _id: req.params.id }, { $set: definition }, { returnDocument: 'after' });
     if (!result) return res.status(404).json({ error: 'Production introuvable.' });
-    logFromReq(req, 'production_modifiee', `A modifié la production « ${result.name} ».`);
+    await recordEntityHistory(req, { entityType: 'production', collectionName: 'production_recipes', beforeDocument: before, afterDocument: result, action: 'modifie', entityName: result.name });
+    logFromReq(req, 'production_modifiee', `A modifié la production « ${result.name} ».`)
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -680,6 +936,7 @@ app.delete('/api/productions/:id', async (req, res) => {
     const item = await col.findOne({ _id: req.params.id });
     if (!item) return res.status(404).json({ error: 'Production introuvable.' });
     await col.deleteOne({ _id: req.params.id });
+    await recordEntityHistory(req, { entityType: 'production', collectionName: 'production_recipes', beforeDocument: item, afterDocument: null, action: 'supprime', entityName: item.name });
     // Retire aussi l'association depuis les types de personnel ; un métier qui
     // pointait vers une recette supprimée redevient un métier général.
     await (await getPersonnelTypesCollection()).updateMany(
@@ -709,7 +966,8 @@ app.post('/api/personnel-types', async (req, res) => {
     const definition = await normaliserPersonnelType(req.body);
     const document = { _id: `personnel_type_${crypto.randomBytes(10).toString('hex')}`, ...definition, createdAt: new Date() };
     await col.insertOne(document);
-    logFromReq(req, 'personnel_type_cree', `A créé le type de personnel « ${document.name} ».`);
+    await recordEntityHistory(req, { entityType: 'personnel', collectionName: 'personnel_types', beforeDocument: null, afterDocument: document, action: 'cree', entityName: document.name });
+    logFromReq(req, 'personnel_type_cree', `A créé le type de personnel « ${document.name} ».`)
     res.status(201).json(document);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -719,10 +977,13 @@ app.post('/api/personnel-types', async (req, res) => {
 app.patch('/api/personnel-types/:id', async (req, res) => {
   try {
     const col = await getPersonnelTypesCollection();
+    const before = await col.findOne({ _id: req.params.id });
+    if (!before) return res.status(404).json({ error: 'Type de personnel introuvable.' });
     const definition = await normaliserPersonnelType(req.body);
     const result = await col.findOneAndUpdate({ _id: req.params.id }, { $set: definition }, { returnDocument: 'after' });
     if (!result) return res.status(404).json({ error: 'Type de personnel introuvable.' });
-    logFromReq(req, 'personnel_type_modifie', `A modifié le type de personnel « ${result.name} ».`);
+    await recordEntityHistory(req, { entityType: 'personnel', collectionName: 'personnel_types', beforeDocument: before, afterDocument: result, action: 'modifie', entityName: result.name });
+    logFromReq(req, 'personnel_type_modifie', `A modifié le type de personnel « ${result.name} ».`)
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -735,7 +996,8 @@ app.delete('/api/personnel-types/:id', async (req, res) => {
     const item = await col.findOne({ _id: req.params.id });
     if (!item) return res.status(404).json({ error: 'Type de personnel introuvable.' });
     await col.deleteOne({ _id: req.params.id });
-    logFromReq(req, 'personnel_type_supprime', `A supprimé le type de personnel « ${item.name} ».`);
+    await recordEntityHistory(req, { entityType: 'personnel', collectionName: 'personnel_types', beforeDocument: item, afterDocument: null, action: 'supprime', entityName: item.name });
+    logFromReq(req, 'personnel_type_supprime', `A supprimé le type de personnel « ${item.name} ».`)
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -754,6 +1016,32 @@ app.get('/api/inventaire/catalogue/meta', async (req, res) => {
     res.json(await getCatalogMetadata());
   } catch (err) {
     console.error('Chargement des métadonnées du catalogue impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/inventaire/catalogue/usage', async (req, res) => {
+  try {
+    const docs = await (await getItemCatalogCollection()).find({ _id: { $not: /^__/ } }, { projection: { _id: 1, name: 1 } }).toArray();
+    const usages = await usageOfCatalogItems(docs.map(doc => String(doc._id)));
+    const items = docs.map(doc => ({ id: String(doc._id), name: doc.name || String(doc._id), ...(usages.get(String(doc._id)) || { total: 0 }) }));
+    res.set('Cache-Control', 'no-store');
+    res.json({ items });
+  } catch (err) {
+    console.error('Chargement des références du catalogue impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/inventaire/catalogue/:itemId/usage', async (req, res) => {
+  try {
+    const itemId = String(req.params.itemId || '');
+    const raw = await (await getItemCatalogCollection()).findOne({ _id: itemId }, { projection: { _id: 1 } });
+    if (!raw) return res.status(404).json({ error: 'Objet introuvable.' });
+    res.set('Cache-Control', 'no-store');
+    res.json(await usageOfCatalogItem(itemId));
+  } catch (err) {
+    console.error('Vérification des références de l’objet impossible :', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -785,6 +1073,8 @@ app.post('/api/inventaire/catalogue', async (req, res) => {
   try {
     const { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction } = req.body || {};
     const created = await addCatalogItem({ id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction });
+    const after = await (await getItemCatalogCollection()).findOne({ _id: created.id });
+    await recordEntityHistory(req, { entityType: 'catalogue', collectionName: 'item_catalog', beforeDocument: null, afterDocument: after, action: 'cree', entityName: created.name });
     logFromReq(req, 'objet_cree', `A ajouté l'objet "${name}" au catalogue.`);
     res.status(201).json(created);
   } catch (err) {
@@ -792,10 +1082,79 @@ app.post('/api/inventaire/catalogue', async (req, res) => {
   }
 });
 
+app.patch('/api/inventaire/catalogue/bulk', async (req, res) => {
+  try {
+    const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(value => String(value || '').trim()).filter(id => id && /^[A-Za-z0-9_-]+$/.test(id)))];
+    const fields = req.body?.fields || {};
+    if (!ids.length || ids.length > 500) return res.status(400).json({ error: 'Sélectionne entre 1 et 500 objets.' });
+    const allowedFields = ['rarity', 'category', 'usable'];
+    const changes = {};
+    if (fields.rarity !== undefined) {
+      if (!ITEM_RARITIES.includes(String(fields.rarity))) return res.status(400).json({ error: 'Rareté invalide.' });
+      changes.rarity = String(fields.rarity);
+    }
+    if (fields.category !== undefined) changes.category = String(fields.category || 'Divers').trim().slice(0, 100) || 'Divers';
+    if (fields.usable !== undefined) changes.usable = Boolean(fields.usable);
+    if (!Object.keys(changes).length || Object.keys(changes).some(key => !allowedFields.includes(key))) return res.status(400).json({ error: 'Choisis au moins un champ à modifier.' });
+    const col = await getItemCatalogCollection();
+    if (changes.usable === false) {
+      const equippedItems = await col.find({ _id: { $in: ids }, slot: { $nin: [null, ''] } }, { projection: { _id: 1, name: 1 } }).toArray();
+      if (equippedItems.length) {
+        return res.status(400).json({ error: `Les objets équipables doivent rester utilisables : ${equippedItems.slice(0, 5).map(item => item.name || item._id).join(', ')}${equippedItems.length > 5 ? ', …' : ''}.` });
+      }
+    }
+    const results = [];
+    for (const id of ids) {
+      const before = await col.findOne({ _id: id });
+      if (!before || String(id).startsWith('__')) continue;
+      const updated = await updateCatalogItem(id, changes);
+      const after = await col.findOne({ _id: updated.id });
+      await recordEntityHistory(req, { entityType: 'catalogue', collectionName: 'item_catalog', beforeDocument: before, afterDocument: after, action: 'modification_masse', entityName: after?.name || id });
+      results.push(String(updated.id));
+    }
+    logFromReq(req, 'objets_modifies_masse', `A modifié ${results.length} objet(s) en masse dans le catalogue.`);
+    res.json({ ok: true, updated: results.length, ids: results });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/inventaire/catalogue/bulk', async (req, res) => {
+  try {
+    const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(value => String(value || '').trim()).filter(id => id && /^[A-Za-z0-9_-]+$/.test(id) && !id.startsWith('__')))];
+    if (!ids.length || ids.length > 500) return res.status(400).json({ error: 'Sélectionne entre 1 et 500 objets.' });
+    const col = await getItemCatalogCollection();
+    const beforeDocs = await col.find({ _id: { $in: ids } }).toArray();
+    if (!beforeDocs.length) return res.status(404).json({ error: 'Aucun objet trouvé dans la sélection.' });
+    const usages = await usageOfCatalogItems(beforeDocs.map(doc => String(doc._id)));
+    const usageById = beforeDocs.map(doc => ({ id: String(doc._id), name: doc.name || String(doc._id), usage: usages.get(String(doc._id)) }));
+    const hasReferences = usageById.some(entry => entry.usage.total > 0);
+    if (hasReferences && req.body?.repairReferences !== true) {
+      return res.status(409).json({ error: 'Certains objets sont encore utilisés. Confirme le nettoyage des références avant suppression.', usage: usageById });
+    }
+    for (const doc of beforeDocs) {
+      const id = String(doc._id);
+      if (req.body?.repairReferences === true && (usages.get(id)?.total || 0) > 0) await repairCatalogItemReferences(id);
+      await removeCatalogItem(id);
+      await recordEntityHistory(req, { entityType: 'catalogue', collectionName: 'item_catalog', beforeDocument: doc, afterDocument: null, action: 'supprime_en_masse', entityName: doc.name || id });
+    }
+    logFromReq(req, 'objets_supprimes_masse', `A supprimé ${beforeDocs.length} objet(s) du catalogue${hasReferences ? ' après nettoyage des références' : ''}.`);
+    res.json({ ok: true, deleted: beforeDocs.length, referencesCleaned: hasReferences });
+  } catch (err) {
+    console.error('Suppression en masse impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.patch('/api/inventaire/catalogue/:itemId', async (req, res) => {
   try {
     const { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction } = req.body || {};
+    const rawCol = await getItemCatalogCollection();
+    const before = await rawCol.findOne({ _id: req.params.itemId });
+    if (!before) return res.status(404).json({ error: 'Objet introuvable.' });
     const updated = await updateCatalogItem(req.params.itemId, { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction });
+    const after = await rawCol.findOne({ _id: updated.id });
+    await recordEntityHistory(req, { entityType: 'catalogue', collectionName: 'item_catalog', beforeDocument: before, afterDocument: after, action: 'modifie', entityName: updated.name });
     const imageInfo = image === undefined ? '' : (image ? ' (image modifiée)' : ' (image retirée)');
     logFromReq(req, 'objet_modifie', `A modifié l'objet "${name || req.params.itemId}" du catalogue${imageInfo}.`);
     res.json(updated);
@@ -805,13 +1164,22 @@ app.patch('/api/inventaire/catalogue/:itemId', async (req, res) => {
 });
 
 app.delete('/api/inventaire/catalogue', async (req, res) => {
-  if (req.session.user?.id !== FOUNDER_DISCORD_ID) {
-    return res.status(403).json({ error: 'Action réservée au fondateur.' });
-  }
+  if (req.session.user?.id !== FOUNDER_DISCORD_ID) return res.status(403).json({ error: 'Action réservée au fondateur.' });
   try {
+    const col = await getItemCatalogCollection();
+    const docs = await col.find({ _id: { $not: /^__/ } }).toArray();
+    const usageMap = await usageOfCatalogItems(docs.map(doc => String(doc._id)));
+    const uses = docs.map(doc => ({ id: String(doc._id), name: doc.name || String(doc._id), usage: usageMap.get(String(doc._id)) })).filter(entry => entry.usage?.total > 0);
+    if (uses.length && req.body?.repairReferences !== true) {
+      return res.status(409).json({ error: 'Des objets sont encore utilisés. Confirme le nettoyage des références avant de vider le catalogue.', usage: uses.slice(0, 100), affectedObjects: uses.length });
+    }
+    for (const doc of docs) {
+      if (req.body?.repairReferences === true && (usageMap.get(String(doc._id))?.total || 0) > 0) await repairCatalogItemReferences(String(doc._id));
+      await recordEntityHistory(req, { entityType: 'catalogue', collectionName: 'item_catalog', beforeDocument: doc, afterDocument: null, action: 'catalogue_vide', entityName: doc.name || String(doc._id) });
+    }
     const nb = await clearCatalog();
     logFromReq(req, 'catalogue_vide', `A vidé tout le catalogue (${nb} objet${nb > 1 ? 's' : ''} supprimé${nb > 1 ? 's' : ''}).`);
-    res.json({ ok: true, deleted: nb });
+    res.json({ ok: true, deleted: nb, referencesCleaned: uses.length > 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -819,10 +1187,20 @@ app.delete('/api/inventaire/catalogue', async (req, res) => {
 
 app.delete('/api/inventaire/catalogue/:itemId', async (req, res) => {
   try {
-    const ok = await removeCatalogItem(req.params.itemId);
+    const id = String(req.params.itemId || '');
+    const col = await getItemCatalogCollection();
+    const before = await col.findOne({ _id: id });
+    if (!before || id.startsWith('__')) return res.status(404).json({ error: 'Objet introuvable.' });
+    const usage = await usageOfCatalogItem(id);
+    if (usage.total > 0 && req.body?.repairReferences !== true) {
+      return res.status(409).json({ error: 'Cet objet est encore utilisé. Consulte les références puis confirme leur nettoyage.', usage });
+    }
+    if (req.body?.repairReferences === true) await repairCatalogItemReferences(id);
+    const ok = await removeCatalogItem(id);
     if (!ok) return res.status(404).json({ error: 'Objet introuvable.' });
-    logFromReq(req, 'objet_supprime', `A supprimé l'objet "${req.params.itemId}" du catalogue.`);
-    res.json({ ok: true });
+    await recordEntityHistory(req, { entityType: 'catalogue', collectionName: 'item_catalog', beforeDocument: before, afterDocument: null, action: 'supprime', entityName: before.name || id });
+    logFromReq(req, 'objet_supprime', `A supprimé l'objet "${id}" du catalogue${usage.total ? ' après nettoyage des références' : ''}.`);
+    res.json({ ok: true, referencesCleaned: usage.total > 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -867,11 +1245,62 @@ app.get('/api/inventaire/:profileId', async (req, res) => {
   }
 });
 
+app.post('/api/inventaire/:profileId/items/bulk', async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!rows.length || rows.length > 200) return res.status(400).json({ error: 'Sélectionne entre 1 et 200 objets.' });
+    const normalized = rows.map(row => ({ itemId: String(row?.itemId || '').trim(), quantity: Math.floor(Number(row?.quantity)) }))
+      .filter(row => row.itemId && /^[A-Za-z0-9_-]+$/.test(row.itemId) && Number.isFinite(row.quantity) && row.quantity >= 1 && row.quantity <= 1000000);
+    if (normalized.length !== rows.length) return res.status(400).json({ error: 'Un identifiant ou une quantité est invalide.' });
+    const known = await getExistingCatalogIds(normalized.map(row => row.itemId));
+    const unknown = normalized.find(row => !known.has(row.itemId));
+    if (unknown) return res.status(400).json({ error: `Objet inconnu : ${unknown.itemId}.` });
+    const before = await getInventory(req.params.profileId);
+    for (const row of normalized) {
+      const result = await addItem(req.params.profileId, row.itemId, row.quantity);
+      if (!result.ok) throw new Error(`Impossible d’ajouter ${row.itemId}.`);
+    }
+    const after = await getInventory(req.params.profileId);
+    await recordEntityHistory(req, { entityType: 'inventaire', collectionName: 'inv', beforeDocument: before, afterDocument: after, action: 'ajout_masse', entityName: `Inventaire ${req.params.profileId}` });
+    logFromReq(req, 'inventaire_ajout_masse', `A ajouté ${normalized.length} type(s) d’objet à l’inventaire de ${req.params.profileId}.`);
+    res.json({ ok: true, count: normalized.length, inventory: after });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/inventaire/:profileId/items/bulk', async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!rows.length || rows.length > 200) return res.status(400).json({ error: 'Sélectionne entre 1 et 200 objets.' });
+    const normalized = rows.map(row => ({ itemId: String(row?.itemId || '').trim(), quantity: Math.floor(Number(row?.quantity)) }))
+      .filter(row => row.itemId && /^[A-Za-z0-9_-]+$/.test(row.itemId) && Number.isFinite(row.quantity) && row.quantity >= 0 && row.quantity <= 1000000);
+    if (normalized.length !== rows.length) return res.status(400).json({ error: 'Un identifiant ou une quantité est invalide.' });
+    const known = await getExistingCatalogIds(normalized.map(row => row.itemId));
+    const unknown = normalized.find(row => !known.has(row.itemId));
+    if (unknown) return res.status(400).json({ error: `Objet inconnu : ${unknown.itemId}.` });
+    const before = await getInventory(req.params.profileId);
+    for (const row of normalized) {
+      const result = await setItemQuantity(req.params.profileId, row.itemId, row.quantity);
+      if (!result.ok) throw new Error(`Impossible de modifier ${row.itemId}.`);
+    }
+    const after = await getInventory(req.params.profileId);
+    await recordEntityHistory(req, { entityType: 'inventaire', collectionName: 'inv', beforeDocument: before, afterDocument: after, action: 'quantites_masse', entityName: `Inventaire ${req.params.profileId}` });
+    logFromReq(req, 'inventaire_quantites_masse', `A modifié les quantités de ${normalized.length} objet(s) dans l’inventaire de ${req.params.profileId}.`);
+    res.json({ ok: true, count: normalized.length, inventory: after });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 app.post('/api/inventaire/:profileId/items', async (req, res) => {
   try {
     const { itemId, quantity } = req.body || {};
+    const before = await getInventory(req.params.profileId);
     const result = await addItem(req.params.profileId, itemId, Number(quantity) || 1);
     if (!result.ok) return res.status(400).json({ error: `Objet inconnu (${itemId}).` });
+    const after = await getInventory(req.params.profileId);
+    await recordEntityHistory(req, { entityType: 'inventaire', collectionName: 'inv', beforeDocument: before, afterDocument: after, action: 'ajout', entityName: `Inventaire ${req.params.profileId}` });
     logFromReq(req, 'inventaire_ajout', `A ajouté ${Number(quantity) || 1}× "${itemId}" à l'inventaire de ${req.params.profileId}.`);
     res.json(result);
   } catch (err) {
@@ -884,8 +1313,11 @@ app.post('/api/inventaire/:profileId/items', async (req, res) => {
 app.patch('/api/inventaire/:profileId/items/:itemId', async (req, res) => {
   try {
     const { quantity } = req.body || {};
+    const before = await getInventory(req.params.profileId);
     const result = await setItemQuantity(req.params.profileId, req.params.itemId, Number(quantity));
     if (!result.ok) return res.status(400).json({ error: `Objet inconnu (${req.params.itemId}).` });
+    const after = await getInventory(req.params.profileId);
+    await recordEntityHistory(req, { entityType: 'inventaire', collectionName: 'inv', beforeDocument: before, afterDocument: after, action: 'quantite_modifiee', entityName: `Inventaire ${req.params.profileId}` });
     logFromReq(req, 'inventaire_quantite', `A mis la quantité de "${req.params.itemId}" à ${Number(quantity)} pour ${req.params.profileId}.`);
     res.json(result);
   } catch (err) {
@@ -896,9 +1328,12 @@ app.patch('/api/inventaire/:profileId/items/:itemId', async (req, res) => {
 
 app.delete('/api/inventaire/:profileId/items/:itemId', async (req, res) => {
   try {
+    const before = await getInventory(req.params.profileId);
     const result = await removeItem(req.params.profileId, req.params.itemId, 999999);
     if (!result.ok && result.reason === 'unknown_item') return res.status(400).json({ error: 'Objet inconnu.' });
-    logFromReq(req, 'inventaire_retrait', `A retiré "${req.params.itemId}" de l'inventaire de ${req.params.profileId}.`);
+    const after = await getInventory(req.params.profileId);
+    await recordEntityHistory(req, { entityType: 'inventaire', collectionName: 'inv', beforeDocument: before, afterDocument: after, action: 'retrait', entityName: `Inventaire ${req.params.profileId}` });
+    logFromReq(req, 'inventaire_retrait', `A retiré "${req.params.itemId}" de l'inventaire de ${req.params.profileId}.`)
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -984,10 +1419,12 @@ app.put('/api/boutique/:itemId', async (req, res) => {
   try {
     const { id, data, unset } = await normaliserBoutiqueItem(req.params.itemId, req.body);
     const col = await getBoutiqueItemsCollection();
-    const existait = await col.findOne({ _id: id }, { projection: { _id: 1 } });
+    const before = await col.findOne({ _id: id });
     await col.updateOne({ _id: id }, { $set: data, $unset: unset, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
+    const after = await col.findOne({ _id: id });
+    await recordEntityHistory(req, { entityType: 'boutique', collectionName: 'boutique_items', beforeDocument: before, afterDocument: after, action: before ? 'modifie' : 'cree', entityName: id });
     await signalerChangementBoutique();
-    logFromReq(req, existait ? 'boutique_modifiee' : 'boutique_ajoutee', `${existait ? 'A modifié' : 'A ajouté'} l'objet « ${id} » dans la boutique.`);
+    logFromReq(req, before ? 'boutique_modifiee' : 'boutique_ajoutee', `${before ? 'A modifié' : 'A ajouté'} l'objet « ${id} » dans la boutique.`);
     res.json({ id, ...data });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -997,8 +1434,11 @@ app.put('/api/boutique/:itemId', async (req, res) => {
 app.delete('/api/boutique/:itemId', async (req, res) => {
   try {
     const col = await getBoutiqueItemsCollection();
+    const before = await col.findOne({ _id: req.params.itemId });
+    if (!before) return res.status(404).json({ error: 'Objet introuvable dans la boutique.' });
     const result = await col.deleteOne({ _id: req.params.itemId });
     if (!result.deletedCount) return res.status(404).json({ error: 'Objet introuvable dans la boutique.' });
+    await recordEntityHistory(req, { entityType: 'boutique', collectionName: 'boutique_items', beforeDocument: before, afterDocument: null, action: 'supprime', entityName: req.params.itemId });
     await signalerChangementBoutique();
     logFromReq(req, 'boutique_retiree', `A retiré l'objet « ${req.params.itemId} » de la boutique.`);
     res.json({ ok: true });
