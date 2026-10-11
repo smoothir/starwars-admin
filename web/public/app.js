@@ -484,7 +484,7 @@ function craftCardHTML(recipe) {
 }
 
 function optionsCatalogueCraft(selectedId) {
-  return '<option value="">Choisir un objet…</option>' + state.catalogue.map(item =>
+  return '<option value="">Choisir un objet…</option>' + catalogueTrie().map(item =>
     `<option value="${escapeAttr(item.id)}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name} - ${item.id}`)}</option>`
   ).join('');
 }
@@ -597,6 +597,13 @@ async function rafraichirCataloguePanel() {
 // Sécurité : ignore les documents internes (id "__xxx__") ou sans nom qu'un
 // serveur pas à jour pourrait renvoyer, pour qu'ils n'apparaissent jamais
 // comme de faux objets vides dans le catalogue.
+// Catalogue trié par ordre alphabétique (nom, puis ID) pour les listes déroulantes.
+function catalogueTrie() {
+  return state.catalogue.slice().sort((a, b) =>
+    String(a.name || '').localeCompare(String(b.name || ''), 'fr', { sensitivity: 'base', numeric: true })
+    || String(a.id || '').localeCompare(String(b.id || ''), 'fr', { numeric: true }));
+}
+
 function catalogueValide(liste) {
   return (liste || []).filter(it => it && it.name && !/^__.*__$/.test(String(it.id || '')));
 }
@@ -1046,7 +1053,7 @@ function panneauCatalogueItem(item) {
   const isNew = !item;
   const useAction = item?.useAction || null;
   const useType = useAction?.type || 'aucune';
-  const rewardOptions = state.catalogue
+  const rewardOptions = catalogueTrie()
     .filter(it => !item || it.id !== item.id)
     .map(it => `<option value="${escapeAttr(it.id)}" ${(useType === 'donner_objet' && useAction?.itemId === it.id) ? 'selected' : ''}>${escapeHtml(it.emoji || '')} ${escapeHtml(it.name)}</option>`)
     .join('');
@@ -1399,7 +1406,7 @@ function panneauInventairePersonnage(profile, inventoryDoc) {
       </div>`;
   }).join('');
 
-  const optionsCatalogue = state.catalogue.map(it => `<option value="${escapeAttr(it.id)}">${escapeHtml(it.emoji || '')} ${escapeHtml(it.name)}</option>`).join('');
+  const optionsCatalogue = catalogueTrie().map(it => `<option value="${escapeAttr(it.id)}">${escapeHtml(it.emoji || '')} ${escapeHtml(it.name)}</option>`).join('');
 
   return `
     <div class="section-titre">🎒 Objets possédés</div>
@@ -1652,7 +1659,7 @@ function renderPersonnelPage() {
 }
 
 function optionsCatalogueProduction(selectedId) {
-  return '<option value="">Choisir un objet…</option>' + state.catalogue.map(item =>
+  return '<option value="">Choisir un objet…</option>' + catalogueTrie().map(item =>
     `<option value="${escapeAttr(item.id)}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name} - ${item.id}`)}</option>`
   ).join('');
 }
@@ -1933,7 +1940,7 @@ function ouvrirEditeurBoutique(itemId, typeInitial = 'achetable') {
   const catItem = entry ? state.catalogue.find(it => it.id === entry.id) : null;
   document.getElementById('panneau-catalogue-titre').textContent = entry ? `Modifier - ${catItem?.name || entry.id}` : 'Ajouter à la boutique';
   const dejaPresents = new Set(state.boutique.map(it => it.id));
-  const options = '<option value="">Choisir un objet…</option>' + state.catalogue
+  const options = '<option value="">Choisir un objet…</option>' + catalogueTrie()
     .filter(it => String(it.id).toLowerCase() !== 'credits_de_la_nouvelle_republique' && !dejaPresents.has(it.id))
     .map(it => `<option value="${escapeAttr(it.id)}">${escapeHtml(`${it.emoji || '📦'} ${it.name} - ${it.id}`)}</option>`).join('');
   const champObjet = entry
@@ -2001,3 +2008,200 @@ async function retirerBoutiqueItem(id) {
   try { await fetchJSON(`/api/boutique/${encodeURIComponent(id)}`, null, 'DELETE'); toast('Objet retiré de la boutique.', 'succes'); await chargerBoutiquePage(); }
   catch (error) { toast(`Échec : ${error.message}`, 'erreur'); }
 }
+
+// -----------------------------------------------------------------------
+// LISTES DÉROULANTES AVEC RECHERCHE
+// Toute liste déroulante d'au moins SEUIL_RECHERCHE choix reçoit un champ de
+// recherche (sans accent, sans casse). Le <select> d'origine reste dans la page
+// (caché) : sa valeur et ses événements "change" fonctionnent comme avant.
+// Pour désactiver sur une liste : data-no-search sur le <select>.
+// -----------------------------------------------------------------------
+const SEUIL_RECHERCHE = 8;
+const _selectValueDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+
+function normaliserRecherche(texte) {
+  return String(texte || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function ameliorerSelect(select) {
+  if (!(select instanceof HTMLSelectElement)) return;
+  if (select.dataset.recherche === 'ok' || select.hasAttribute('data-no-search') || select.multiple) return;
+  if (select.options.length < SEUIL_RECHERCHE || !select.parentNode) return;
+  select.dataset.recherche = 'ok';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'select-recherche';
+  select.parentNode.insertBefore(wrap, select);
+  wrap.appendChild(select);
+  select.classList.add('select-recherche-natif');
+
+  const bouton = document.createElement('button');
+  bouton.type = 'button';
+  bouton.className = 'select-recherche-bouton';
+  bouton.setAttribute('aria-haspopup', 'listbox');
+  const libelle = document.createElement('span');
+  libelle.className = 'select-recherche-libelle';
+  const fleche = document.createElement('span');
+  fleche.className = 'select-recherche-fleche';
+  fleche.textContent = '▾';
+  bouton.append(libelle, fleche);
+  wrap.appendChild(bouton);
+
+  let panneau = null, champ = null, liste = null, actifIndex = -1, visibles = [];
+
+  function synchroniser() {
+    const opt = select.options[select.selectedIndex];
+    libelle.textContent = opt ? opt.textContent : '';
+    libelle.classList.toggle('placeholder', !opt || opt.value === '');
+    bouton.disabled = select.disabled;
+  }
+
+  function positionner() {
+    if (!panneau) return;
+    const r = bouton.getBoundingClientRect();
+    const hauteurMax = 320;
+    const dessous = window.innerHeight - r.bottom - 8;
+    const dessus = r.top - 8;
+    const enHaut = dessous < 200 && dessus > dessous;
+    panneau.style.left = `${r.left}px`;
+    panneau.style.width = `${r.width}px`;
+    panneau.style.maxHeight = `${Math.min(hauteurMax, Math.max(140, enHaut ? dessus : dessous))}px`;
+    if (enHaut) { panneau.style.top = 'auto'; panneau.style.bottom = `${window.innerHeight - r.top + 4}px`; }
+    else { panneau.style.bottom = 'auto'; panneau.style.top = `${r.bottom + 4}px`; }
+  }
+
+  function remplirListe() {
+    const q = normaliserRecherche(champ.value);
+    liste.innerHTML = '';
+    visibles = [];
+    Array.from(select.options).forEach(opt => {
+      if (opt.disabled) return;
+      if (q && opt.value !== '' && !normaliserRecherche(opt.textContent).includes(q)) return;
+      if (q && opt.value === '') return;
+      visibles.push(opt);
+    });
+    if (!visibles.length) {
+      const vide = document.createElement('li');
+      vide.className = 'select-recherche-vide';
+      vide.textContent = 'Aucun résultat';
+      liste.appendChild(vide);
+      actifIndex = -1;
+      return;
+    }
+    const courant = select.selectedIndex;
+    visibles.forEach((opt, i) => {
+      const li = document.createElement('li');
+      li.className = 'select-recherche-option' + (opt.index === courant ? ' selectionne' : '') + (opt.value === '' ? ' placeholder' : '');
+      li.textContent = opt.textContent;
+      li.setAttribute('role', 'option');
+      li.addEventListener('mousedown', e => { e.preventDefault(); choisir(opt); });
+      li.addEventListener('mousemove', () => definirActif(i, false));
+      liste.appendChild(li);
+    });
+    const indexSelectionne = visibles.findIndex(o => o.index === courant);
+    definirActif(q ? 0 : Math.max(0, indexSelectionne), true);
+  }
+
+  function definirActif(i, defiler) {
+    actifIndex = i;
+    Array.from(liste.querySelectorAll('.select-recherche-option')).forEach((li, idx) => {
+      li.classList.toggle('actif', idx === i);
+      if (idx === i && defiler) li.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  function choisir(opt) {
+    const change = select.value !== opt.value;
+    _selectValueDesc.set.call(select, opt.value);
+    synchroniser();
+    fermer();
+    if (change) select.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function surClicExterieur(e) {
+    if (panneau && !panneau.contains(e.target) && !bouton.contains(e.target)) fermer();
+  }
+  function surDefilement(e) {
+    if (panneau && !panneau.contains(e.target)) positionner();
+  }
+
+  function ouvrir() {
+    if (panneau || select.disabled) return;
+    panneau = document.createElement('div');
+    panneau.className = 'select-recherche-panneau';
+    champ = document.createElement('input');
+    champ.type = 'text';
+    champ.className = 'select-recherche-champ';
+    champ.placeholder = '🔎 Rechercher…';
+    champ.autocomplete = 'off';
+    liste = document.createElement('ul');
+    liste.className = 'select-recherche-liste';
+    liste.setAttribute('role', 'listbox');
+    panneau.append(champ, liste);
+    document.body.appendChild(panneau);
+    positionner();
+    remplirListe();
+    champ.focus();
+    champ.addEventListener('input', remplirListe);
+    champ.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (visibles.length) definirActif(Math.min(visibles.length - 1, actifIndex + 1), true); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); if (visibles.length) definirActif(Math.max(0, actifIndex - 1), true); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (visibles[actifIndex]) choisir(visibles[actifIndex]); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fermer(); bouton.focus(); }
+      else if (e.key === 'Tab') fermer();
+    });
+    document.addEventListener('mousedown', surClicExterieur, true);
+    window.addEventListener('scroll', surDefilement, true);
+    window.addEventListener('resize', positionner);
+    bouton.setAttribute('aria-expanded', 'true');
+  }
+
+  function fermer() {
+    if (!panneau) return;
+    document.removeEventListener('mousedown', surClicExterieur, true);
+    window.removeEventListener('scroll', surDefilement, true);
+    window.removeEventListener('resize', positionner);
+    panneau.remove();
+    panneau = champ = liste = null;
+    bouton.setAttribute('aria-expanded', 'false');
+  }
+
+  bouton.addEventListener('click', () => (panneau ? fermer() : ouvrir()));
+  bouton.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); ouvrir(); }
+  });
+
+  // Reste synchronisé avec le <select> d'origine (options remplacées, valeur
+  // changée par le code, désactivation).
+  Object.defineProperty(select, 'value', {
+    configurable: true,
+    get() { return _selectValueDesc.get.call(this); },
+    set(v) { _selectValueDesc.set.call(this, v); synchroniser(); },
+  });
+  new MutationObserver(() => { synchroniser(); if (panneau) remplirListe(); })
+    .observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'selected'] });
+  select.addEventListener('change', synchroniser);
+  synchroniser();
+}
+
+function ameliorerSelectsDans(racine) {
+  if (!racine || racine.nodeType !== 1) return;
+  if (racine.tagName === 'SELECT') ameliorerSelect(racine);
+  racine.querySelectorAll?.('select').forEach(ameliorerSelect);
+}
+
+(function initSelectsRecherche() {
+  let planifie = false;
+  const aTraiter = new Set();
+  new MutationObserver(mutations => {
+    for (const m of mutations) m.addedNodes.forEach(n => { if (n.nodeType === 1) aTraiter.add(n); });
+    if (planifie || !aTraiter.size) return;
+    planifie = true;
+    requestAnimationFrame(() => {
+      planifie = false;
+      const noeuds = Array.from(aTraiter); aTraiter.clear();
+      noeuds.forEach(ameliorerSelectsDans);
+    });
+  }).observe(document.body, { childList: true, subtree: true });
+  ameliorerSelectsDans(document.body);
+})();

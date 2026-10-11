@@ -1876,3 +1876,39 @@ html { font-size: 14px; }
 }
 
 .boutique-card.boutique-masque { opacity: .55; }
+
+/* ---------- Listes déroulantes avec recherche ---------- */
+.select-recherche { position: relative; flex: 1 1 0; width: 100%; min-width: 0; }
+.select-recherche-natif { display: none !important; }
+.select-recherche-bouton {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; min-width: 0; text-align: left; cursor: pointer;
+  padding: 10px 12px; background: var(--bg-input); color: var(--text-primary);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  font-family: var(--font-text); font-size: 0.88rem;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.production-item-row .select-recherche-bouton, .craft-item-row .select-recherche-bouton { padding: 9px 10px; font-size: .77rem; }
+.select-recherche-bouton:hover:not(:disabled), .select-recherche-bouton:focus-visible, .select-recherche-bouton[aria-expanded="true"] {
+  outline: none; border-color: var(--border-gold); box-shadow: 0 0 0 3px rgba(255,255,255,0.14);
+}
+.select-recherche-bouton:disabled { opacity: .5; cursor: not-allowed; }
+.select-recherche-libelle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-recherche-libelle.placeholder { opacity: .65; }
+.select-recherche-fleche { flex: none; font-size: .8rem; opacity: .8; }
+.select-recherche-panneau {
+  position: fixed; z-index: 10000; display: flex; flex-direction: column;
+  background: #0b0b0b; border: 1px solid var(--border-gold); border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px rgba(0,0,0,.7); overflow: hidden;
+}
+.select-recherche-champ {
+  flex: none; width: 100%; padding: 10px 12px; background: #000; color: var(--text-primary);
+  border: 0; border-bottom: 1px solid var(--border-subtle); font-family: var(--font-text); font-size: .85rem; outline: none;
+}
+.select-recherche-liste { list-style: none; margin: 0; padding: 4px; overflow-y: auto; flex: 1; }
+.select-recherche-option, .select-recherche-vide { padding: 8px 10px; border-radius: 6px; font-size: .82rem; }
+.select-recherche-option { cursor: pointer; }
+.select-recherche-option.placeholder { opacity: .65; }
+.select-recherche-option.selectionne { font-weight: 700; }
+.select-recherche-option.actif { background: rgba(255,255,255,0.16); }
+.select-recherche-vide { opacity: .7; text-align: center; }
