@@ -1912,3 +1912,27 @@ html { font-size: 14px; }
 .select-recherche-option.selectionne { font-weight: 700; }
 .select-recherche-option.actif { background: rgba(255,255,255,0.16); }
 .select-recherche-vide { opacity: .7; text-align: center; }
+
+
+/* ---------- Boutique : tuiles compactes ---------- */
+.boutique-grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; margin-bottom: 26px; }
+.boutique-tuile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  aspect-ratio: 1 / 1; padding: 10px 8px; text-align: center; cursor: pointer;
+  background: var(--bg-card); color: var(--text-primary);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; font-weight: 600;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.boutique-tuile:hover, .boutique-tuile:focus-visible { outline: none; border-color: var(--border-gold); background: var(--bg-card-hover); transform: translateY(-2px); }
+.boutique-tuile.boutique-masque { opacity: .55; }
+.boutique-tuile-icone { font-size: 1.9rem; line-height: 1; }
+.boutique-tuile-nom { font-size: .74rem; line-height: 1.25; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
+.boutique-tuile-stock { font-size: .68rem; opacity: .85; }
+.boutique-vide { grid-column: 1 / -1; }
+.boutique-case { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; font-size: .84rem; font-weight: 700; cursor: pointer; }
+.boutique-case input { width: 16px; height: 16px; accent-color: #fff; }
+.confirm-case { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: .8rem; cursor: pointer; }
+.confirm-case[hidden] { display: none; }
+.confirm-case input { width: 15px; height: 15px; accent-color: #fff; }
+.boutique-tuile.masquee { display: none; }

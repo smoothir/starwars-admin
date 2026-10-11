@@ -931,29 +931,34 @@ async function normaliserBoutiqueItem(itemId, body) {
   if (!known.has(id)) throw new Error(`L'objet « ${id} » n'existe pas dans le catalogue.`);
 
   const b = body || {};
-  // Type : "achetable" (le joueur achète au marchand) ou "vendable" (le joueur
-  // vend au marchand = rachat). Chaque type n'a que ses propres prix.
-  const type = b.type === 'vendable' ? 'vendable' : 'achetable';
-  const stock = entierBoutique(b.stock, 'Le stock', { min: 0, max: 1000000 });
-  const data = { type, stock, enabled: b.enabled !== false, updatedAt: new Date() };
+  // Un objet peut être achetable, vendable (rachat) ou les deux. Le stock est
+  // UNIQUE : il est partagé entre l'achat et la revente.
+  const achetable = b.achetable === true;
+  const vendable = b.vendable === true;
+  if (!achetable && !vendable) throw new Error('Coche au moins « Achetable » ou « Vendable ».');
+  const type = achetable && vendable ? 'mixte' : achetable ? 'achetable' : 'vendable';
+  const data = { type, stock: entierBoutique(b.stock, 'Le stock', { min: 0, max: 1000000 }), enabled: b.enabled !== false, updatedAt: new Date() };
   const unset = {};
 
-  if (type === 'achetable') {
+  if (achetable) {
     const minPrice = entierBoutique(b.minPrice, 'Le prix d\'achat minimum', { min: 1 });
     const maxPrice = entierBoutique(b.maxPrice, 'Le prix d\'achat maximum', { min: 1 });
     if (minPrice > maxPrice) throw new Error('Le prix d\'achat minimum ne peut pas dépasser le maximum.');
     data.minPrice = minPrice;
     data.maxPrice = maxPrice;
-    unset.rachatMinPrice = '';
-    unset.rachatMaxPrice = '';
   } else {
-    const rachatMinPrice = entierBoutique(b.rachatMinPrice, 'Le prix de vente minimum', { min: 1 });
-    const rachatMaxPrice = entierBoutique(b.rachatMaxPrice, 'Le prix de vente maximum', { min: 1 });
-    if (rachatMinPrice > rachatMaxPrice) throw new Error('Le prix de vente minimum ne peut pas dépasser le maximum.');
-    data.rachatMinPrice = rachatMinPrice;
-    data.rachatMaxPrice = rachatMaxPrice;
     unset.minPrice = '';
     unset.maxPrice = '';
+  }
+  if (vendable) {
+    const rachatMinPrice = entierBoutique(b.rachatMinPrice, 'Le prix de rachat minimum', { min: 1 });
+    const rachatMaxPrice = entierBoutique(b.rachatMaxPrice, 'Le prix de rachat maximum', { min: 1 });
+    if (rachatMinPrice > rachatMaxPrice) throw new Error('Le prix de rachat minimum ne peut pas dépasser le maximum.');
+    data.rachatMinPrice = rachatMinPrice;
+    data.rachatMaxPrice = rachatMaxPrice;
+  } else {
+    unset.rachatMinPrice = '';
+    unset.rachatMaxPrice = '';
   }
   return { id, data, unset };
 }

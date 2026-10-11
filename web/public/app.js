@@ -707,7 +707,7 @@ function filtrerListe() {
       if (correspond) visibles += 1;
     });
   } else if (state.collectionActuelle === 'boutique') {
-    document.querySelectorAll('.boutique-card').forEach(card => {
+    document.querySelectorAll('.boutique-tuile').forEach(card => {
       const correspond = !q || (card.dataset.nom || '').includes(q);
       card.classList.toggle('masquee', !correspond);
       if (correspond) visibles += 1;
@@ -1810,10 +1810,23 @@ async function supprimerPersonnelType(id) {
 // -----------------------------------------------------------------------
 let _resoudreConfirmEnCours = null;
 
-function confirmerAction({ titre = 'Confirmer', message = '', texteValider = 'Valider' } = {}) {
+function confirmerAction({ titre = 'Confirmer', message = '', texteValider = 'Valider', caseLabel = '' } = {}) {
   document.getElementById('confirm-titre').textContent = titre;
   document.getElementById('confirm-message').textContent = message;
   document.getElementById('confirm-valider').textContent = texteValider;
+  // Case à cocher optionnelle (ex. « Ne plus afficher ce message »).
+  let ligneCase = document.getElementById('confirm-case-ligne');
+  if (!ligneCase) {
+    ligneCase = document.createElement('label');
+    ligneCase.id = 'confirm-case-ligne';
+    ligneCase.className = 'confirm-case';
+    ligneCase.innerHTML = '<input type="checkbox" id="confirm-case"> <span id="confirm-case-texte"></span>';
+    document.querySelector('#confirm-overlay .confirm-actions').before(ligneCase);
+  }
+  document.getElementById('confirm-case').checked = false;
+  document.getElementById('confirm-case-texte').textContent = caseLabel;
+  ligneCase.hidden = !caseLabel;
+  confirmerAction.caseCochee = false;
   document.getElementById('confirm-overlay').classList.add('visible');
 
   return new Promise((resolve) => {
@@ -1822,6 +1835,7 @@ function confirmerAction({ titre = 'Confirmer', message = '', texteValider = 'Va
 }
 
 function resoudreConfirm(valeur) {
+  confirmerAction.caseCochee = !!document.getElementById('confirm-case')?.checked;
   document.getElementById('confirm-overlay').classList.remove('visible');
   if (_resoudreConfirmEnCours) {
     _resoudreConfirmEnCours(valeur);
@@ -1888,89 +1902,107 @@ function fourchetteBoutique(min, max) {
   return Number(min) === Number(max) ? formaterCreditsBoutique(min) : `${formaterCreditsBoutique(min)} → ${formaterCreditsBoutique(max)}`;
 }
 
-// Type d'un objet : "achetable" (le joueur achète), "vendable" (le joueur vend /
-// rachat par le marchand) ou "mixte" (anciens objets sans type : achat + rachat).
+// Un objet de la boutique peut être achetable, vendable (rachat) ou les deux
+// (type "mixte"). Le stock est unique : partagé entre l'achat et la revente.
+// Les anciens objets sans type avaient achat + rachat : ils sont "mixte".
 function typeBoutique(entry) {
   if (entry?.type === 'achetable' || entry?.type === 'vendable') return entry.type;
   return 'mixte';
 }
+const estAchetable = entry => typeBoutique(entry) !== 'vendable';
+const estVendable = entry => typeBoutique(entry) !== 'achetable';
 
-function boutiqueCardHTML(entry) {
+// Tuile compacte : icône, nom et stock. Tout le détail est dans « Modifier ».
+function boutiqueCardHTML(entry, side) {
   const item = state.catalogue.find(it => it.id === entry.id);
   const nom = item?.name || entry.id;
   const masque = entry.enabled === false;
   const stock = Math.max(0, Number(entry.stock) || 0);
-  const type = typeBoutique(entry);
-  const blocAchat = `<div class="production-preview"><strong>🛒 Prix d'achat (joueur)</strong><ul><li>${fourchetteBoutique(entry.minPrice, entry.maxPrice)}</li></ul></div>`;
-  const blocVente = `<div class="production-preview"><strong>💰 Prix de vente (rachat par le marchand)</strong><ul><li>${fourchetteBoutique(entry.rachatMinPrice, entry.rachatMaxPrice)}</li></ul></div>`;
-  const prix = type === 'achetable' ? blocAchat : type === 'vendable' ? blocVente : blocAchat + blocVente;
-  return `<article class="production-card boutique-card${masque ? ' boutique-masque' : ''}" data-nom="${escapeAttr(`${nom} ${entry.id} ${item?.category || ''}`.toLowerCase())}">
-    <div class="production-card-head"><span class="production-icon">${escapeHtml(item?.emoji || '📦')}</span><div class="production-card-title"><h3>${escapeHtml(nom)}</h3><p>${escapeHtml(item ? `${item.category || 'Autre'} · ${item.rarity || 'Commun'}` : 'Objet absent du catalogue')}</p></div><span class="production-time">${masque ? '🚫 Masqué' : stock > 0 ? `📦 Stock : ${stock}` : '❌ Rupture'}</span></div>
-    <div class="production-columns">${prix}</div>
-    <div class="production-actions"><button class="btn-secondaire" onclick="ouvrirEditeurBoutique('${jsAttr(entry.id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="retirerBoutiqueItem('${jsAttr(entry.id)}')">Retirer</button></div>
-  </article>`;
+  const etat = masque ? '🚫 Masqué' : stock > 0 ? `📦 ${stock}` : '❌ Rupture';
+  return `<button type="button" class="boutique-tuile${masque ? ' boutique-masque' : ''}" onclick="ouvrirEditeurBoutique('${jsAttr(entry.id)}', '${side}')" data-nom="${escapeAttr(`${nom} ${entry.id} ${item?.category || ''}`.toLowerCase())}" title="${escapeAttr(nom)}">
+    <span class="boutique-tuile-icone">${escapeHtml(item?.emoji || '📦')}</span>
+    <span class="boutique-tuile-nom">${escapeHtml(nom)}</span>
+    <span class="boutique-tuile-stock">${etat}</span>
+  </button>`;
 }
 
 function renderBoutiquePage() {
-  const trier = (a, b) => {
-    const ia = state.catalogue.find(it => it.id === a.id); const ib = state.catalogue.find(it => it.id === b.id);
-    return String(ia?.category || '').localeCompare(String(ib?.category || ''), 'fr') || String(ia?.name || a.id).localeCompare(String(ib?.name || b.id), 'fr');
-  };
-  const achetables = state.boutique.filter(it => typeBoutique(it) !== 'vendable').sort(trier);
-  const vendables = state.boutique.filter(it => typeBoutique(it) === 'vendable').sort(trier);
-  const vide = (titre, sous) => `<div class="etat-vide"><p>${titre}</p><span class="etat-vide-sub">${sous}</span></div>`;
+  const nomDe = e => String(state.catalogue.find(it => it.id === e.id)?.name || e.id);
+  const parPrix = (min, max) => (a, b) =>
+    (Number(a[min]) || 0) - (Number(b[min]) || 0) || (Number(a[max]) || 0) - (Number(b[max]) || 0)
+    || nomDe(a).localeCompare(nomDe(b), 'fr');
+  const achetables = state.boutique.filter(estAchetable).sort(parPrix('minPrice', 'maxPrice'));
+  const vendables = state.boutique.filter(estVendable).sort(parPrix('rachatMinPrice', 'rachatMaxPrice'));
+  const vide = texte => `<div class="etat-vide boutique-vide"><p>${texte}</p></div>`;
   document.getElementById('contenu').innerHTML = `
-    <div class="production-intro"><div class="production-intro-icon">🏪</div><div><strong>Boutique galactique</strong><p>Deux catégories distinctes : les objets <b>achetables</b> (le joueur les achète au marchand, avec un prix d'achat) et les objets <b>vendables</b> (le joueur les revend au marchand, avec un prix de vente / rachat). Les changements apparaissent dans Discord en moins d'une minute.</p></div></div>
-    <div class="production-section-heading"><div><h3>🛒 Achetable</h3><p>Objets que les joueurs peuvent acheter. Le prix baisse quand le stock monte : prix maximum à 0 en stock, prix minimum à 20 en stock ou plus.</p></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'achetable')">＋ Ajouter un objet achetable</button></div>
-    <div class="production-grid">${achetables.map(boutiqueCardHTML).join('') || vide('Aucun objet achetable.', 'Ajoute un objet du catalogue que les joueurs pourront acheter.')}</div>
-    <div class="production-section-heading"><div><h3>💰 Vendable</h3><p>Objets que les joueurs peuvent vendre au marchand (rachat).</p></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'vendable')">＋ Ajouter un objet vendable</button></div>
-    <div class="production-grid">${vendables.map(boutiqueCardHTML).join('') || vide('Aucun objet vendable.', 'Ajoute un objet du catalogue que le marchand rachètera aux joueurs.')}</div>
+    <div class="production-section-heading"><div><h3>🛒 Achetable</h3></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'achetable')">＋ Ajouter</button></div>
+    <div class="boutique-grille">${achetables.map(e => boutiqueCardHTML(e, 'achetable')).join('') || vide('Aucun objet achetable.')}</div>
+    <div class="production-section-heading"><div><h3>💰 Vendable</h3></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'vendable')">＋ Ajouter</button></div>
+    <div class="boutique-grille">${vendables.map(e => boutiqueCardHTML(e, 'vendable')).join('') || vide('Aucun objet vendable.')}</div>
     <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>`;
 }
 
-function ouvrirEditeurBoutique(itemId, typeInitial = 'achetable') {
+function ouvrirEditeurBoutique(itemId, side = 'achetable') {
   const entry = itemId ? state.boutique.find(it => it.id === itemId) : null;
   if (itemId && !entry) return toast('Objet introuvable dans la boutique.', 'erreur');
   state.boutiqueActuelle = entry?.id || null;
-  const typeEntree = entry ? typeBoutique(entry) : typeInitial;
-  const typeEdition = typeEntree === 'vendable' ? 'vendable' : 'achetable';
-  state.boutiqueTypeEdition = typeEdition;
+  // Case(s) cochée(s) : celles de l'objet, plus la section depuis laquelle on ajoute.
+  const coche = {
+    achetable: entry ? estAchetable(entry) : false,
+    vendable: entry ? estVendable(entry) : false,
+  };
+  coche[side === 'vendable' ? 'vendable' : 'achetable'] = true;
+  state.boutiqueStockInitial = entry ? Math.max(0, Number(entry.stock) || 0) : null;
+
   document.getElementById('overlay-catalogue').classList.add('visible');
   document.getElementById('panneau-catalogue').classList.add('ouvert');
   const catItem = entry ? state.catalogue.find(it => it.id === entry.id) : null;
   document.getElementById('panneau-catalogue-titre').textContent = entry ? `Modifier - ${catItem?.name || entry.id}` : 'Ajouter à la boutique';
-  const dejaPresents = new Set(state.boutique.map(it => it.id));
+
+  // Pour ajouter à une section, on propose tous les objets pas encore présents
+  // dans CETTE section (un objet déjà en achat peut donc être ajouté en rachat).
+  const dansSection = new Set(state.boutique.filter(it => side === 'vendable' ? estVendable(it) : estAchetable(it)).map(it => it.id));
   const options = '<option value="">Choisir un objet…</option>' + catalogueTrie()
-    .filter(it => String(it.id).toLowerCase() !== 'credits_de_la_nouvelle_republique' && !dejaPresents.has(it.id))
+    .filter(it => String(it.id).toLowerCase() !== 'credits_de_la_nouvelle_republique' && !dansSection.has(it.id))
     .map(it => `<option value="${escapeAttr(it.id)}">${escapeHtml(`${it.emoji || '📦'} ${it.name} - ${it.id}`)}</option>`).join('');
   const champObjet = entry
     ? `<div class="champ"><label>Objet</label><input type="text" value="${escapeAttr(`${catItem?.emoji || '📦'} ${catItem?.name || entry.id}`)}" disabled></div>`
-    : `<div class="champ"><label for="f-boutique-item">Objet du catalogue</label><select id="f-boutique-item">${options}</select></div>`;
+    : `<div class="champ"><label for="f-boutique-item">Objet du catalogue</label><select id="f-boutique-item" onchange="choisirObjetBoutique(this.value, '${side === 'vendable' ? 'vendable' : 'achetable'}')">${options}</select></div>`;
   const nb = (id, label, value) => `<div class="champ"><label for="${id}">${label}</label><input id="${id}" type="number" min="1" step="1" value="${Math.max(1, Number(value) || 1)}"></div>`;
   document.getElementById('panneau-catalogue-corps').innerHTML = `
     <div class="section-titre">${entry ? '✏️ Modifier l\'objet' : '➕ Ajouter un objet'}</div>
     ${champObjet}
-    <div class="grille-champs"><div class="champ"><label for="f-boutique-stock">Stock du marchand</label><input id="f-boutique-stock" type="number" min="0" max="1000000" step="1" value="${Math.max(0, Number(entry?.stock) || 0)}"></div><div class="champ"><label for="f-boutique-enabled">Visibilité</label><select id="f-boutique-enabled"><option value="1" ${entry?.enabled === false ? '' : 'selected'}>Visible dans la boutique</option><option value="0" ${entry?.enabled === false ? 'selected' : ''}>Masqué</option></select></div></div>
-    <div class="champ"><label for="f-boutique-type">Catégorie</label><select id="f-boutique-type" onchange="changerTypeBoutique(this.value)"><option value="achetable" ${typeEdition === 'achetable' ? 'selected' : ''}>🛒 Achetable (le joueur achète)</option><option value="vendable" ${typeEdition === 'vendable' ? 'selected' : ''}>💰 Vendable (le marchand rachète)</option></select></div>
-    <div id="bloc-boutique-achat" ${typeEdition === 'achetable' ? '' : 'hidden'}>
-      <div class="section-titre">🛒 Prix d'achat (ce que paie le joueur)</div>
+    <div class="grille-champs"><div class="champ"><label for="f-boutique-stock">Stock du marchand (achat et rachat)</label><input id="f-boutique-stock" type="number" min="0" max="1000000" step="1" value="${Math.max(0, Number(entry?.stock) || 0)}"></div><div class="champ"><label for="f-boutique-enabled">Visibilité</label><select id="f-boutique-enabled"><option value="1" ${entry?.enabled === false ? '' : 'selected'}>Visible dans la boutique</option><option value="0" ${entry?.enabled === false ? 'selected' : ''}>Masqué</option></select></div></div>
+    <label class="boutique-case"><input type="checkbox" id="f-boutique-achetable" ${coche.achetable ? 'checked' : ''} onchange="basculerSideBoutique()"> 🛒 Achetable (le joueur achète au marchand)</label>
+    <div id="bloc-boutique-achat" ${coche.achetable ? '' : 'hidden'}>
       <div class="grille-champs">${nb('f-boutique-min', 'Prix minimum (stock élevé)', entry?.minPrice ?? 100)}${nb('f-boutique-max', 'Prix maximum (rupture)', entry?.maxPrice ?? 250)}</div>
     </div>
-    <div id="bloc-boutique-vente" ${typeEdition === 'vendable' ? '' : 'hidden'}>
-      <div class="section-titre">💰 Prix de vente (ce que paie le marchand au joueur)</div>
-      <div class="grille-champs">${nb('f-boutique-rachat-min', 'Vente minimum (stock élevé)', entry?.rachatMinPrice ?? 50)}${nb('f-boutique-rachat-max', 'Vente maximum (rupture)', entry?.rachatMaxPrice ?? 125)}</div>
+    <label class="boutique-case"><input type="checkbox" id="f-boutique-vendable" ${coche.vendable ? 'checked' : ''} onchange="basculerSideBoutique()"> 💰 Vendable (le marchand rachète au joueur)</label>
+    <div id="bloc-boutique-vente" ${coche.vendable ? '' : 'hidden'}>
+      <div class="grille-champs">${nb('f-boutique-rachat-min', 'Rachat minimum (stock élevé)', entry?.rachatMinPrice ?? 50)}${nb('f-boutique-rachat-max', 'Rachat maximum (rupture)', entry?.rachatMaxPrice ?? 125)}</div>
     </div>
-    <p class="section-note">Le stock est aussi modifié par le bot à chaque achat, vente ou échange : si tu le changes ici, la nouvelle valeur remplace le stock actuel.</p>
-    <div class="actions-panneau"><button class="btn-principal" id="btn-enregistrer-boutique" onclick="sauvegarderBoutiqueItem()">${entry ? 'Enregistrer les modifications' : 'Ajouter à la boutique'}</button></div>`;
+    <div class="actions-panneau">
+      <button class="btn-principal" id="btn-enregistrer-boutique" onclick="sauvegarderBoutiqueItem()">${entry ? 'Enregistrer les modifications' : 'Ajouter à la boutique'}</button>
+      ${entry ? `<button class="btn-secondaire btn-danger" onclick="retirerBoutiqueItem('${jsAttr(entry.id)}')">Retirer de la boutique</button>` : ''}
+    </div>`;
 }
 
-function changerTypeBoutique(type) {
-  state.boutiqueTypeEdition = type === 'vendable' ? 'vendable' : 'achetable';
-  const achat = document.getElementById('bloc-boutique-achat');
-  const vente = document.getElementById('bloc-boutique-vente');
-  if (achat) achat.hidden = state.boutiqueTypeEdition !== 'achetable';
-  if (vente) vente.hidden = state.boutiqueTypeEdition !== 'vendable';
+// Choisir dans la liste un objet déjà présent dans l'autre section : on rouvre
+// l'éditeur sur cet objet pour reprendre son stock (partagé) et ses prix.
+function choisirObjetBoutique(id, side) {
+  if (id && state.boutique.some(it => it.id === id)) ouvrirEditeurBoutique(id, side);
 }
+
+function basculerSideBoutique() {
+  const achat = document.getElementById('f-boutique-achetable')?.checked;
+  const vente = document.getElementById('f-boutique-vendable')?.checked;
+  const blocAchat = document.getElementById('bloc-boutique-achat');
+  const blocVente = document.getElementById('bloc-boutique-vente');
+  if (blocAchat) blocAchat.hidden = !achat;
+  if (blocVente) blocVente.hidden = !vente;
+}
+
+const CLE_MASQUER_INFO_STOCK = 'boutique:masquerInfoStock';
 
 async function sauvegarderBoutiqueItem() {
   const button = document.getElementById('btn-enregistrer-boutique');
@@ -1980,19 +2012,28 @@ async function sauvegarderBoutiqueItem() {
   try {
     const id = state.boutiqueActuelle || val('f-boutique-item');
     if (!id) throw new Error('Choisis un objet du catalogue.');
-    const type = val('f-boutique-type') === 'vendable' ? 'vendable' : 'achetable';
-    const payload = {
-      type,
-      stock: Number(val('f-boutique-stock')),
-      enabled: val('f-boutique-enabled') !== '0',
-    };
-    if (type === 'achetable') {
-      payload.minPrice = Number(val('f-boutique-min'));
-      payload.maxPrice = Number(val('f-boutique-max'));
-    } else {
-      payload.rachatMinPrice = Number(val('f-boutique-rachat-min'));
-      payload.rachatMaxPrice = Number(val('f-boutique-rachat-max'));
+    const achetable = document.getElementById('f-boutique-achetable').checked;
+    const vendable = document.getElementById('f-boutique-vendable').checked;
+    if (!achetable && !vendable) throw new Error('Coche au moins « Achetable » ou « Vendable ».');
+    const stock = Number(val('f-boutique-stock'));
+    const payload = { achetable, vendable, stock, enabled: val('f-boutique-enabled') !== '0' };
+    if (achetable) { payload.minPrice = Number(val('f-boutique-min')); payload.maxPrice = Number(val('f-boutique-max')); }
+    if (vendable) { payload.rachatMinPrice = Number(val('f-boutique-rachat-min')); payload.rachatMaxPrice = Number(val('f-boutique-rachat-max')); }
+
+    // Quantité modifiée : on rappelle que le stock est commun à l'achat et à la revente.
+    let masquer = false;
+    try { masquer = localStorage.getItem(CLE_MASQUER_INFO_STOCK) === '1'; } catch (_) { /* stockage indisponible */ }
+    if (state.boutiqueStockInitial !== null && stock !== state.boutiqueStockInitial && !masquer) {
+      const ok = await confirmerAction({
+        titre: 'Modifier le stock',
+        message: `Le stock est partagé entre l'achat et la revente : passer de ${state.boutiqueStockInitial} à ${stock} change la quantité disponible à l'achat ET celle qui fait varier le prix de rachat.`,
+        texteValider: 'Enregistrer',
+        caseLabel: 'Ne plus afficher ce message',
+      });
+      if (!ok) return;
+      if (confirmerAction.caseCochee) { try { localStorage.setItem(CLE_MASQUER_INFO_STOCK, '1'); } catch (_) { /* ignoré */ } }
     }
+
     await fetchJSON(`/api/boutique/${encodeURIComponent(id)}`, payload, 'PUT');
     toast(state.boutiqueActuelle ? 'Objet de la boutique modifié.' : 'Objet ajouté à la boutique.', 'succes');
     fermerCataloguePanel();
@@ -2003,9 +2044,9 @@ async function sauvegarderBoutiqueItem() {
 
 async function retirerBoutiqueItem(id) {
   const item = state.catalogue.find(it => it.id === id);
-  const ok = await confirmerAction({ titre: 'Retirer de la boutique', message: `Retirer « ${item?.name || id} » de la boutique ? L'objet reste dans le catalogue.`, texteValider: 'Retirer' });
+  const ok = await confirmerAction({ titre: 'Retirer de la boutique', message: `Retirer « ${item?.name || id} » de la boutique (achat et rachat) ? L'objet reste dans le catalogue.`, texteValider: 'Retirer' });
   if (!ok) return;
-  try { await fetchJSON(`/api/boutique/${encodeURIComponent(id)}`, null, 'DELETE'); toast('Objet retiré de la boutique.', 'succes'); await chargerBoutiquePage(); }
+  try { await fetchJSON(`/api/boutique/${encodeURIComponent(id)}`, null, 'DELETE'); toast('Objet retiré de la boutique.', 'succes'); fermerCataloguePanel(); await chargerBoutiquePage(); }
   catch (error) { toast(`Échec : ${error.message}`, 'erreur'); }
 }
 
