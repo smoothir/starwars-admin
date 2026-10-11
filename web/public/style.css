@@ -1860,3 +1860,16 @@ html { font-size: 14px; }
   .production-item-row select, .production-item-row input { padding: 9px 6px; font-size: .72rem; }
   .production-actions .btn-secondaire { flex: 1; }
 }
+/* Lisibilité : la police GothicA1 Black rend le « i » presque identique à un « I »
+   en petit. On utilise une police système pour les champs et le contenu des cartes. */
+.champ input[type="text"],
+.champ textarea,
+.champ select,
+.production-item-row select,
+.production-item-row input,
+.production-card-title h3,
+.production-card-title p,
+.production-preview li {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  font-weight: 600;
+}

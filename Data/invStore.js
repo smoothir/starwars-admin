@@ -234,6 +234,20 @@ async function getCatalog() {
 }
 
 /**
+ * Retourne l'ensemble des identifiants (parmi ceux demandés) qui existent dans
+ * le catalogue. Ne charge QUE les _id : pas d'images base64, donc très rapide
+ * (à utiliser pour valider des listes d'objets plutôt que getCatalog()).
+ */
+async function getExistingCatalogIds(ids) {
+  const col = await getItemCatalogCollection();
+  await ensureCatalogInitialized(col);
+  const wanted = [...new Set((ids || []).map(String))];
+  if (!wanted.length) return new Set();
+  const docs = await col.find({ _id: { $in: wanted } }, { projection: { _id: 1 } }).toArray();
+  return new Set(docs.map(d => String(d._id)));
+}
+
+/**
  * Version légère du catalogue destinée aux listes du site.
  * Les images base64 ne sont jamais renvoyées dans le JSON : elles deviennent
  * une URL chargée séparément par le navigateur au moment où l'image apparaît.
@@ -494,6 +508,7 @@ module.exports = {
   ITEM_RARITIES,
   normalizeUseAction,
   getCatalog,
+  getExistingCatalogIds,
   getCatalogMetadata,
   getCatalogImageData,
   getItem,

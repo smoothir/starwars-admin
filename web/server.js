@@ -27,6 +27,7 @@ const {
   EQUIPMENT_SLOT_LABELS,
   ITEM_RARITIES,
   getCatalog,
+  getExistingCatalogIds,
   getCatalogMetadata,
   getCatalogImageData,
   getInventory,
@@ -492,8 +493,7 @@ async function normaliserRecetteCraft(body) {
   if (!Number.isFinite(durationMinutes) || durationMinutes < 1 || durationMinutes > 5256000) {
     throw new Error('La durée doit être comprise entre 1 minute et 10 ans.');
   }
-  const catalog = await getCatalog();
-  const known = new Set(catalog.map(item => String(item.id)));
+  const known = await getExistingCatalogIds([...requirements, ...outputs].map(row => row.itemId));
   for (const row of [...requirements, ...outputs]) {
     if (!known.has(row.itemId)) throw new Error(`L'objet « ${row.itemId} » n'existe pas dans le catalogue.`);
   }
@@ -582,8 +582,7 @@ async function normaliserListeProduction(values, fieldName, obligatoire = true) 
   }
   const rows = [...merged.entries()].map(([itemId, quantity]) => ({ itemId, quantity }));
   if (obligatoire && !rows.length) throw new Error(`Ajoute au moins un objet dans « ${fieldName} ».`);
-  const catalog = await getCatalog();
-  const known = new Set(catalog.map(item => String(item.id)));
+  const known = await getExistingCatalogIds(rows.map(row => row.itemId));
   for (const row of rows) if (!known.has(row.itemId)) throw new Error(`L'objet « ${row.itemId} » n'existe pas dans le catalogue.`);
   return rows;
 }
