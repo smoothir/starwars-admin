@@ -2095,3 +2095,36 @@ html { font-size: 14px; }
   .inventory-bulk-row { flex-wrap: wrap; }
   .inventory-bulk-row .item-corps { flex: 1 1 55%; }
 }
+
+/* Bonus / malus configurables et gestion des primes */
+.trait-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.trait-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+.trait-card.masquee { display: none; }
+.trait-card.trait-inactif { opacity: .62; }
+.trait-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.trait-point { display: inline-flex; align-items: center; justify-content: center; min-width: 72px; padding: 5px 10px; border: 1px solid var(--border-soft); border-radius: 999px; font-weight: 800; font-size: .76rem; }
+.trait-point-malus { color: #ffb6b6; border-color: rgba(255,90,90,.42); background: rgba(255,60,60,.08); }
+.trait-point-bonus { color: #a8f0c1; border-color: rgba(70,195,125,.42); background: rgba(70,195,125,.08); }
+.trait-card h3 { font-size: .94rem; overflow-wrap: anywhere; }
+.trait-card > p { margin: 0; color: var(--text-secondary); font-size: .76rem; line-height: 1.5; }
+.trait-effets { display: flex; flex-direction: column; gap: 5px; padding: 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: rgba(255,255,255,.025); }
+.trait-effets strong { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; }
+.trait-effets span { color: var(--text-secondary); font-size: .72rem; line-height: 1.45; overflow-wrap: anywhere; }
+.trait-actions { display: flex; gap: 8px; margin-top: auto; }
+.trait-actions button { min-height: 34px; flex: 1; }
+.trait-json-input { min-height: 260px !important; font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important; font-size: .76rem !important; white-space: pre; }
+.prime-row.masquee { display: none; }
+@media (max-width: 900px) { .trait-grid { grid-template-columns: 1fr; } }

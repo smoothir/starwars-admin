@@ -20,6 +20,22 @@ const {
 } = require('../Data/profileStore.js');
 const config = require('../Data/config.js');
 const FOUNDER_DISCORD_ID = '391515665271357441';
+
+// Traits de départ. Ils ne sont insérés que si la collection est vide ; une fois
+// le site configuré, les choix du staff sont la source de vérité partagée avec le bot.
+const DEFAULT_CHARACTER_TRAITS = [
+  { _id: 'mise-a-prix', name: 'Mise à Prix', description: 'Prime de 2 500 crédits pour avoir volé la Nouvelle République ; +1 relation avec l’Empire.', points: 5, enabled: true, effects: { bounty: { amount: 2500, description: 'Recherché pour avoir volé la Nouvelle République.' }, relations: [{ factionKey: 'EMPIRE', mode: 'add', value: 1 }] } },
+  { _id: 'dette-d-hutt', name: 'Dette d’Hutt', description: 'Dette de 2 000 crédits auprès du Cartel des Hutts.', points: 6, enabled: true, effects: { debts: [{ creditor: 'Cartel des Hutts', amount: 2000 }] } },
+  { _id: 'veteran-des-guerres', name: 'Vétéran des Guerres', description: 'Reçoit un équipement Peu commun au hasard.', points: -4, enabled: true, effects: { randomItems: [{ rarity: 'Peu commun', categoryIncludes: 'équipement', quantity: 1 }] } },
+  { _id: 'connaisseur-des-bas-fonds', name: 'Connaisseur des Bas-Fonds', description: '+5 Éloquence & Commerce.', points: -2, enabled: true, effects: { stats: [{ stat: 'Éloquence & Commerce', amount: 5 }] } },
+  { _id: 'accro-aux-batons-de-la-mort', name: 'Accro aux Bâtons de la Mort', description: '-10 Résistance si aucune dose n’est consommée tous les 3 jours réels.', points: 6, enabled: true, effects: { addictions: [{ itemId: 'batons_de_la_mort', itemNameContains: 'bâton de la mort', stat: 'Résistance', amount: -10, intervalDays: 3 }] } },
+  { _id: 'sequelle-de-guerre', name: 'Séquelle de Guerre', description: '-10 Tir & Précision.', points: 2, enabled: true, effects: { stats: [{ stat: 'Tir & Précision', amount: -10 }] } },
+  { _id: 'capitaine-de-chasseur-stellaire', name: 'Capitaine de chasseur stellaire', description: 'Reçoit un chasseur stellaire de rareté Rare.', points: -8, enabled: true, effects: { items: [{ itemId: 'chasseur_stellaire', fallbackName: 'chasseur stellaire', rarity: 'Rare', quantity: 1 }] } },
+  { _id: 'as-du-vol-spatial', name: 'As du Vol Spatial', description: '+10 Pilotage.', points: -6, enabled: true, effects: { stats: [{ stat: 'Pilotage', amount: 10 }] } },
+  { _id: 'infiltre-du-syndicat', name: 'Infiltré du Syndicat', description: 'La relation avec le Syndicat Pyke passe à 5.', points: -6, enabled: true, effects: { relations: [{ factionKey: 'SYNDICAT_PYKE', mode: 'set', value: 5 }] } },
+  { _id: 'fonds-de-roulement', name: 'Fonds de Roulement', description: 'Reçoit 1 500 crédits.', points: -4, enabled: true, effects: { items: [{ itemId: 'credits_de_la_nouvelle_republique', fallbackName: 'crédits', quantity: 1500 }] } },
+  { _id: 'diplomate-celebre', name: 'Diplomate Célèbre', description: 'La Nouvelle République OU l’Ordre Jedi passe à 3 (Favorable) ; +5 Éloquence & Commerce.', points: -2, enabled: true, effects: { stats: [{ stat: 'Éloquence & Commerce', amount: 5 }], relationChoice: { prompt: 'Choisis la faction qui commence à une relation de 3 (Favorable).', options: [{ factionKey: 'NOUVELLE_REPUBLIQUE', label: 'La Nouvelle République', level: 3 }, { factionKey: 'ORDRE_JEDI', label: 'L’Ordre Jedi', level: 3 }] } } },
+];
 const { getFactions, findGradeByRoleId } = require('../Data/factionHelper.js');
 const { findAvatar, upsertAvatarImage } = require('../Data/avatarStore.js');
 const {
@@ -41,7 +57,7 @@ const {
   setItemQuantity,
 } = require('../Data/invStore.js');
 const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup } = require('../Data/adminStore.js');
-const { connect, getItemCatalogCollection, getBoutiqueItemsCollection, getBoutiqueStateCollection, getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection } = require('../Data/mongo.js');
+const { connect, getItemCatalogCollection, getBoutiqueItemsCollection, getBoutiqueStateCollection, getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection, getCharacterTraitsCollection } = require('../Data/mongo.js');
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
@@ -642,6 +658,20 @@ app.patch('/api/profils/:id', async (req, res) => {
       fields.stats = stats;
     }
 
+    // Prime de personnage. On conserve les champs internes de synchronisation
+    // Discord afin de mettre à jour le fil du forum existant au lieu d'en créer un nouveau.
+    if (b.prime && typeof b.prime === 'object' && !Array.isArray(b.prime)) {
+      const oldPrime = profile.prime && typeof profile.prime === 'object' ? profile.prime : {};
+      const amount = Math.max(0, Math.floor(Number(b.prime.amount) || 0));
+      fields.prime = {
+        ...oldPrime,
+        active: Boolean(b.prime.active) && amount > 0,
+        amount,
+        description: String(b.prime.description || '').trim().slice(0, 1000),
+        updatedAt: new Date(),
+      };
+    }
+
     // Nouveau portrait (image encodée en base64, envoyée par le formulaire) :
     // enregistré dans la collection "avatars", associé au faceclaim FINAL
     // (celui qu'on vient de sauvegarder ci-dessus, au cas où il ait aussi été
@@ -708,6 +738,91 @@ app.get('/api/profils/:id/avatar', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).end();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// BONUS / MALUS — définitions configurables du système de création du personnage.
+// ---------------------------------------------------------------------------
+async function ensureCharacterTraitsSeeded() {
+  const col = await getCharacterTraitsCollection();
+  const markerId = '__character_traits_seeded__';
+  if (await col.findOne({ _id: markerId }, { projection: { _id: 1 } })) return;
+  const now = new Date();
+  await col.bulkWrite(DEFAULT_CHARACTER_TRAITS.map(t => ({ updateOne: { filter: { _id: t._id }, update: { $setOnInsert: { ...t, createdAt: now, updatedAt: now } }, upsert: true } })), { ordered: false });
+  await col.updateOne({ _id: markerId }, { $setOnInsert: { seededAt: new Date(), internal: true } }, { upsert: true });
+}
+
+function normalizeCharacterTrait(body, idFromRoute = null) {
+  const b = body || {};
+  const name = String(b.name || '').trim();
+  if (!name) throw new Error('Le nom du trait est obligatoire.');
+  const points = Math.round(Number(b.points));
+  if (!Number.isFinite(points) || points === 0 || Math.abs(points) > 100) throw new Error('Les points doivent être un entier entre -100 et 100, différent de 0.');
+  if (!b.effects || typeof b.effects !== 'object' || Array.isArray(b.effects)) throw new Error('Les effets doivent être un objet JSON valide.');
+  return {
+    name: name.slice(0, 100),
+    description: String(b.description || '').trim().slice(0, 1000),
+    points,
+    effects: b.effects,
+    enabled: b.enabled !== false,
+    updatedAt: new Date(),
+  };
+}
+
+app.get('/api/traits', async (req, res) => {
+  try {
+    await ensureCharacterTraitsSeeded();
+    const traits = await (await getCharacterTraitsCollection()).find({ _id: { $ne: '__character_traits_seeded__' } }).sort({ points: -1, name: 1 }).toArray();
+    res.set('Cache-Control', 'no-store');
+    res.json(traits);
+  } catch (err) {
+    console.error('Chargement des bonus/malus impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/traits', async (req, res) => {
+  try {
+    const col = await getCharacterTraitsCollection();
+    const requested = String(req.body?.id || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+    const id = requested || `trait_${crypto.randomBytes(8).toString('hex')}`;
+    if (!/^[a-z0-9_-]{1,80}$/.test(id) || id.startsWith('__')) return res.status(400).json({ error: 'Identifiant de trait invalide.' });
+    const trait = normalizeCharacterTrait(req.body);
+    const existing = await col.findOne({ _id: id });
+    if (existing) return res.status(409).json({ error: `Un trait avec l'identifiant « ${id} » existe déjà.` });
+    const document = { _id: id, ...trait, createdAt: new Date() };
+    await col.insertOne(document);
+    logFromReq(req, 'trait_cree', `A créé le bonus/malus « ${document.name} » (${document.points} points).`);
+    res.status(201).json(document);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/traits/:id', async (req, res) => {
+  try {
+    const col = await getCharacterTraitsCollection();
+    const trait = normalizeCharacterTrait(req.body, req.params.id);
+    const result = await col.findOneAndUpdate({ _id: req.params.id }, { $set: trait }, { returnDocument: 'after' });
+    if (!result) return res.status(404).json({ error: 'Trait introuvable.' });
+    logFromReq(req, 'trait_modifie', `A modifié le bonus/malus « ${result.name} » (${result.points} points).`);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/traits/:id', async (req, res) => {
+  try {
+    const col = await getCharacterTraitsCollection();
+    const trait = await col.findOne({ _id: req.params.id });
+    if (!trait) return res.status(404).json({ error: 'Trait introuvable.' });
+    await col.deleteOne({ _id: req.params.id });
+    logFromReq(req, 'trait_supprime', `A supprimé le bonus/malus « ${trait.name} ».`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

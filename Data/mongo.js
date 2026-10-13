@@ -16,6 +16,7 @@ const COLLECTION_PROFILS = 'profils';
 const COLLECTION_CHARLIST_INDEX = 'charlist_index';
 const COLLECTION_INV = 'inv';
 const COLLECTION_ITEM_CATALOG = 'item_catalog';
+const COLLECTION_CHARACTER_TRAITS = 'character_traits';
 const COLLECTION_SITE_CONNEXIONS = 'site_connexions';
 const COLLECTION_SITE_LOGS = 'site_logs';
 const COLLECTION_SITE_BACKUPS = 'site_backups';
@@ -272,6 +273,12 @@ async function getProductionRecipesCollection() {
 }
 
 /** Types de personnel recrutables, partagés avec le bot. */
+
+async function getCharacterTraitsCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_CHARACTER_TRAITS);
+}
+
 async function getPersonnelTypesCollection() {
   const database = await connect();
   return database.collection(COLLECTION_PERSONNEL_TYPES);
@@ -303,4 +310,5 @@ module.exports = {
   getBoutiqueStateCollection,
   getProductionRecipesCollection,
   getPersonnelTypesCollection,
+  getCharacterTraitsCollection,
 };

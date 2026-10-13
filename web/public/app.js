@@ -15,6 +15,8 @@ const state = {
   personnelTypeActuel: null,
   boutique: [],
   boutiqueActuelle: null,
+  traits: [],
+  traitActuel: null,
   statuts: [],
   listes: { relationFactions: [], relationLevels: [], defaultStats: [], statMax: 10 },
   collectionActuelle: null,
@@ -316,6 +318,22 @@ async function chargerDonnees(collection) {
     document.getElementById('titre-section').textContent = 'Boutique';
     document.getElementById('sous-titre').textContent = 'Objets, prix et stock de la boutique Discord. Les achats et ventes se font sur le bot.';
     await chargerBoutiquePage();
+  } else if (collection === 'traits') {
+    searchWrap.hidden = false;
+    const rechercheInput = document.getElementById('recherche');
+    rechercheInput.value = '';
+    rechercheInput.placeholder = 'Rechercher un bonus ou un malus...';
+    document.getElementById('titre-section').textContent = 'Bonus / malus';
+    document.getElementById('sous-titre').textContent = 'Configure les traits proposés à l’étape 4 de création des personnages et leurs effets.';
+    await chargerTraitsPage();
+  } else if (collection === 'primes') {
+    searchWrap.hidden = false;
+    const rechercheInput = document.getElementById('recherche');
+    rechercheInput.value = '';
+    rechercheInput.placeholder = 'Rechercher un personnage...';
+    document.getElementById('titre-section').textContent = 'Primes';
+    document.getElementById('sous-titre').textContent = 'Gère les primes des personnages. Les fiches actives sont publiées automatiquement dans le forum Discord des primes.';
+    await chargerPrimesPage();
   } else if (collection === 'admin') {
     searchWrap.hidden = true;
     document.getElementById('titre-section').textContent = 'Admin';
@@ -833,6 +851,7 @@ function fermerCataloguePanel() {
   state.craftActuel = null;
   state.productionActuelle = null;
   state.personnelTypeActuel = null;
+  state.traitActuel = null;
 }
 
 async function rafraichirCataloguePanel() {
@@ -999,6 +1018,18 @@ function filtrerListe() {
       card.classList.toggle('masquee', !matches);
       if (matches) visibles += 1;
     });
+  } else if (state.collectionActuelle === 'traits') {
+    document.querySelectorAll('.trait-card').forEach(card => {
+      const correspond = !q || (card.dataset.nom || '').includes(q);
+      card.classList.toggle('masquee', !correspond);
+      if (correspond) visibles += 1;
+    });
+  } else if (state.collectionActuelle === 'primes') {
+    document.querySelectorAll('.prime-row').forEach(card => {
+      const correspond = !q || (card.dataset.nom || '').includes(q);
+      card.classList.toggle('masquee', !correspond);
+      if (correspond) visibles += 1;
+    });
   } else {
     document.querySelectorAll('.contenu .ligne').forEach(card => {
       const matches = !q || (card.dataset.nom || '').includes(q);
@@ -1007,6 +1038,150 @@ function filtrerListe() {
     });
   }
   if (aucun) aucun.hidden = visibles !== 0;
+}
+
+// -----------------------------------------------------------------------
+// Bonus / malus de création et gestion des primes des personnages.
+// -----------------------------------------------------------------------
+async function chargerTraitsPage() {
+  const contenuDiv = document.getElementById('contenu');
+  contenuDiv.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
+  try {
+    const response = await apiFetch('/api/traits');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.traits = await response.json();
+    renderTraitsPage();
+    setStatutConnexion(true);
+  } catch (error) {
+    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de chargement des bonus/malus</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    setStatutConnexion(false);
+  }
+}
+
+function pointsTraitTexte(points) {
+  const n = Number(points) || 0;
+  return `${n > 0 ? '+' : ''}${n} pts`;
+}
+
+function resumeEffetsTrait(effects) {
+  const e = effects || {};
+  const parts = [];
+  if (e.bounty) parts.push(`Prime : ${Number(e.bounty.amount) || 0} crédits`);
+  for (const item of e.debts || []) parts.push(`Dette : ${Number(item.amount) || 0} crédits (${item.creditor || 'créancier'})`);
+  for (const s of e.stats || []) parts.push(`${Number(s.amount) > 0 ? '+' : ''}${s.amount} ${s.stat}`);
+  for (const r of e.relations || []) parts.push(`Relation ${r.factionKey}: ${r.mode === 'set' ? '→' : '+'}${r.value}`);
+  for (const i of e.items || []) parts.push(`Objet : ${i.fallbackName || i.itemId} ×${i.quantity || 1}`);
+  for (const i of e.randomItems || []) parts.push(`Objet aléatoire : ${i.rarity || 'Peu commun'} ×${i.quantity || 1}`);
+  for (const a of e.addictions || []) parts.push(`Addiction : ${a.stat || 'Résistance'} ${a.amount || -10}, tous les ${a.intervalDays || 3} jours`);
+  if (e.relationChoice) parts.push('Choix de relation');
+  return parts.join(' · ') || 'Aucun effet configuré.';
+}
+
+function renderTraitsPage() {
+  const contenuDiv = document.getElementById('contenu');
+  contenuDiv.innerHTML = `
+    <div class="catalogue-actions-bar">
+      <div><strong>🎭 Traits de création</strong><span>${state.traits.length} bonus / malus configuré(s) · les points doivent se totaliser à 0</span></div>
+      <div class="catalogue-actions"><button class="btn-principal" onclick="ouvrirEditeurTrait(null)">＋ Ajouter un trait</button></div>
+    </div>
+    <div class="trait-grid">
+      ${state.traits.map(trait => `
+        <article class="trait-card ${trait.enabled === false ? 'trait-inactif' : ''}" data-nom="${escapeAttr(`${trait.name} ${trait._id} ${trait.description || ''}`.toLowerCase())}">
+          <div class="trait-card-head"><span class="trait-point ${Number(trait.points) > 0 ? 'trait-point-malus' : 'trait-point-bonus'}">${escapeHtml(pointsTraitTexte(trait.points))}</span><span class="badge ${trait.enabled === false ? 'badge-sang' : 'badge-vert'}">${trait.enabled === false ? 'Désactivé' : 'Actif'}</span></div>
+          <h3>${escapeHtml(trait.name)}</h3>
+          <p>${escapeHtml(trait.description || 'Aucune description.')}</p>
+          <div class="trait-effets"><strong>Effets configurés</strong><span>${escapeHtml(resumeEffetsTrait(trait.effects))}</span></div>
+          <div class="trait-actions"><button class="btn-secondaire" onclick="ouvrirEditeurTrait('${jsAttr(trait._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerTrait('${jsAttr(trait._id)}')">Supprimer</button></div>
+        </article>`).join('') || '<div class="etat-vide"><p>Aucun trait configuré.</p></div>'}
+    </div>
+    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun trait ne correspond à cette recherche.</div>
+  `;
+  filtrerListe();
+}
+
+function ouvrirEditeurTrait(id) {
+  const trait = id ? state.traits.find(t => String(t._id) === String(id)) : null;
+  if (id && !trait) { toast('Trait introuvable.', 'erreur'); return; }
+  state.traitActuel = trait?._id || null;
+  document.getElementById('overlay-catalogue').classList.add('visible');
+  document.getElementById('panneau-catalogue').classList.add('ouvert');
+  document.getElementById('panneau-catalogue-titre').textContent = trait ? trait.name : 'Nouveau bonus / malus';
+  document.getElementById('panneau-catalogue-corps').innerHTML = panneauTraitHTML(trait);
+}
+
+function panneauTraitHTML(trait) {
+  const effects = JSON.stringify(trait?.effects || {}, null, 2);
+  return `
+    <div class="section-titre">${trait ? '✏️ Modifier le trait' : '➕ Nouveau trait'}</div>
+    <div class="champ"><label for="f-trait-id">Identifiant</label><input type="text" id="f-trait-id" value="${escapeAttr(trait?._id || '')}" placeholder="ex. veteran-des-guerres" ${trait ? 'disabled' : ''} pattern="[A-Za-z0-9_-]+"><p class="section-note">Identifiant stable utilisé par le bot ; il ne peut plus être changé après création.</p></div>
+    <div class="champ"><label for="f-trait-name">Nom</label><input type="text" id="f-trait-name" maxlength="100" value="${escapeAttr(trait?.name || '')}"></div>
+    <div class="champ"><label for="f-trait-points">Points (malus positif, bonus négatif)</label><input type="number" id="f-trait-points" min="-100" max="100" step="1" value="${Number(trait?.points) || 0}"><p class="section-note">Le joueur commence à 0 et doit arriver exactement à 0, ou choisir « Aucun trait ».</p></div>
+    <div class="champ"><label for="f-trait-description">Description affichée aux joueurs</label><textarea id="f-trait-description" maxlength="1000">${escapeHtml(trait?.description || '')}</textarea></div>
+    <div class="champ"><label for="f-trait-effects">Effets (JSON)</label><textarea class="trait-json-input" id="f-trait-effects" spellcheck="false">${escapeHtml(effects)}</textarea><p class="section-note">Champs pris en charge : <code>stats</code>, <code>relations</code>, <code>relationChoice</code>, <code>items</code>, <code>randomItems</code>, <code>debts</code>, <code>bounty</code>, <code>addictions</code>. Les IDs d’objets doivent correspondre au catalogue.</p></div>
+    <div class="champ champ-case"><label class="case-label"><input type="checkbox" id="f-trait-enabled" ${trait?.enabled === false ? '' : 'checked'}> Trait disponible à l’étape 4</label></div>
+    <div class="actions-panneau"><button class="btn-principal" id="btn-enregistrer-trait" onclick="sauvegarderTrait()">${trait ? 'Enregistrer les modifications' : 'Créer le trait'}</button></div>
+  `;
+}
+
+async function sauvegarderTrait() {
+  const btn = document.getElementById('btn-enregistrer-trait');
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    const rawId = state.traitActuel || val('f-trait-id');
+    if (!rawId) throw new Error('L’identifiant est obligatoire.');
+    let effects;
+    try { effects = JSON.parse(val('f-trait-effects') || '{}'); } catch { throw new Error('Le JSON des effets est invalide.'); }
+    if (!effects || typeof effects !== 'object' || Array.isArray(effects)) throw new Error('Les effets doivent être un objet JSON.');
+    const payload = { id: rawId, name: val('f-trait-name'), points: Number(val('f-trait-points')), description: val('f-trait-description'), effects, enabled: document.getElementById('f-trait-enabled').checked };
+    if (state.traitActuel) await fetchJSON(`/api/traits/${encodeURIComponent(state.traitActuel)}`, payload, 'PATCH');
+    else await fetchJSON('/api/traits', payload, 'POST');
+    toast('Bonus / malus enregistré.', 'succes');
+    fermerCataloguePanel();
+    await chargerTraitsPage();
+  } catch (error) { toast(`Échec de l’enregistrement : ${error.message}`, 'erreur'); }
+  finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = original; } }
+}
+
+async function supprimerTrait(id) {
+  const trait = state.traits.find(t => String(t._id) === String(id));
+  const ok = await confirmerAction({ titre: 'Supprimer le trait', message: `Supprimer « ${trait?.name || id} » du choix de création ? Les personnages qui l’ont déjà choisi conservent leurs effets enregistrés.`, texteValider: 'Supprimer' });
+  if (!ok) return;
+  try { await fetchJSON(`/api/traits/${encodeURIComponent(id)}`, null, 'DELETE'); toast('Trait supprimé.', 'succes'); await chargerTraitsPage(); }
+  catch (error) { toast(`Échec : ${error.message}`, 'erreur'); }
+}
+
+async function chargerPrimesPage() {
+  const contenuDiv = document.getElementById('contenu');
+  contenuDiv.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
+  try {
+    const profils = state.cache.profils.length ? state.cache.profils : await apiFetch('/api/profils').then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
+    state.cache.profils = profils;
+    renderPrimesPage();
+  } catch (error) {
+    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de chargement des primes</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+  }
+}
+
+function renderPrimesPage() {
+  const contenuDiv = document.getElementById('contenu');
+  const profiles = (state.cache.profils || []).slice().sort((a, b) => String(a.nomPrenom || '').localeCompare(String(b.nomPrenom || ''), 'fr', { sensitivity: 'base' }));
+  const activeCount = profiles.filter(p => p.prime?.active && Number(p.prime.amount) > 0).length;
+  contenuDiv.innerHTML = `
+    <div class="catalogue-actions-bar"><div><strong>🎯 Avis de recherche</strong><span>${activeCount} prime(s) active(s) · publication automatique dans le forum Discord</span></div><button class="btn-secondaire" onclick="chargerPrimesPage()">Actualiser</button></div>
+    <div class="liste-personnages-inventaire">
+      ${profiles.map(p => {
+        const prime = p.prime || {};
+        const active = prime.active && Number(prime.amount) > 0;
+        return `<div class="ligne prime-row" data-nom="${escapeAttr(`${p.nomPrenom || ''} ${p.surnom || ''} ${p._id}`.toLowerCase())}">
+          <div class="ligne-sigil">${active ? '🎯' : '👤'}</div>
+          <div class="ligne-corps"><div class="ligne-nom">${escapeHtml(p.nomPrenom || p._id)}${p.surnom && p.surnom !== 'Aucun' ? ` (${escapeHtml(p.surnom)})` : ''}</div>
+          <div class="ligne-meta"><span class="badge ${active ? 'badge-sang' : 'badge-defaut'}">${active ? `${Math.floor(Number(prime.amount)).toLocaleString('fr-FR')} crédits` : 'Sans prime'}</span>${prime.description ? `<span class="badge badge-defaut">${escapeHtml(prime.description.slice(0, 80))}</span>` : ''}${active && prime.discordThreadId ? '<span class="badge badge-vert">Forum synchronisé</span>' : active ? '<span class="badge badge-or">Publication en attente</span>' : ''}</div></div>
+          <button class="btn-modifier" onclick="ouvrirEditeur('${jsAttr(p._id)}')">${active ? 'Modifier' : 'Ajouter une prime'}</button>
+        </div>`;
+      }).join('') || "<div class='etat-vide'><p>Aucun personnage trouvé.</p></div>"}
+    </div><div class="aucun-resultat" id="aucun-resultat" hidden>Aucun personnage ne correspond à cette recherche.</div>`;
+  filtrerListe();
 }
 
 // -----------------------------------------------------------------------
@@ -1330,6 +1505,17 @@ function panneauProfil(p) {
       <div class="champ"><label for="f-boursePersonnelle">Bourse personnelle</label><input type="text" id="f-boursePersonnelle" value="${escapeAttr(p.boursePersonnelle || '')}"></div>
     </div>
     <div class="champ"><label for="f-notes">Notes</label><textarea id="f-notes">${escapeHtml(p.notes || '')}</textarea></div>
+
+    <div class="section-titre">🎯 Prime & avis de recherche</div>
+    <p class="section-note">Quand une prime est activée, le bot crée ou actualise automatiquement une fiche dans le forum Discord des primes. La fiche utilise le nom, le surnom, la description et la photo du personnage.</p>
+    <div class="champ champ-case">
+      <label class="case-label"><input type="checkbox" id="f-prime-active" ${(p.prime?.active && Number(p.prime?.amount) > 0) ? 'checked' : ''}> Prime active</label>
+    </div>
+    <div class="grille-champs">
+      <div class="champ"><label for="f-prime-amount">Montant (crédits)</label><input type="number" id="f-prime-amount" min="0" step="1" value="${Math.max(0, Math.floor(Number(p.prime?.amount) || 0))}"></div>
+      <div class="champ"><label>État Discord</label><input type="text" value="${p.prime?.active && p.prime?.discordThreadId ? 'Publiée / synchronisée' : p.prime?.active ? 'Publication en attente' : 'Inactive'}" disabled></div>
+    </div>
+    <div class="champ"><label for="f-prime-description">Description de la prime</label><textarea id="f-prime-description" maxlength="1000" placeholder="Motif de la mise à prix...">${escapeHtml(p.prime?.description || '')}</textarea></div>
 
     <div class="section-titre">🤝 Relations avec les factions</div>
     <div class="grille-champs">${relationsHTML || '<p class="section-note">Aucune faction configurée.</p>'}</div>
@@ -1876,6 +2062,11 @@ async function sauvegarder() {
       gardePersonnelle: val('f-gardePersonnelle'),
       boursePersonnelle: val('f-boursePersonnelle'),
       notes: val('f-notes'),
+      prime: {
+        active: document.getElementById('f-prime-active')?.checked === true,
+        amount: Math.max(0, Math.floor(Number(val('f-prime-amount')) || 0)),
+        description: val('f-prime-description') || '',
+      },
       relations,
       stats,
       portraitDataUrl: state.pendingPortraitDataUrl || undefined,
@@ -1895,8 +2086,10 @@ async function sauvegarder() {
 
 async function rafraichirEtRouvrir() {
   const { id } = state.itemActuel;
+  const sectionAvant = state.collectionActuelle;
   await chargerProfils();
-  filtrerListe();
+  if (sectionAvant === 'primes') renderPrimesPage();
+  else filtrerListe();
   ouvrirEditeur(id);
 }
 
