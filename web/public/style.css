@@ -2128,3 +2128,25 @@ html { font-size: 14px; }
 .trait-json-input { min-height: 260px !important; font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important; font-size: .76rem !important; white-space: pre; }
 .prime-row.masquee { display: none; }
 @media (max-width: 900px) { .trait-grid { grid-template-columns: 1fr; } }
+
+/* Filtres et éditeur d'actions des bonus/malus */
+.trait-filtres { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 18px; }
+.trait-filtre-bouton { border: 1px solid var(--border-subtle); border-radius: 999px; padding: 8px 15px; color: var(--text-secondary); background: var(--bg-card); font: inherit; font-size: .78rem; cursor: pointer; transition: background .15s ease, color .15s ease, border-color .15s ease; }
+.trait-filtre-bouton:hover { color: var(--text-primary); border-color: var(--border-soft); }
+.trait-filtre-bouton.actif { color: var(--text-primary); background: rgba(255,255,255,.1); border-color: var(--border-soft); }
+.trait-actions-titre { margin-top: 22px; }
+.trait-actions-liste { display: grid; gap: 12px; margin-top: 12px; }
+.trait-action-card { padding: 14px; border: 1px solid var(--border-soft); border-radius: var(--radius); background: rgba(255,255,255,.025); }
+.trait-action-entete { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.trait-action-entete strong { color: var(--text-primary); font-size: .82rem; }
+.trait-action-entete button { flex: 0 0 auto; min-height: 30px; }
+.trait-ajouter-action { display: flex; justify-content: flex-start; margin: 12px 0 18px; }
+.trait-relation-options { display: grid; gap: 8px; margin: 12px 0; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+.trait-relation-options > strong { margin-bottom: 4px; color: var(--text-secondary); font-size: .76rem; }
+.trait-relation-choice { display: flex; align-items: center; gap: 9px; font-size: .8rem; }
+.trait-relation-choice input { width: 16px; height: 16px; accent-color: var(--accent, #b9a2ff); }
+@media (max-width: 760px) {
+  .trait-filtres { width: 100%; }
+  .trait-filtre-bouton { flex: 1; }
+  .trait-action-card { padding: 11px; }
+}

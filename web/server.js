@@ -25,7 +25,7 @@ const FOUNDER_DISCORD_ID = '391515665271357441';
 // le site configuré, les choix du staff sont la source de vérité partagée avec le bot.
 const DEFAULT_CHARACTER_TRAITS = [
   { _id: 'mise-a-prix', name: 'Mise à Prix', description: 'Prime de 2 500 crédits pour avoir volé la Nouvelle République ; +1 relation avec l’Empire.', points: 5, enabled: true, effects: { bounty: { amount: 2500, description: 'Recherché pour avoir volé la Nouvelle République.' }, relations: [{ factionKey: 'EMPIRE', mode: 'add', value: 1 }] } },
-  { _id: 'dette-d-hutt', name: 'Dette d’Hutt', description: 'Dette de 2 000 crédits auprès du Cartel des Hutts.', points: 6, enabled: true, effects: { debts: [{ creditor: 'Cartel des Hutts', amount: 2000 }] } },
+  { _id: 'dette-d-hutt', name: 'Dette d’Hutt', description: 'Dette de 2 000 crédits auprès du Cartel des Hutts et relation diminuée.', points: 6, enabled: true, effects: { debts: [{ creditor: 'Cartel des Hutts', amount: 2000 }], credits: { amount: -2000 }, relations: [{ factionKey: 'CARTEL_HUTTS', mode: 'add', value: -1 }] } },
   { _id: 'veteran-des-guerres', name: 'Vétéran des Guerres', description: 'Reçoit un équipement Peu commun au hasard.', points: -4, enabled: true, effects: { randomItems: [{ rarity: 'Peu commun', categoryIncludes: 'équipement', quantity: 1 }] } },
   { _id: 'connaisseur-des-bas-fonds', name: 'Connaisseur des Bas-Fonds', description: '+5 Éloquence & Commerce.', points: -2, enabled: true, effects: { stats: [{ stat: 'Éloquence & Commerce', amount: 5 }] } },
   { _id: 'accro-aux-batons-de-la-mort', name: 'Accro aux Bâtons de la Mort', description: '-10 Résistance si aucune dose n’est consommée tous les 3 jours réels.', points: 6, enabled: true, effects: { addictions: [{ itemId: 'batons_de_la_mort', itemNameContains: 'bâton de la mort', stat: 'Résistance', amount: -10, intervalDays: 3 }] } },
@@ -747,10 +747,37 @@ app.get('/api/profils/:id/avatar', async (req, res) => {
 async function ensureCharacterTraitsSeeded() {
   const col = await getCharacterTraitsCollection();
   const markerId = '__character_traits_seeded__';
-  if (await col.findOne({ _id: markerId }, { projection: { _id: 1 } })) return;
-  const now = new Date();
-  await col.bulkWrite(DEFAULT_CHARACTER_TRAITS.map(t => ({ updateOne: { filter: { _id: t._id }, update: { $setOnInsert: { ...t, createdAt: now, updatedAt: now } }, upsert: true } })), { ordered: false });
-  await col.updateOne({ _id: markerId }, { $setOnInsert: { seededAt: new Date(), internal: true } }, { upsert: true });
+  const alreadySeeded = await col.findOne({ _id: markerId }, { projection: { _id: 1 } });
+  if (!alreadySeeded) {
+    const now = new Date();
+    await col.bulkWrite(DEFAULT_CHARACTER_TRAITS.map(t => ({ updateOne: { filter: { _id: t._id }, update: { $setOnInsert: { ...t, createdAt: now, updatedAt: now } }, upsert: true } })), { ordered: false });
+    await col.updateOne({ _id: markerId }, { $setOnInsert: { seededAt: new Date(), internal: true } }, { upsert: true });
+  }
+
+  // Met à niveau l'ancien trait dette sans écraser ses autres effets.
+  const huttDebt = await col.findOne({ _id: 'dette-d-hutt' });
+  const effects = huttDebt?.effects || {};
+  const debt = (Array.isArray(effects.debts) ? effects.debts : []).find(row => /hutt/i.test(String(row.creditor || '')) && Number(row.amount) > 0);
+  const relations = Array.isArray(effects.relations) ? effects.relations : [];
+  const debtPenaltyAlreadySet = relations.some(row => row.factionKey === 'CARTEL_HUTTS' && row.mode !== 'set' && Number(row.value) < 0);
+  if (huttDebt && debt && !debtPenaltyAlreadySet) {
+    const previousCredits = Number(effects.credits?.amount) || 0;
+    const debtAmount = Math.floor(Number(debt.amount));
+    const creditAmount = previousCredits === -debtAmount ? previousCredits : previousCredits - debtAmount;
+    const update = {
+      'effects.credits': { amount: creditAmount },
+      'effects.relations': [...relations, { factionKey: 'CARTEL_HUTTS', mode: 'add', value: -1 }],
+      updatedAt: new Date(),
+    };
+    const legacyDescriptions = [
+      'Le personnage doit 2 000 crédits au Cartel des Hutts.',
+      'Dette de 2 000 crédits auprès du Cartel des Hutts.',
+    ];
+    if (legacyDescriptions.includes(String(huttDebt.description || ''))) {
+      update.description = 'Le personnage doit 2 000 crédits au Cartel des Hutts et sa relation avec lui baisse.';
+    }
+    await col.updateOne({ _id: 'dette-d-hutt' }, { $set: update });
+  }
 }
 
 function normalizeCharacterTrait(body, idFromRoute = null) {

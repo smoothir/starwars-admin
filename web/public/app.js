@@ -17,6 +17,8 @@ const state = {
   boutiqueActuelle: null,
   traits: [],
   traitActuel: null,
+  traitActionsDraft: [],
+  filtreTraits: 'tous',
   statuts: [],
   listes: { relationFactions: [], relationLevels: [], defaultStats: [], statMax: 10 },
   collectionActuelle: null,
@@ -1019,8 +1021,11 @@ function filtrerListe() {
       if (matches) visibles += 1;
     });
   } else if (state.collectionActuelle === 'traits') {
+    const typeFilter = state.filtreTraits || 'tous';
     document.querySelectorAll('.trait-card').forEach(card => {
-      const correspond = !q || (card.dataset.nom || '').includes(q);
+      const queryOk = !q || (card.dataset.nom || '').includes(q);
+      const typeOk = typeFilter === 'tous' || card.dataset.traitType === typeFilter;
+      const correspond = queryOk && typeOk;
       card.classList.toggle('masquee', !correspond);
       if (correspond) visibles += 1;
     });
@@ -1041,7 +1046,7 @@ function filtrerListe() {
 }
 
 // -----------------------------------------------------------------------
-// Bonus / malus de création et gestion des primes des personnages.
+// Bonus / malus configurables et gestion des primes des personnages.
 // -----------------------------------------------------------------------
 async function chargerTraitsPage() {
   const contenuDiv = document.getElementById('contenu');
@@ -1063,14 +1068,34 @@ function pointsTraitTexte(points) {
   return `${n > 0 ? '+' : ''}${n} pts`;
 }
 
+const TRAIT_CURRENCY_ID = 'credits_de_la_nouvelle_republique';
+const TRAIT_ACTION_TYPES = [
+  ['moneyAdd', 'Ajouter de l’argent'],
+  ['moneyRemove', 'Retirer de l’argent'],
+  ['relationAdd', 'Ajouter une relation'],
+  ['relationRemove', 'Retirer une relation'],
+  ['relationSet', 'Définir un niveau de relation'],
+  ['bounty', 'Ajouter une prime'],
+  ['debt', 'Ajouter une dette'],
+  ['item', 'Ajouter un item'],
+  ['randomItem', 'Ajouter un item aléatoire'],
+  ['stat', 'Modifier une statistique'],
+  ['addiction', 'Ajouter une addiction'],
+  ['relationChoice', 'Choix d’une relation de départ'],
+];
+
 function resumeEffetsTrait(effects) {
   const e = effects || {};
   const parts = [];
+  if (Number(e.credits?.amount)) parts.push(`Argent : ${Number(e.credits.amount) > 0 ? '+' : ''}${Number(e.credits.amount).toLocaleString('fr-FR')} crédits`);
   if (e.bounty) parts.push(`Prime : ${Number(e.bounty.amount) || 0} crédits`);
   for (const item of e.debts || []) parts.push(`Dette : ${Number(item.amount) || 0} crédits (${item.creditor || 'créancier'})`);
   for (const s of e.stats || []) parts.push(`${Number(s.amount) > 0 ? '+' : ''}${s.amount} ${s.stat}`);
-  for (const r of e.relations || []) parts.push(`Relation ${r.factionKey}: ${r.mode === 'set' ? '→' : '+'}${r.value}`);
-  for (const i of e.items || []) parts.push(`Objet : ${i.fallbackName || i.itemId} ×${i.quantity || 1}`);
+  for (const r of e.relations || []) parts.push(`Relation ${r.factionKey}: ${r.mode === 'set' ? '→' : Number(r.value) > 0 ? '+' : ''}${r.value}`);
+  for (const i of e.items || []) {
+    if (String(i.itemId || '').toLowerCase() === TRAIT_CURRENCY_ID) parts.push(`Argent : +${Number(i.quantity) || 1} crédits`);
+    else parts.push(`Objet : ${i.fallbackName || i.itemId} ×${i.quantity || 1}`);
+  }
   for (const i of e.randomItems || []) parts.push(`Objet aléatoire : ${i.rarity || 'Peu commun'} ×${i.quantity || 1}`);
   for (const a of e.addictions || []) parts.push(`Addiction : ${a.stat || 'Résistance'} ${a.amount || -10}, tous les ${a.intervalDays || 3} jours`);
   if (e.relationChoice) parts.push('Choix de relation');
@@ -1079,48 +1104,365 @@ function resumeEffetsTrait(effects) {
 
 function renderTraitsPage() {
   const contenuDiv = document.getElementById('contenu');
+  const filtre = state.filtreTraits || 'tous';
   contenuDiv.innerHTML = `
     <div class="catalogue-actions-bar">
       <div><strong>🎭 Traits de création</strong><span>${state.traits.length} bonus / malus configuré(s) · les points doivent se totaliser à 0</span></div>
       <div class="catalogue-actions"><button class="btn-principal" onclick="ouvrirEditeurTrait(null)">＋ Ajouter un trait</button></div>
     </div>
+    <div class="trait-filtres" role="group" aria-label="Filtrer les bonus et malus">
+      <button type="button" class="trait-filtre-bouton ${filtre === 'tous' ? 'actif' : ''}" data-filtre-trait="tous" onclick="choisirFiltreTraits('tous')">Tous</button>
+      <button type="button" class="trait-filtre-bouton ${filtre === 'bonus' ? 'actif' : ''}" data-filtre-trait="bonus" onclick="choisirFiltreTraits('bonus')">Bonus</button>
+      <button type="button" class="trait-filtre-bouton ${filtre === 'malus' ? 'actif' : ''}" data-filtre-trait="malus" onclick="choisirFiltreTraits('malus')">Malus</button>
+    </div>
     <div class="trait-grid">
-      ${state.traits.map(trait => `
-        <article class="trait-card ${trait.enabled === false ? 'trait-inactif' : ''}" data-nom="${escapeAttr(`${trait.name} ${trait._id} ${trait.description || ''}`.toLowerCase())}">
-          <div class="trait-card-head"><span class="trait-point ${Number(trait.points) > 0 ? 'trait-point-malus' : 'trait-point-bonus'}">${escapeHtml(pointsTraitTexte(trait.points))}</span><span class="badge ${trait.enabled === false ? 'badge-sang' : 'badge-vert'}">${trait.enabled === false ? 'Désactivé' : 'Actif'}</span></div>
+      ${state.traits.map(trait => {
+        const points = Number(trait.points) || 0;
+        const type = points > 0 ? 'malus' : points < 0 ? 'bonus' : 'neutre';
+        return `
+        <article class="trait-card ${trait.enabled === false ? 'trait-inactif' : ''}" data-trait-type="${type}" data-nom="${escapeAttr(`${trait.name} ${trait._id} ${trait.description || ''}`.toLowerCase())}">
+          <div class="trait-card-head"><span class="trait-point ${points > 0 ? 'trait-point-malus' : 'trait-point-bonus'}">${escapeHtml(pointsTraitTexte(points))}</span><span class="badge ${trait.enabled === false ? 'badge-sang' : 'badge-vert'}">${trait.enabled === false ? 'Désactivé' : 'Actif'}</span></div>
           <h3>${escapeHtml(trait.name)}</h3>
           <p>${escapeHtml(trait.description || 'Aucune description.')}</p>
-          <div class="trait-effets"><strong>Effets configurés</strong><span>${escapeHtml(resumeEffetsTrait(trait.effects))}</span></div>
+          <div class="trait-effets"><strong>Actions configurées</strong><span>${escapeHtml(resumeEffetsTrait(trait.effects))}</span></div>
           <div class="trait-actions"><button class="btn-secondaire" onclick="ouvrirEditeurTrait('${jsAttr(trait._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerTrait('${jsAttr(trait._id)}')">Supprimer</button></div>
-        </article>`).join('') || '<div class="etat-vide"><p>Aucun trait configuré.</p></div>'}
+        </article>`;
+      }).join('') || '<div class="etat-vide"><p>Aucun trait configuré.</p></div>'}
     </div>
-    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun trait ne correspond à cette recherche.</div>
+    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun trait ne correspond à cette recherche ou à ce filtre.</div>
   `;
   filtrerListe();
 }
 
-function ouvrirEditeurTrait(id) {
-  const trait = id ? state.traits.find(t => String(t._id) === String(id)) : null;
-  if (id && !trait) { toast('Trait introuvable.', 'erreur'); return; }
-  state.traitActuel = trait?._id || null;
-  document.getElementById('overlay-catalogue').classList.add('visible');
-  document.getElementById('panneau-catalogue').classList.add('ouvert');
-  document.getElementById('panneau-catalogue-titre').textContent = trait ? trait.name : 'Nouveau bonus / malus';
-  document.getElementById('panneau-catalogue-corps').innerHTML = panneauTraitHTML(trait);
+function choisirFiltreTraits(filtre) {
+  state.filtreTraits = ['bonus', 'malus'].includes(filtre) ? filtre : 'tous';
+  document.querySelectorAll('[data-filtre-trait]').forEach(btn => btn.classList.toggle('actif', btn.dataset.filtreTrait === state.filtreTraits));
+  filtrerListe();
+}
+
+async function chargerOptionsEditeurTrait() {
+  const jobs = [];
+  if (!state.listes?.relationFactions?.length) jobs.push(apiFetch('/api/lists').then(async r => { if (!r.ok) throw new Error('Impossible de charger les factions.'); state.listes = await r.json(); }));
+  if (!state.catalogue?.length) jobs.push(apiFetch('/api/inventaire/catalogue/meta').then(async r => { if (!r.ok) throw new Error('Impossible de charger les objets du catalogue.'); state.catalogue = catalogueValide(await r.json()); }));
+  await Promise.all(jobs);
+}
+
+async function ouvrirEditeurTrait(id) {
+  try {
+    await chargerOptionsEditeurTrait();
+    const trait = id ? state.traits.find(t => String(t._id) === String(id)) : null;
+    if (id && !trait) { toast('Trait introuvable.', 'erreur'); return; }
+    state.traitActuel = trait?._id || null;
+    state.traitActionsDraft = trait ? actionsTraitDepuisEffets(trait.effects || {}) : [{ type: 'moneyAdd', amount: '' }];
+    document.getElementById('overlay-catalogue').classList.add('visible');
+    document.getElementById('panneau-catalogue').classList.add('ouvert');
+    document.getElementById('panneau-catalogue-titre').textContent = trait ? trait.name : 'Nouveau bonus / malus';
+    document.getElementById('panneau-catalogue-corps').innerHTML = panneauTraitHTML(trait);
+  } catch (error) {
+    toast(`Impossible d’ouvrir l’éditeur : ${error.message}`, 'erreur');
+  }
+}
+
+function nomObjetTrait(id) {
+  return state.catalogue.find(item => String(item.id) === String(id))?.name || String(id || '');
+}
+
+function actionsTraitDepuisEffets(effects) {
+  const e = effects || {};
+  const actions = [];
+  const relations = Array.isArray(e.relations) ? e.relations : [];
+  const relationsUtilisees = new Set();
+  const debts = Array.isArray(e.debts) ? e.debts : [];
+
+  debts.forEach(debt => {
+    let relationIndex = relations.findIndex((r, i) => !relationsUtilisees.has(i) && r.mode !== 'set' && Number(r.value) < 0);
+    let factionKey = '';
+    let relationPenalty = '';
+    if (relationIndex >= 0) {
+      const relation = relations[relationIndex];
+      relationsUtilisees.add(relationIndex);
+      factionKey = relation.factionKey || '';
+      relationPenalty = Math.abs(Number(relation.value) || 0);
+    } else if (/hutt/i.test(String(debt.creditor || ''))) {
+      factionKey = 'CARTEL_HUTTS';
+      relationPenalty = 1;
+    }
+    actions.push({ type: 'debt', amount: Math.max(1, Math.floor(Number(debt.amount) || 1)), creditor: debt.creditor || '', factionKey, relationPenalty });
+  });
+
+  const hasCreditEffect = Object.prototype.hasOwnProperty.call(e.credits || {}, 'amount');
+  const creditAmount = Number(e.credits?.amount) || 0;
+  const debtTotal = debts.reduce((sum, debt) => sum + Math.max(0, Math.floor(Number(debt.amount) || 0)), 0);
+  const creditRemainder = debts.length ? (hasCreditEffect ? creditAmount + debtTotal : 0) : creditAmount;
+  if (creditRemainder) actions.push({ type: creditRemainder > 0 ? 'moneyAdd' : 'moneyRemove', amount: Math.abs(creditRemainder) });
+
+  for (let i = 0; i < relations.length; i += 1) {
+    if (relationsUtilisees.has(i)) continue;
+    const r = relations[i] || {};
+    if (r.mode === 'set') actions.push({ type: 'relationSet', factionKey: r.factionKey || '', level: Math.max(1, Math.min(5, Number(r.value) || 3)) });
+    else actions.push({ type: Number(r.value) < 0 ? 'relationRemove' : 'relationAdd', factionKey: r.factionKey || '', amount: Math.max(1, Math.abs(Number(r.value) || 1)) });
+  }
+
+  if (e.bounty) actions.push({ type: 'bounty', amount: Math.max(1, Math.floor(Number(e.bounty.amount) || 1)), description: e.bounty.description || '' });
+  for (const row of Array.isArray(e.items) ? e.items : []) {
+    if (String(row.itemId || '').toLowerCase() === TRAIT_CURRENCY_ID) {
+      actions.push({ type: 'moneyAdd', amount: Math.max(1, Math.floor(Number(row.quantity) || 1)) });
+    } else {
+      const wanted = String(row.fallbackName || row.itemId || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const matched = state.catalogue.find(item => String(item.id) === String(row.itemId || '')) || state.catalogue.find(item => String(item.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(wanted));
+      actions.push({ type: 'item', itemId: matched?.id || row.itemId || '', fallbackName: row.fallbackName || matched?.name || row.itemId || '', rarity: row.rarity || '', quantity: Math.max(1, Math.floor(Number(row.quantity) || 1)) });
+    }
+  }
+  for (const row of Array.isArray(e.randomItems) ? e.randomItems : []) actions.push({ type: 'randomItem', rarity: row.rarity || 'Peu commun', categoryIncludes: row.categoryIncludes || '', quantity: Math.max(1, Math.floor(Number(row.quantity) || 1)) });
+  for (const row of Array.isArray(e.stats) ? e.stats : []) actions.push({ type: 'stat', stat: row.stat || '', amount: Number(row.amount) || 0 });
+  for (const row of Array.isArray(e.addictions) ? e.addictions : []) actions.push({ type: 'addiction', itemId: row.itemId || '', itemNameContains: row.itemNameContains || '', stat: row.stat || 'Résistance', amount: Math.min(-1, Number(row.amount) || -10), intervalDays: Math.max(1, Math.floor(Number(row.intervalDays) || 3)) });
+  if (e.relationChoice) actions.push({ type: 'relationChoice', prompt: e.relationChoice.prompt || '', options: (e.relationChoice.options || []).map(o => ({ factionKey: o.factionKey, label: o.label, level: Number(o.level) || 3 })), level: Number(e.relationChoice.options?.[0]?.level) || 3 });
+  return actions.length ? actions : [{ type: 'moneyAdd', amount: '' }];
+}
+
+function optionsFactionTrait(selected = '') {
+  return `<option value="">Choisir une faction…</option>${(state.listes.relationFactions || []).map(f => `<option value="${escapeAttr(f.key)}" ${String(selected) === String(f.key) ? 'selected' : ''}>${escapeHtml(f.label || f.key)}</option>`).join('')}`;
+}
+
+function optionsObjetTrait(selected = '', { includeCurrency = false, fallbackName = '' } = {}) {
+  const items = catalogueTrie().filter(item => includeCurrency || String(item.id).toLowerCase() !== TRAIT_CURRENCY_ID);
+  let html = '<option value="">Choisir un item…</option>';
+  const found = items.some(item => String(item.id) === String(selected));
+  if (selected && !found) html += `<option value="${escapeAttr(selected)}" selected>${escapeHtml(`${fallbackName || nomObjetTrait(selected)} (${selected})`)}</option>`;
+  return html + items.map(item => `<option value="${escapeAttr(item.id)}" ${String(selected) === String(item.id) ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name} — ${item.id}`)}</option>`).join('');
+}
+
+function optionsStatTrait(selected = '') {
+  const stats = new Set([...(state.listes.defaultStats || []), ...(selected ? [selected] : [])]);
+  return `<option value="">Choisir une statistique…</option>${Array.from(stats).map(stat => `<option value="${escapeAttr(stat)}" ${String(selected) === String(stat) ? 'selected' : ''}>${escapeHtml(stat)}</option>`).join('')}`;
+}
+
+function optionsRareteTrait(selected = 'Peu commun') {
+  const defaultRarities = ['Commun', 'Peu commun', 'Rare', 'Épique'];
+  const rarities = state.listes.itemRarities?.length ? state.listes.itemRarities : defaultRarities;
+  const all = [...new Set([...rarities, ...(selected ? [selected] : [])])];
+  return all.map(value => `<option value="${escapeAttr(value)}" ${String(selected) === String(value) ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('');
+}
+
+function champActionTrait(index, label, key, value, { type = 'text', min, max, step = '1', placeholder = '', required = false, help = '' } = {}) {
+  return `<div class="champ"><label for="f-ta-${index}-${key}">${label}</label><input id="f-ta-${index}-${key}" type="${type}" value="${escapeAttr(value ?? '')}" ${min !== undefined ? `min="${min}"` : ''} ${max !== undefined ? `max="${max}"` : ''} step="${step}" ${placeholder ? `placeholder="${escapeAttr(placeholder)}"` : ''} ${required ? 'required' : ''} oninput="majActionTrait(${index}, '${key}', this.value)">${help ? `<p class="section-note">${help}</p>` : ''}</div>`;
+}
+
+function champSelectActionTrait(index, label, key, value, options, { help = '' } = {}) {
+  return `<div class="champ"><label for="f-ta-${index}-${key}">${label}</label><select id="f-ta-${index}-${key}" onchange="majActionTrait(${index}, '${key}', this.value)">${options}</select>${help ? `<p class="section-note">${help}</p>` : ''}</div>`;
+}
+
+function actionTraitParDefaut(type) {
+  switch (type) {
+    case 'moneyAdd': case 'moneyRemove': return { type, amount: '' };
+    case 'relationAdd': case 'relationRemove': return { type, factionKey: '', amount: 1 };
+    case 'relationSet': return { type, factionKey: '', level: 3 };
+    case 'bounty': return { type, amount: '', description: '' };
+    case 'debt': return { type, amount: '', creditor: '', factionKey: '', relationPenalty: 1 };
+    case 'item': return { type, itemId: '', quantity: 1 };
+    case 'randomItem': return { type, rarity: 'Peu commun', categoryIncludes: '', quantity: 1 };
+    case 'stat': return { type, stat: '', amount: '' };
+    case 'addiction': return { type, itemId: '', itemNameContains: '', stat: 'Résistance', amount: -10, intervalDays: 3 };
+    case 'relationChoice': return { type, prompt: 'Choisis une faction de départ.', options: [], level: 3 };
+    default: return { type: 'moneyAdd', amount: '' };
+  }
+}
+
+function majActionTrait(index, key, value) {
+  const action = state.traitActionsDraft?.[index];
+  if (!action) return;
+  action[key] = value;
+  if (key === 'itemId') {
+    action.itemNameContains = nomObjetTrait(value);
+    if (action.type === 'item') action.rarity = '';
+  }
+}
+
+function changerTypeActionTrait(index, type) {
+  if (!state.traitActionsDraft?.[index]) return;
+  state.traitActionsDraft[index] = actionTraitParDefaut(type);
+  renderActionTraitEditeur();
+}
+
+function ajouterActionTrait() {
+  state.traitActionsDraft = state.traitActionsDraft || [];
+  state.traitActionsDraft.push({ type: 'moneyAdd', amount: '' });
+  renderActionTraitEditeur();
+}
+
+function supprimerActionTrait(index) {
+  state.traitActionsDraft?.splice(index, 1);
+  renderActionTraitEditeur();
+}
+
+function majOptionRelationTrait(index, factionKey, checked) {
+  const action = state.traitActionsDraft?.[index];
+  if (!action) return;
+  const options = Array.isArray(action.options) ? action.options : [];
+  if (checked && !options.some(o => o.factionKey === factionKey)) {
+    const faction = (state.listes.relationFactions || []).find(f => f.key === factionKey);
+    options.push({ factionKey, label: faction?.label || factionKey, level: Number(action.level) || 3 });
+  } else if (!checked) {
+    action.options = options.filter(o => o.factionKey !== factionKey);
+  }
+  if (checked) action.options = options;
+}
+
+function renderActionTraitHTML(action, index) {
+  const title = TRAIT_ACTION_TYPES.find(([type]) => type === action.type)?.[1] || 'Action';
+  const typesOptions = `<option value="">Choisir une action…</option>${TRAIT_ACTION_TYPES.map(([type, label]) => `<option value="${type}" ${action.type === type ? 'selected' : ''}>${label}</option>`).join('')}`;
+  let fields = '';
+  if (action.type === 'moneyAdd' || action.type === 'moneyRemove') {
+    fields = champActionTrait(index, 'Somme en crédits', 'amount', action.amount, { type: 'number', min: 1, max: 100000000, required: true, placeholder: 'Ex. 1500' });
+  } else if (action.type === 'relationAdd' || action.type === 'relationRemove') {
+    fields = `<div class="grille-champs">${champSelectActionTrait(index, 'Faction concernée', 'factionKey', action.factionKey, optionsFactionTrait(action.factionKey))}${champActionTrait(index, `Niveaux à ${action.type === 'relationAdd' ? 'ajouter' : 'retirer'}`, 'amount', action.amount, { type: 'number', min: 1, max: 4, required: true })}</div><p class="section-note">Les relations restent comprises entre 1 et 5.</p>`;
+  } else if (action.type === 'relationSet') {
+    fields = `<div class="grille-champs">${champSelectActionTrait(index, 'Faction concernée', 'factionKey', action.factionKey, optionsFactionTrait(action.factionKey))}${champActionTrait(index, 'Niveau de relation (1 à 5)', 'level', action.level, { type: 'number', min: 1, max: 5, required: true })}</div>`;
+  } else if (action.type === 'bounty') {
+    fields = `${champActionTrait(index, 'Montant de la prime (crédits)', 'amount', action.amount, { type: 'number', min: 1, max: 100000000, required: true })}${champActionTrait(index, 'Motif de la prime', 'description', action.description || '', { placeholder: 'Ex. Vol de la Nouvelle République' })}<p class="section-note">La prime est publiée dans le forum Discord lorsque la création du personnage est validée.</p>`;
+  } else if (action.type === 'debt') {
+    fields = `<div class="grille-champs">${champActionTrait(index, 'Montant de la dette (crédits)', 'amount', action.amount, { type: 'number', min: 1, max: 100000000, required: true })}${champActionTrait(index, 'Créancier', 'creditor', action.creditor || '', { required: true, placeholder: 'Ex. Cartel des Hutts' })}</div><div class="grille-champs">${champSelectActionTrait(index, 'Faction dont la relation baisse', 'factionKey', action.factionKey, optionsFactionTrait(action.factionKey))}${champActionTrait(index, 'Niveaux de relation retirés', 'relationPenalty', action.relationPenalty, { type: 'number', min: 1, max: 4, required: true })}</div><p class="section-note">Cette action enregistre la dette, retire son montant des crédits de départ et réduit la relation avec la faction choisie.</p>`;
+  } else if (action.type === 'item') {
+    fields = `<div class="grille-champs">${champSelectActionTrait(index, 'Item du catalogue', 'itemId', action.itemId, optionsObjetTrait(action.itemId, { fallbackName: action.fallbackName }))}${champActionTrait(index, 'Quantité', 'quantity', action.quantity ?? 1, { type: 'number', min: 1, max: 100000, required: true })}</div>`;
+  } else if (action.type === 'randomItem') {
+    fields = `<div class="grille-champs">${champSelectActionTrait(index, 'Rareté', 'rarity', action.rarity || 'Peu commun', optionsRareteTrait(action.rarity || 'Peu commun'))}${champActionTrait(index, 'Quantité', 'quantity', action.quantity ?? 1, { type: 'number', min: 1, max: 100, required: true })}</div>${champActionTrait(index, 'Catégorie (facultative)', 'categoryIncludes', action.categoryIncludes || '', { placeholder: 'Ex. équipement' })}<p class="section-note">Le bot choisira au hasard un objet de cette rareté, éventuellement dans la catégorie indiquée.</p>`;
+  } else if (action.type === 'stat') {
+    fields = `<div class="grille-champs">${champSelectActionTrait(index, 'Statistique', 'stat', action.stat, optionsStatTrait(action.stat))}${champActionTrait(index, 'Valeur ajoutée/retirée', 'amount', action.amount, { type: 'number', min: -100, max: 100, required: true })}</div><p class="section-note">Utilise une valeur positive pour augmenter la statistique et une valeur négative pour la diminuer.</p>`;
+  } else if (action.type === 'addiction') {
+    fields = `${champSelectActionTrait(index, 'Item à consommer', 'itemId', action.itemId, optionsObjetTrait(action.itemId, { includeCurrency: true }))}<div class="grille-champs">${champSelectActionTrait(index, 'Statistique pénalisée', 'stat', action.stat || 'Résistance', optionsStatTrait(action.stat || 'Résistance'))}${champActionTrait(index, 'Malus (valeur négative)', 'amount', action.amount ?? -10, { type: 'number', min: -100, max: -1, required: true })}</div>${champActionTrait(index, 'Délai maximum sans dose (jours)', 'intervalDays', action.intervalDays ?? 3, { type: 'number', min: 1, max: 365, required: true })}<p class="section-note">Le bot applique le malus si le personnage ne consomme pas l’item avant la fin du délai.</p>`;
+  } else if (action.type === 'relationChoice') {
+    const selected = new Set((action.options || []).map(o => o.factionKey));
+    const factions = (state.listes.relationFactions || []).map(f => `<label class="trait-relation-choice"><input type="checkbox" ${selected.has(f.key) ? 'checked' : ''} onchange="majOptionRelationTrait(${index}, '${jsAttr(f.key)}', this.checked)"><span>${escapeHtml(f.label || f.key)}</span></label>`).join('');
+    fields = `${champActionTrait(index, 'Texte affiché au joueur', 'prompt', action.prompt || 'Choisis une faction de départ.', { required: true })}${champActionTrait(index, 'Niveau attribué à la faction choisie (1 à 5)', 'level', action.level ?? 3, { type: 'number', min: 1, max: 5, required: true })}<div class="trait-relation-options"><strong>Factions proposées au joueur</strong>${factions}</div><p class="section-note">Sélectionne au moins deux factions pour proposer un choix au joueur.</p>`;
+  }
+
+  return `<div class="trait-action-card"><div class="trait-action-entete"><strong>Action ${index + 1}</strong><button type="button" class="btn-secondaire btn-danger" onclick="supprimerActionTrait(${index})">Supprimer</button></div><div class="champ"><label for="f-ta-${index}-type">Action à appliquer</label><select id="f-ta-${index}-type" onchange="changerTypeActionTrait(${index}, this.value)">${typesOptions}</select></div>${fields}</div>`;
+}
+
+function renderActionTraitEditeur() {
+  const host = document.getElementById('trait-actions-container');
+  if (!host) return;
+  host.innerHTML = (state.traitActionsDraft || []).map(renderActionTraitHTML).join('') || '<p class="section-note">Aucune action. Ajoute au moins une action pour définir le bonus/malus.</p>';
 }
 
 function panneauTraitHTML(trait) {
-  const effects = JSON.stringify(trait?.effects || {}, null, 2);
   return `
     <div class="section-titre">${trait ? '✏️ Modifier le trait' : '➕ Nouveau trait'}</div>
     <div class="champ"><label for="f-trait-id">Identifiant</label><input type="text" id="f-trait-id" value="${escapeAttr(trait?._id || '')}" placeholder="ex. veteran-des-guerres" ${trait ? 'disabled' : ''} pattern="[A-Za-z0-9_-]+"><p class="section-note">Identifiant stable utilisé par le bot ; il ne peut plus être changé après création.</p></div>
-    <div class="champ"><label for="f-trait-name">Nom</label><input type="text" id="f-trait-name" maxlength="100" value="${escapeAttr(trait?.name || '')}"></div>
-    <div class="champ"><label for="f-trait-points">Points (malus positif, bonus négatif)</label><input type="number" id="f-trait-points" min="-100" max="100" step="1" value="${Number(trait?.points) || 0}"><p class="section-note">Le joueur commence à 0 et doit arriver exactement à 0, ou choisir « Aucun trait ».</p></div>
+    <div class="champ"><label for="f-trait-name">Nom</label><input type="text" id="f-trait-name" maxlength="100" value="${escapeAttr(trait?.name || '')}" required></div>
+    <div class="champ"><label for="f-trait-points">Points du trait (malus positif, bonus négatif)</label><input type="number" id="f-trait-points" min="-100" max="100" step="1" value="${Number(trait?.points) || 0}" required><p class="section-note">Le joueur commence à 0 et doit arriver exactement à 0, ou choisir « Aucun trait ». Un trait positif en points est un malus ; un trait négatif est un bonus.</p></div>
     <div class="champ"><label for="f-trait-description">Description affichée aux joueurs</label><textarea id="f-trait-description" maxlength="1000">${escapeHtml(trait?.description || '')}</textarea></div>
-    <div class="champ"><label for="f-trait-effects">Effets (JSON)</label><textarea class="trait-json-input" id="f-trait-effects" spellcheck="false">${escapeHtml(effects)}</textarea><p class="section-note">Champs pris en charge : <code>stats</code>, <code>relations</code>, <code>relationChoice</code>, <code>items</code>, <code>randomItems</code>, <code>debts</code>, <code>bounty</code>, <code>addictions</code>. Les IDs d’objets doivent correspondre au catalogue.</p></div>
+    <div class="section-titre trait-actions-titre">⚙️ Actions et prérequis</div>
+    <p class="section-note">Ajoute une ou plusieurs actions. Chaque action affiche les champs requis selon son type. Une dette retire ses crédits de départ et diminue la relation avec la faction choisie.</p>
+    <div id="trait-actions-container" class="trait-actions-liste">${(state.traitActionsDraft || []).map(renderActionTraitHTML).join('')}</div>
+    <div class="trait-ajouter-action"><button type="button" class="btn-secondaire" onclick="ajouterActionTrait()">＋ Ajouter une action</button></div>
     <div class="champ champ-case"><label class="case-label"><input type="checkbox" id="f-trait-enabled" ${trait?.enabled === false ? '' : 'checked'}> Trait disponible à l’étape 4</label></div>
     <div class="actions-panneau"><button class="btn-principal" id="btn-enregistrer-trait" onclick="sauvegarderTrait()">${trait ? 'Enregistrer les modifications' : 'Créer le trait'}</button></div>
   `;
+}
+
+function construireEffetsTrait(actions) {
+  if (!Array.isArray(actions) || !actions.length) throw new Error('Ajoute au moins une action au bonus/malus.');
+  const effects = {};
+  let credits = 0;
+  let bountyCount = 0;
+  let relationChoiceCount = 0;
+  const existingRelations = new Set((state.listes.relationFactions || []).map(f => f.key));
+  const existingItems = new Set((state.catalogue || []).map(item => String(item.id)));
+
+  const entierPositif = (value, label, max = 100000000) => {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1 || n > max) throw new Error(`${label} doit être un entier entre 1 et ${max.toLocaleString('fr-FR')}.`);
+    return n;
+  };
+
+  for (const action of actions) {
+    if (!action?.type) throw new Error('Choisis un type pour chaque action.');
+    if (action.type === 'moneyAdd' || action.type === 'moneyRemove') {
+      const amount = entierPositif(action.amount, 'La somme en crédits');
+      credits += action.type === 'moneyAdd' ? amount : -amount;
+    } else if (action.type === 'relationAdd' || action.type === 'relationRemove') {
+      const factionKey = String(action.factionKey || '');
+      if (!existingRelations.has(factionKey)) throw new Error('Choisis une faction pour chaque action de relation.');
+      const amount = entierPositif(action.amount, 'Le changement de relation', 4);
+      effects.relations = effects.relations || [];
+      effects.relations.push({ factionKey, mode: 'add', value: action.type === 'relationAdd' ? amount : -amount });
+    } else if (action.type === 'relationSet') {
+      const factionKey = String(action.factionKey || '');
+      const level = Number(action.level);
+      if (!existingRelations.has(factionKey)) throw new Error('Choisis une faction pour définir la relation.');
+      if (!Number.isFinite(level) || level < 1 || level > 5) throw new Error('Le niveau de relation doit être compris entre 1 et 5.');
+      effects.relations = effects.relations || [];
+      effects.relations.push({ factionKey, mode: 'set', value: level });
+    } else if (action.type === 'bounty') {
+      bountyCount += 1;
+      if (bountyCount > 1) throw new Error('Un trait ne peut configurer qu’une seule prime.');
+      effects.bounty = { amount: entierPositif(action.amount, 'Le montant de la prime'), description: String(action.description || '').trim().slice(0, 1000) };
+    } else if (action.type === 'debt') {
+      const amount = entierPositif(action.amount, 'Le montant de la dette');
+      const creditor = String(action.creditor || '').trim();
+      const factionKey = String(action.factionKey || '');
+      const relationPenalty = entierPositif(action.relationPenalty, 'Le malus de relation', 4);
+      if (!creditor) throw new Error('Indique le créancier de la dette.');
+      if (!existingRelations.has(factionKey)) throw new Error('Choisis la faction dont la relation baissera à cause de la dette.');
+      effects.debts = effects.debts || [];
+      effects.debts.push({ creditor: creditor.slice(0, 100), amount });
+      credits -= amount;
+      effects.relations = effects.relations || [];
+      effects.relations.push({ factionKey, mode: 'add', value: -relationPenalty });
+    } else if (action.type === 'item') {
+      let itemId = String(action.itemId || '');
+      const fallbackName = String(action.fallbackName || '').trim();
+      let item = state.catalogue.find(row => String(row.id) === itemId);
+      if (!item && fallbackName) {
+        const wanted = fallbackName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        item = state.catalogue.find(row => String(row.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().includes(wanted));
+        if (item) itemId = String(item.id);
+      }
+      if (!itemId || (!existingItems.has(itemId) && !fallbackName)) throw new Error('Choisis un item existant dans le catalogue.');
+      if (itemId.toLowerCase() === TRAIT_CURRENCY_ID) throw new Error('Utilise l’action « Ajouter de l’argent » pour la monnaie.');
+      effects.items = effects.items || [];
+      effects.items.push({ itemId, fallbackName: item?.name || fallbackName || itemId, ...(action.rarity ? { rarity: action.rarity } : {}), quantity: entierPositif(action.quantity, 'La quantité', 100000) });
+    } else if (action.type === 'randomItem') {
+      const rarity = String(action.rarity || '').trim();
+      if (!rarity) throw new Error('Choisis la rareté de l’item aléatoire.');
+      effects.randomItems = effects.randomItems || [];
+      effects.randomItems.push({ rarity, categoryIncludes: String(action.categoryIncludes || '').trim(), quantity: entierPositif(action.quantity, 'La quantité', 100) });
+    } else if (action.type === 'stat') {
+      const stat = String(action.stat || '').trim();
+      const amount = Number(action.amount);
+      if (!stat) throw new Error('Choisis une statistique.');
+      if (!Number.isInteger(amount) || amount === 0 || Math.abs(amount) > 100) throw new Error('La valeur de statistique doit être un entier entre -100 et 100, sauf 0.');
+      effects.stats = effects.stats || [];
+      effects.stats.push({ stat, amount });
+    } else if (action.type === 'addiction') {
+      const itemId = String(action.itemId || '').trim();
+      const stat = String(action.stat || '').trim();
+      const amount = Number(action.amount);
+      const intervalDays = entierPositif(action.intervalDays, 'Le délai sans dose', 365);
+      if (!itemId) throw new Error('Choisis l’item consommé pour l’addiction.');
+      if (!stat) throw new Error('Choisis la statistique pénalisée par l’addiction.');
+      if (!Number.isInteger(amount) || amount >= 0 || amount < -100) throw new Error('Le malus d’addiction doit être une valeur négative entre -1 et -100.');
+      effects.addictions = effects.addictions || [];
+      effects.addictions.push({ itemId, itemNameContains: String(action.itemNameContains || nomObjetTrait(itemId)).slice(0, 100), stat, amount, intervalDays });
+    } else if (action.type === 'relationChoice') {
+      relationChoiceCount += 1;
+      if (relationChoiceCount > 1) throw new Error('Un trait ne peut proposer qu’un seul choix de relation.');
+      const selectedOptions = (action.options || []).filter(o => existingRelations.has(String(o.factionKey)));
+      if (selectedOptions.length < 2) throw new Error('Sélectionne au moins deux factions pour le choix de relation.');
+      const level = Number(action.level);
+      if (!Number.isInteger(level) || level < 1 || level > 5) throw new Error('Le niveau choisi doit être compris entre 1 et 5.');
+      effects.relationChoice = {
+        prompt: String(action.prompt || 'Choisis une faction de départ.').trim().slice(0, 300),
+        options: selectedOptions.map(o => ({ factionKey: o.factionKey, label: (state.listes.relationFactions.find(f => f.key === o.factionKey)?.label || o.label || o.factionKey), level })),
+      };
+    } else {
+      throw new Error('Une action sélectionnée n’est pas reconnue.');
+    }
+  }
+
+  if (credits) effects.credits = { amount: credits };
+  return effects;
 }
 
 async function sauvegarderTrait() {
@@ -1130,10 +1472,13 @@ async function sauvegarderTrait() {
   try {
     const rawId = state.traitActuel || val('f-trait-id');
     if (!rawId) throw new Error('L’identifiant est obligatoire.');
-    let effects;
-    try { effects = JSON.parse(val('f-trait-effects') || '{}'); } catch { throw new Error('Le JSON des effets est invalide.'); }
-    if (!effects || typeof effects !== 'object' || Array.isArray(effects)) throw new Error('Les effets doivent être un objet JSON.');
-    const payload = { id: rawId, name: val('f-trait-name'), points: Number(val('f-trait-points')), description: val('f-trait-description'), effects, enabled: document.getElementById('f-trait-enabled').checked };
+    if (!/^[A-Za-z0-9_-]{1,80}$/.test(rawId)) throw new Error('L’identifiant doit contenir uniquement des lettres, chiffres, tirets ou tirets bas.');
+    const name = String(val('f-trait-name') || '').trim();
+    if (!name) throw new Error('Le nom du bonus/malus est obligatoire.');
+    const points = Number(val('f-trait-points'));
+    if (!Number.isInteger(points) || points === 0 || Math.abs(points) > 100) throw new Error('Les points doivent être un entier entre -100 et 100, différent de 0.');
+    const effects = construireEffetsTrait(state.traitActionsDraft || []);
+    const payload = { id: rawId, name, points, description: val('f-trait-description'), effects, enabled: document.getElementById('f-trait-enabled').checked };
     if (state.traitActuel) await fetchJSON(`/api/traits/${encodeURIComponent(state.traitActuel)}`, payload, 'PATCH');
     else await fetchJSON('/api/traits', payload, 'POST');
     toast('Bonus / malus enregistré.', 'succes');
@@ -1147,7 +1492,7 @@ async function supprimerTrait(id) {
   const trait = state.traits.find(t => String(t._id) === String(id));
   const ok = await confirmerAction({ titre: 'Supprimer le trait', message: `Supprimer « ${trait?.name || id} » du choix de création ? Les personnages qui l’ont déjà choisi conservent leurs effets enregistrés.`, texteValider: 'Supprimer' });
   if (!ok) return;
-  try { await fetchJSON(`/api/traits/${encodeURIComponent(id)}`, null, 'DELETE'); toast('Trait supprimé.', 'succes'); await chargerTraitsPage(); }
+  try { await fetchJSON(`/api/traits/${encodeURIComponent(id)}`, null, 'DELETE'); toast('Bonus / malus supprimé.', 'succes'); await chargerTraitsPage(); }
   catch (error) { toast(`Échec : ${error.message}`, 'erreur'); }
 }
 
