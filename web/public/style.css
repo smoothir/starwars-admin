@@ -1251,6 +1251,7 @@ input[type="number"]::-webkit-inner-spin-button {
 /* Masquer les flèches des champs de type number (Firefox) */
 input[type="number"] {
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 /* Champ "Emplacement" + case "Utilisable" du formulaire d'objet */
 .champ-case { display: flex; flex-direction: column; justify-content: center; }
