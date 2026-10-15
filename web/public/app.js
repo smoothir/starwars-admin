@@ -1105,6 +1105,18 @@ function resumeEffetsTrait(effects) {
 function renderTraitsPage() {
   const contenuDiv = document.getElementById('contenu');
   const filtre = state.filtreTraits || 'tous';
+  // Ordre par défaut : bonus (points négatifs) du plus fort au plus faible,
+  // puis traits neutres, puis malus (points positifs) du plus élevé au plus faible.
+  const traitsTries = [...state.traits].sort((a, b) => {
+    const pointsA = Number(a.points) || 0;
+    const pointsB = Number(b.points) || 0;
+    const groupeA = pointsA < 0 ? 0 : pointsA === 0 ? 1 : 2;
+    const groupeB = pointsB < 0 ? 0 : pointsB === 0 ? 1 : 2;
+    if (groupeA !== groupeB) return groupeA - groupeB;
+    if (groupeA === 0) return pointsA - pointsB || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+    if (groupeA === 2) return pointsB - pointsA || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+    return String(a.name || '').localeCompare(String(b.name || ''), 'fr');
+  });
   contenuDiv.innerHTML = `
     <div class="catalogue-actions-bar">
       <div><strong>🎭 Traits de création</strong><span>${state.traits.length} bonus / malus configuré(s) · les points doivent se totaliser à 0</span></div>
@@ -1116,7 +1128,7 @@ function renderTraitsPage() {
       <button type="button" class="trait-filtre-bouton ${filtre === 'malus' ? 'actif' : ''}" data-filtre-trait="malus" onclick="choisirFiltreTraits('malus')">Malus</button>
     </div>
     <div class="trait-grid">
-      ${state.traits.map(trait => {
+      ${traitsTries.map(trait => {
         const points = Number(trait.points) || 0;
         const type = points > 0 ? 'malus' : points < 0 ? 'bonus' : 'neutre';
         return `

@@ -879,8 +879,10 @@ h1, h2, h3, h4 {
 .section-note {
   font-size: 0.76rem;
   color: var(--text-muted);
-  margin: -8px 0 14px;
-  line-height: 1.5;
+  margin: 8px 0 14px;
+  line-height: 1.55;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .grille-champs {
@@ -1242,6 +1244,7 @@ h1, h2, h3, h4 {
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
+  appearance: none;
   margin: 0;
 }
 
@@ -1927,7 +1930,7 @@ html { font-size: 14px; }
 .boutique-tuile:hover, .boutique-tuile:focus-visible { outline: none; border-color: var(--border-gold); background: var(--bg-card-hover); transform: translateY(-2px); }
 .boutique-tuile.boutique-masque { opacity: .55; }
 .boutique-tuile-icone { font-size: 1.9rem; line-height: 1; }
-.boutique-tuile-nom { font-size: .74rem; line-height: 1.25; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
+.boutique-tuile-nom { font-size: .74rem; line-height: 1.25; max-width: 100%; overflow: hidden; display: -webkit-box; line-clamp: 2; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
 .boutique-tuile-stock { font-size: .68rem; opacity: .85; }
 .boutique-vide { grid-column: 1 / -1; }
 .boutique-case { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; font-size: .84rem; font-weight: 700; cursor: pointer; }
@@ -2149,4 +2152,191 @@ html { font-size: 14px; }
   .trait-filtres { width: 100%; }
   .trait-filtre-bouton { flex: 1; }
   .trait-action-card { padding: 11px; }
+}
+
+
+/* =====================================================================
+   Correctifs globaux de lisibilité et de mise en page des formulaires
+   - Les notes ne remontent plus sur les champs.
+   - Les labels longs passent à la ligne.
+   - Les grilles se réduisent sans faire déborder les champs.
+   ===================================================================== */
+.section-note {
+  margin-top: 8px;
+  line-height: 1.55;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.champ {
+  min-width: 0;
+}
+
+.champ label:not(.case-label) {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  margin-bottom: 8px;
+}
+
+.champ > .section-note {
+  margin: 7px 0 0;
+  line-height: 1.5;
+}
+
+.grille-champs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  column-gap: 14px;
+  row-gap: 12px;
+}
+
+.grille-champs > .champ {
+  margin-bottom: 0;
+}
+
+.champ input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.champ select,
+.champ textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 42px;
+  line-height: 1.45;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.champ textarea {
+  min-height: 96px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.champ input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+
+.panneau-corps {
+  min-width: 0;
+  min-height: 0;
+  overflow-wrap: anywhere;
+  padding-bottom: 112px;
+}
+
+.actions-panneau {
+  bottom: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  z-index: 2;
+}
+
+.actions-panneau > button {
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.trait-action-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.trait-action-card .grille-champs + .grille-champs {
+  margin-top: 10px;
+}
+
+.trait-action-card > .section-note {
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
+
+.trait-action-entete {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.trait-action-entete strong {
+  min-width: 0;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.trait-action-entete button {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 6px 12px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.trait-relation-choice {
+  align-items: flex-start;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.trait-relation-choice span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 880px) {
+  .grille-champs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .panneau-header {
+    gap: 10px;
+    padding: 18px 16px 14px;
+  }
+
+  .panneau-header h3 {
+    font-size: 1.05rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .panneau-corps {
+    padding: 18px 16px 112px;
+  }
+
+  .actions-panneau {
+    margin-left: -16px;
+    margin-right: -16px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .trait-action-card {
+    padding: 12px;
+  }
+
+  .trait-action-entete button {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .trait-action-card {
+    padding: 10px;
+  }
+
+  .trait-action-entete {
+    gap: 8px;
+  }
+
+  .actions-panneau > button {
+    flex: 1 1 100%;
+  }
 }
