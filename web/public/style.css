@@ -1136,11 +1136,13 @@ h1, h2, h3, h4 {
 .btn-secondaire:hover { border-color: var(--border-soft); color: #ffffff; }
 
 .actions-panneau {
-  position: sticky;
-  bottom: -40px;
-  margin: 28px -26px -40px;
-  padding: 16px 26px 22px;
-  background: linear-gradient(0deg, var(--bg-deep) 60%, transparent);
+  /* Les actions restent dans le flux du formulaire : elles ne recouvrent pas
+     les champs pendant le défilement du panneau. */
+  position: static;
+  bottom: auto;
+  margin: 28px 0 0;
+  padding: 16px 0 22px;
+  background: none;
   display: flex;
   gap: 10px;
 }
@@ -2227,14 +2229,15 @@ html { font-size: 14px; }
   min-width: 0;
   min-height: 0;
   overflow-wrap: anywhere;
-  padding-bottom: 112px;
+  padding-bottom: 40px;
 }
 
 .actions-panneau {
-  bottom: 0;
+  position: static;
+  bottom: auto;
   flex-wrap: wrap;
   align-items: center;
-  z-index: 2;
+  z-index: auto;
 }
 
 .actions-panneau > button {
