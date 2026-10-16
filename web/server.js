@@ -9,6 +9,7 @@ const express = require('express');
 const session = require('express-session');
 const { MongoStore } = require('connect-mongo');
 const crypto = require('crypto');
+const { ObjectId } = require('mongodb');
 
 const {
   listAllProfiles,
@@ -489,6 +490,335 @@ app.post('/api/admin/backups/:backupId/restore', async (req, res) => {
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GESTION DES DONNÉES MONGO (créateur uniquement, protégée par /api/admin).
+// Cette page ne propose que les collections opérationnelles explicitement
+// autorisées : aucune collection système/session/log/backups n'est exposée.
+// ---------------------------------------------------------------------------
+const DATA_MANAGER_TYPES = new Set([
+  'reservations', 'profils', 'personnel', 'productions', 'crafts', 'tickets', 'rumeurs',
+]);
+
+const DATA_MANAGER_LABELS = {
+  reservations: 'Réservations',
+  profils: 'Profils RP',
+  personnel: 'Personnel acheté',
+  productions: 'Productions en cours',
+  crafts: 'Crafts en cours',
+  tickets: 'Autres tickets',
+  rumeurs: 'Rumeurs',
+};
+
+function managerId(value) {
+  return value === undefined || value === null ? '' : String(value);
+}
+
+function managerProfileIsDraftQuery() {
+  return {
+    reservationChannelId: { $exists: true, $nin: [null, ''] },
+    $or: [
+      { ficheUrl: { $exists: false } },
+      { ficheUrl: null },
+      { ficheUrl: '' },
+    ],
+  };
+}
+
+async function managerFindById(collection, id) {
+  let doc = await collection.findOne({ _id: id });
+  if (doc) return doc;
+  if (/^[a-f0-9]{24}$/i.test(String(id))) {
+    try {
+      doc = await collection.findOne({ _id: new ObjectId(String(id)) });
+      if (doc) return doc;
+    } catch { /* identifiant pas un ObjectId valide pour cette version du driver */ }
+  }
+  return null;
+}
+
+function managerRecordDate(doc) {
+  return doc?.updatedAt || doc?.createdAt || doc?.startedAt || doc?.timestamp || doc?.reservedAt || null;
+}
+
+function managerFormatRow(type, doc, extra = {}) {
+  const id = managerId(extra.id ?? doc?.channelId ?? doc?._id);
+  const date = managerRecordDate(doc);
+  const dateIso = date instanceof Date ? date.toISOString() : (date ? String(date) : null);
+  const userId = managerId(doc?.userId || doc?.ownerId || doc?.discordId);
+  const profileId = managerId(doc?.profileId || doc?.characterId || '');
+  const channelId = managerId(doc?.channelId || doc?.reservationChannelId || (type === 'tickets' ? doc?._id : ''));
+  let label = '';
+  let detail = '';
+  let status = managerId(doc?.status || doc?.state || 'Enregistré');
+  let icon = '🗃️';
+
+  if (type === 'reservations') {
+    icon = '📝';
+    label = doc?.nomPrenom || extra.profile?.nomPrenom || doc?.profileName || doc?.personnage || doc?.faceclaim || `Réservation ${id}`;
+    const fc = doc?.faceclaim || extra.profile?.faceclaim;
+    const role = doc?.roleName || extra.profile?.roleName;
+    detail = [userId ? `Joueur Discord : ${userId}` : '', fc ? `Faceclaim : ${fc}` : '', role ? `Rôle : ${role}` : '', channelId ? `Salon : ${channelId}` : '', extra.source || ''].filter(Boolean).join(' · ');
+    status = doc?.status || (extra.profile?.ficheUrl ? 'Fiche validée' : 'En cours');
+  } else if (type === 'profils') {
+    icon = '👤';
+    label = doc?.nomPrenom || id;
+    detail = [doc?.surnom && doc.surnom !== 'Aucun' ? `Surnom : ${doc.surnom}` : '', doc?.categoryName || '', doc?.roleName || '', userId ? `Joueur : ${userId}` : '', profileId ? `Profil : ${profileId}` : ''].filter(Boolean).join(' · ');
+    status = doc?.ficheUrl ? (doc?.statut || 'Fiche validée') : (doc?.reservationChannelId ? 'Création en cours' : (doc?.statut || 'Profil sans fiche'));
+  } else if (type === 'personnel') {
+    icon = '👥';
+    label = doc?.typeName || doc?.name || id;
+    detail = [doc?.profileName ? `Personnage : ${doc.profileName}` : '', userId ? `Joueur : ${userId}` : '', doc?.productionRecipeName ? `Production : ${doc.productionRecipeName}` : 'Production non affectée', doc?.pausedReason ? `Pause : ${doc.pausedReason}` : '', doc?.upkeepStatus ? `Entretien : ${doc.upkeepStatus}` : ''].filter(Boolean).join(' · ');
+    status = doc?.enabled === false ? 'Désactivé' : doc?.pausedReason ? 'En pause' : 'Actif';
+  } else if (type === 'productions') {
+    icon = '🏭';
+    label = doc?.recipeName || doc?.productionName || doc?.name || id;
+    detail = [doc?.profileName ? `Personnage : ${doc.profileName}` : '', userId ? `Joueur : ${userId}` : '', doc?.quantity ? `Quantité : ${doc.quantity}` : '', doc?.kind ? `Type : ${doc.kind === 'personnel' ? 'Cycle du personnel' : doc.kind}` : '', doc?.endsAt ? `Fin : ${new Date(doc.endsAt).toLocaleString('fr-FR')}` : ''].filter(Boolean).join(' · ');
+    status = doc?.status || (doc?.enabled === false ? 'Désactivé' : 'Enregistré');
+  } else if (type === 'crafts') {
+    icon = '🛠️';
+    label = doc?.recipeName || doc?.craftName || doc?.name || 'Craft';
+    detail = [doc?.profileName ? `Personnage : ${doc.profileName}` : '', userId ? `Joueur : ${userId}` : '', doc?.quantity ? `Quantité : ${doc.quantity}` : '', doc?.endsAt ? `Fin : ${new Date(doc.endsAt).toLocaleString('fr-FR')}` : ''].filter(Boolean).join(' · ');
+    status = doc?.status || 'Enregistré';
+  } else if (type === 'tickets') {
+    icon = '🎫';
+    label = doc?.title || doc?.subject || doc?.type || doc?.name || `Ticket ${id}`;
+    detail = [userId ? `Joueur : ${userId}` : '', doc?.channelName ? `Salon : ${doc.channelName}` : '', `ID salon : ${channelId || id}`].filter(Boolean).join(' · ');
+    status = doc?.status || 'Ouvert';
+  } else if (type === 'rumeurs') {
+    icon = '🗣️';
+    label = doc?.title || doc?.name || doc?.authorName || (doc?.content ? String(doc.content).slice(0, 76) : `Rumeur ${id}`);
+    detail = [userId ? `Joueur : ${userId}` : '', doc?.content && doc?.title ? String(doc.content).slice(0, 120) : '', doc?.votes ? `Votes : ${doc.votes.length}` : ''].filter(Boolean).join(' · ');
+    status = doc?.status || 'Enregistrée';
+  }
+
+  return {
+    id,
+    label: String(label || id),
+    detail: String(detail || 'Aucun détail complémentaire.'),
+    status: String(status),
+    icon,
+    userId: userId || null,
+    profileId: profileId || null,
+    channelId: channelId || null,
+    timestamp: dateIso,
+    source: extra.source || null,
+  };
+}
+
+async function managerListReservations(database) {
+  const [tickets, drafts] = await Promise.all([
+    database.collection('logsticket').find({}).sort({ updatedAt: -1, createdAt: -1 }).limit(500).toArray(),
+    database.collection('profils').find(managerProfileIsDraftQuery()).sort({ updatedAt: -1, createdAt: -1 }).limit(500).toArray(),
+  ]);
+  const draftByChannel = new Map(drafts.filter(p => p.reservationChannelId).map(p => [String(p.reservationChannelId), p]));
+  const seenChannels = new Set();
+  const rows = [];
+  for (const ticket of tickets) {
+    const channelId = managerId(ticket.channelId || '');
+    const draft = channelId ? draftByChannel.get(channelId) : null;
+    const rowId = channelId || managerId(ticket._id);
+    if (channelId) seenChannels.add(channelId);
+    rows.push(managerFormatRow('reservations', ticket, {
+      id: rowId,
+      profile: draft || null,
+      source: draft ? 'Ticket + profil brouillon' : 'Ticket de réservation MongoDB',
+    }));
+  }
+  for (const draft of drafts) {
+    const channelId = managerId(draft.reservationChannelId || '');
+    if (channelId && seenChannels.has(channelId)) continue;
+    const rowId = channelId || managerId(draft._id);
+    rows.push(managerFormatRow('reservations', draft, {
+      id: rowId,
+      profile: draft,
+      source: 'Profil brouillon sans ticket enregistré',
+    }));
+  }
+  rows.sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')));
+  return rows;
+}
+
+async function managerListRows(database, type) {
+  if (type === 'reservations') return managerListReservations(database);
+  const collections = {
+    profils: 'profils',
+    personnel: 'personnel_assignments',
+    productions: 'production_jobs',
+    crafts: 'craft_jobs',
+    tickets: 'general_tickets',
+    rumeurs: 'rumeurs',
+  };
+  const collectionName = collections[type];
+  if (!collectionName) throw new Error('Type de données inconnu.');
+  const docs = await database.collection(collectionName).find({})
+    .sort({ updatedAt: -1, createdAt: -1, startedAt: -1, timestamp: -1 })
+    .limit(1000).toArray();
+  return docs.map(doc => managerFormatRow(type, doc));
+}
+
+async function managerReleaseFaceclaim(database, profileOrTicket) {
+  const faceclaim = String(profileOrTicket?.faceclaim || '').trim().toLowerCase();
+  const userId = managerId(profileOrTicket?.userId);
+  if (!faceclaim || !userId) return 0;
+  const result = await database.collection('avatars').deleteOne({ faceclaimKey: faceclaim, userId });
+  return result.deletedCount || 0;
+}
+
+async function managerDeleteProfile(database, profile) {
+  const profileId = managerId(profile?._id);
+  if (!profileId) return { profils: 0, inventaires: 0, personnel: 0, productions: 0, crafts: 0, reservations: 0, faceclaims: 0 };
+  const assignmentsCol = database.collection('personnel_assignments');
+  const assignments = await assignmentsCol.find({ profileId }).project({ _id: 1 }).toArray();
+  const assignmentIds = assignments.map(row => row._id);
+  const productionQuery = assignmentIds.length
+    ? { $or: [{ profileId }, { assignmentId: { $in: assignmentIds } }] }
+    : { profileId };
+  const [invResult, personnelResult, productionResult, craftResult, ticketResult] = await Promise.all([
+    database.collection('inv').deleteOne({ _id: profileId }),
+    assignmentsCol.deleteMany({ profileId }),
+    database.collection('production_jobs').deleteMany(productionQuery),
+    database.collection('craft_jobs').deleteMany({ profileId }),
+    profile.reservationChannelId
+      ? database.collection('logsticket').deleteMany({ channelId: String(profile.reservationChannelId) })
+      : Promise.resolve({ deletedCount: 0 }),
+  ]);
+  const avatarCount = await managerReleaseFaceclaim(database, profile);
+  const profileResult = await database.collection('profils').deleteOne({ _id: profile._id });
+  return {
+    profils: profileResult.deletedCount || 0,
+    inventaires: invResult.deletedCount || 0,
+    personnel: personnelResult.deletedCount || 0,
+    productions: productionResult.deletedCount || 0,
+    crafts: craftResult.deletedCount || 0,
+    reservations: ticketResult.deletedCount || 0,
+    faceclaims: avatarCount,
+  };
+}
+
+app.get('/api/admin/data-manager/summary', async (req, res) => {
+  try {
+    const database = await connect();
+    const draftQuery = managerProfileIsDraftQuery();
+    const [reservationTickets, draftProfiles, profils, personnel, productions, crafts, tickets, rumeurs, ticketChannels] = await Promise.all([
+      database.collection('logsticket').countDocuments({}),
+      database.collection('profils').countDocuments(draftQuery),
+      database.collection('profils').countDocuments({}),
+      database.collection('personnel_assignments').countDocuments({}),
+      database.collection('production_jobs').countDocuments({}),
+      database.collection('craft_jobs').countDocuments({}),
+      database.collection('general_tickets').countDocuments({}),
+      database.collection('rumeurs').countDocuments({}),
+      database.collection('logsticket').distinct('channelId', { channelId: { $exists: true, $nin: [null, ''] } }),
+    ]);
+    const draftChannels = await database.collection('profils').distinct('reservationChannelId', { ...draftQuery, reservationChannelId: { $exists: true, $nin: [null, ''] } });
+    const ticketChannelSet = new Set(ticketChannels.map(String));
+    const duplicateReservations = draftChannels.filter(channelId => ticketChannelSet.has(String(channelId))).length;
+    res.set('Cache-Control', 'no-store');
+    res.json({ counts: {
+      reservations: reservationTickets + draftProfiles - duplicateReservations,
+      profils,
+      personnel,
+      productions,
+      crafts,
+      tickets,
+      rumeurs,
+    } });
+  } catch (err) {
+    console.error('Chargement du résumé des données Mongo impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/admin/data-manager/:type', async (req, res) => {
+  try {
+    const type = String(req.params.type || '');
+    if (!DATA_MANAGER_TYPES.has(type)) return res.status(400).json({ error: 'Type de données non autorisé.' });
+    const database = await connect();
+    const rows = await managerListRows(database, type);
+    res.set('Cache-Control', 'no-store');
+    res.json({ type, label: DATA_MANAGER_LABELS[type], rows, truncated: rows.length >= 1000 });
+  } catch (err) {
+    console.error('Chargement de la gestion Mongo impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/data-manager/:type/:id', async (req, res) => {
+  try {
+    if (req.body?.confirm !== true) return res.status(400).json({ error: 'Confirmation de suppression requise.' });
+    const type = String(req.params.type || '');
+    const id = String(req.params.id || '');
+    if (!DATA_MANAGER_TYPES.has(type) || !id || id.length > 180) return res.status(400).json({ error: 'Type ou identifiant invalide.' });
+    const database = await connect();
+    let deleted = {};
+    let name = id;
+
+    if (type === 'reservations') {
+      const tickets = database.collection('logsticket');
+      let ticket = await tickets.findOne({ channelId: id });
+      let ticketFilter = { channelId: id };
+      if (!ticket) {
+        ticket = await managerFindById(tickets, id);
+        if (ticket) ticketFilter = { _id: ticket._id };
+      }
+      const draftProfiles = await database.collection('profils').find({ ...managerProfileIsDraftQuery(), reservationChannelId: id }).toArray();
+      // La suppression d'une réservation ne supprime que les profils encore en brouillon.
+      if (!ticket && !draftProfiles.length) return res.status(404).json({ error: 'Réservation introuvable ou déjà supprimée.' });
+      if (ticket) {
+        name = ticket.nomPrenom || ticket.faceclaim || id;
+        const removed = await tickets.deleteOne(ticketFilter);
+        deleted.reservations = removed.deletedCount || 0;
+        if (!draftProfiles.length) deleted.faceclaims = await managerReleaseFaceclaim(database, ticket);
+      } else deleted.reservations = 0;
+      const cascade = { profils: 0, inventaires: 0, personnel: 0, productions: 0, crafts: 0, reservations: 0, faceclaims: 0 };
+      for (const draft of draftProfiles) {
+        const counts = await managerDeleteProfile(database, draft);
+        for (const [key, value] of Object.entries(counts)) cascade[key] = (cascade[key] || 0) + value;
+      }
+      for (const [key, value] of Object.entries(cascade)) if (value) deleted[key] = (deleted[key] || 0) + value;
+    } else if (type === 'profils') {
+      const profiles = database.collection('profils');
+      const profile = await managerFindById(profiles, id);
+      if (!profile) return res.status(404).json({ error: 'Profil introuvable ou déjà supprimé.' });
+      name = profile.nomPrenom || id;
+      deleted = await managerDeleteProfile(database, profile);
+    } else if (type === 'personnel') {
+      const assignments = database.collection('personnel_assignments');
+      const assignment = await managerFindById(assignments, id);
+      if (!assignment) return res.status(404).json({ error: 'Achat de personnel introuvable ou déjà supprimé.' });
+      name = `${assignment.typeName || 'Personnel'} — ${assignment.profileName || assignment.profileId || id}`;
+      const jobs = await database.collection('production_jobs').deleteMany({ assignmentId: assignment._id });
+      const assignmentResult = await assignments.deleteOne({ _id: assignment._id });
+      deleted = { personnel: assignmentResult.deletedCount || 0, productions: jobs.deletedCount || 0 };
+    } else {
+      const collectionName = {
+        productions: 'production_jobs',
+        crafts: 'craft_jobs',
+        tickets: 'general_tickets',
+        rumeurs: 'rumeurs',
+      }[type];
+      const collection = database.collection(collectionName);
+      const doc = await managerFindById(collection, id);
+      if (!doc) return res.status(404).json({ error: 'Enregistrement introuvable ou déjà supprimé.' });
+      name = doc.recipeName || doc.typeName || doc.title || doc.name || doc.profileName || id;
+      const result = await collection.deleteOne({ _id: doc._id });
+      deleted[type] = result.deletedCount || 0;
+    }
+
+    const summary = Object.entries(deleted).filter(([, count]) => Number(count) > 0).map(([key, count]) => `${count} ${key}`).join(', ') || '1 enregistrement';
+    await logAction({
+      ...req.session.user,
+      action: 'mongo_data_deleted',
+      details: `A supprimé « ${String(name).slice(0, 120)} » depuis la section de gestion Mongo (${DATA_MANAGER_LABELS[type]}). ${summary}.`,
+      metadata: { dataType: type, recordId: id, deletedCounts: deleted },
+    }).catch(err => console.error('Journalisation de suppression Mongo impossible :', err?.message || err));
+    res.json({ ok: true, type, id, name, deleted });
+  } catch (err) {
+    console.error('Suppression d’une donnée Mongo impossible :', err);
     res.status(500).json({ error: err.message });
   }
 });

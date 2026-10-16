@@ -4,6 +4,9 @@ const state = {
   selectedCatalogIds: new Set(),
   selectedProfileIds: new Set(),
   isFounder: false,
+  dataManagerType: 'reservations',
+  dataManagerRows: [],
+  dataManagerSummary: {},
   catalogue: [],
   catalogueCategorieActive: 'Tout',
   catalogueCategories: [],
@@ -113,6 +116,8 @@ function afficherUtilisateurConnecte(me) {
   if (me.avatar) { avatar.src = me.avatar; avatar.hidden = false; } else { avatar.hidden = true; }
   badge.hidden = false;
   document.getElementById('nav-admin').hidden = !me.isSuperAdmin;
+  const navMongo = document.getElementById('nav-donnees-mongo');
+  if (navMongo) navMongo.hidden = !me.isSuperAdmin;
 }
 
 // -----------------------------------------------------------------------
@@ -336,6 +341,14 @@ async function chargerDonnees(collection) {
     document.getElementById('titre-section').textContent = 'Primes';
     document.getElementById('sous-titre').textContent = 'Gère les primes des personnages. Les fiches actives sont publiées automatiquement dans le forum Discord des primes.';
     await chargerPrimesPage();
+  } else if (collection === 'data-manager') {
+    searchWrap.hidden = false;
+    const rechercheInput = document.getElementById('recherche');
+    rechercheInput.value = '';
+    rechercheInput.placeholder = 'Rechercher par personnage, joueur, ID ou statut...';
+    document.getElementById('titre-section').textContent = 'Gestion des données';
+    document.getElementById('sous-titre').textContent = 'Nettoyage ciblé des réservations, profils et opérations enregistrées dans MongoDB — créateur uniquement.';
+    await chargerDataManagerPage('reservations');
   } else if (collection === 'admin') {
     searchWrap.hidden = true;
     document.getElementById('titre-section').textContent = 'Admin';
@@ -1588,6 +1601,152 @@ async function chargerAdminPage() {
   }
 }
 
+// -----------------------------------------------------------------------
+// Gestion sécurisée des données Mongo : listes et suppressions ciblées.
+// Les routes correspondantes sont réservées au créateur côté serveur.
+// -----------------------------------------------------------------------
+const DATA_MANAGER_SECTIONS = [
+  { id: 'reservations', label: 'Réservations', icon: '📝', help: 'Tickets stockés dans MongoDB et profils de réservation encore en brouillon.' },
+  { id: 'profils', label: 'Profils RP', icon: '👤', help: 'Supprimer un profil retire aussi son inventaire, ses achats de personnel et ses opérations de craft/production associées.' },
+  { id: 'personnel', label: 'Personnel acheté', icon: '👥', help: 'Achats effectués par les joueurs. Supprimer une affectation efface également ses cycles automatiques de production ; aucun coût d’achat n’est remboursé.' },
+  { id: 'productions', label: 'Productions', icon: '🏭', help: 'Travaux manuels et cycles de production enregistrés, terminés ou en attente. La suppression ne rembourse pas automatiquement les ingrédients.' },
+  { id: 'crafts', label: 'Crafts', icon: '🛠️', help: 'Opérations de craft enregistrées. La suppression ne rembourse pas automatiquement les ingrédients.' },
+  { id: 'tickets', label: 'Autres tickets', icon: '🎫', help: 'Suivi Mongo des tickets de support, animation et autres panels. Le salon Discord lui-même n’est pas supprimé.' },
+  { id: 'rumeurs', label: 'Rumeurs', icon: '🗣️', help: 'Entrées de rumeurs proposées ou en cours de validation. Les messages Discord ne sont pas supprimés.' },
+];
+
+function dataManagerEscDate(value) {
+  if (!value) return 'Date inconnue';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Date inconnue' : date.toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+async function chargerDataManagerPage(type = state.dataManagerType || 'reservations') {
+  state.dataManagerType = DATA_MANAGER_SECTIONS.some(row => row.id === type) ? type : 'reservations';
+  const contenu = document.getElementById('contenu');
+  contenu.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
+  try {
+    const summaryResponse = await apiFetch('/api/admin/data-manager/summary');
+    if (!summaryResponse.ok) throw new Error(`HTTP ${summaryResponse.status}`);
+    const summary = await summaryResponse.json();
+    state.dataManagerSummary = summary.counts || {};
+    await chargerDataManagerRows(state.dataManagerType, false);
+  } catch (error) {
+    contenu.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Gestion des données indisponible</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    setStatutConnexion(false);
+  }
+}
+
+async function chargerDataManagerRows(type = state.dataManagerType, refreshSummary = true) {
+  if (!DATA_MANAGER_SECTIONS.some(row => row.id === type)) return;
+  state.dataManagerType = type;
+  const contenu = document.getElementById('contenu');
+  if (refreshSummary) {
+    try {
+      const summaryResponse = await apiFetch('/api/admin/data-manager/summary');
+      if (!summaryResponse.ok) throw new Error(`HTTP ${summaryResponse.status}`);
+      const summary = await summaryResponse.json();
+      state.dataManagerSummary = summary.counts || {};
+    } catch (error) {
+      toast(`Impossible d’actualiser les compteurs : ${error.message}`, 'erreur');
+    }
+  }
+  contenu.innerHTML = '<div class="squelette"></div><div class="squelette"></div>';
+  try {
+    const response = await apiFetch(`/api/admin/data-manager/${encodeURIComponent(type)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    state.dataManagerRows = Array.isArray(data.rows) ? data.rows : [];
+    renderDataManagerPage(data);
+    filtrerListe();
+    setStatutConnexion(true);
+  } catch (error) {
+    contenu.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Impossible de charger ces données</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    setStatutConnexion(false);
+  }
+}
+
+function renderDataManagerPage(data) {
+  const contenu = document.getElementById('contenu');
+  const selected = DATA_MANAGER_SECTIONS.find(row => row.id === state.dataManagerType) || DATA_MANAGER_SECTIONS[0];
+  const rows = state.dataManagerRows;
+  const summary = DATA_MANAGER_SECTIONS.map(section => `
+    <button type="button" class="mongo-manager-stat ${section.id === state.dataManagerType ? 'active' : ''}" onclick="chargerDataManagerRows('${section.id}')">
+      <span>${section.icon}</span><strong>${Number(state.dataManagerSummary[section.id]) || 0}</strong><small>${escapeHtml(section.label)}</small>
+    </button>`).join('');
+  contenu.innerHTML = `
+    <section class="mongo-manager-intro">
+      <div class="mongo-manager-intro-head"><span class="mongo-manager-icon">🧹</span><div><strong>Nettoyage des données MongoDB</strong><p>Supprime uniquement les enregistrements choisis. Cette section est réservée au créateur du site.</p></div><button type="button" class="btn-secondaire" onclick="chargerDataManagerPage(state.dataManagerType)">↻ Actualiser</button></div>
+      <div class="mongo-manager-warning"><strong>⚠️ Attention</strong><span>Les suppressions sont définitives dans les collections opérationnelles. Elles ne suppriment pas les messages, fils ou salons déjà créés sur Discord.</span></div>
+    </section>
+    <section class="mongo-manager-summary">${summary}</section>
+    <section class="mongo-manager-list-section">
+      <div class="mongo-manager-list-head"><div><div class="section-titre">${selected.icon} ${escapeHtml(selected.label)} <span class="mongo-manager-total">${rows.length}</span></div><p class="section-note">${escapeHtml(selected.help)}</p></div>
+        <label class="filter-control"><span>Catégorie</span><select value="${escapeAttr(state.dataManagerType)}" onchange="chargerDataManagerRows(this.value)">${DATA_MANAGER_SECTIONS.map(section => `<option value="${section.id}" ${section.id === state.dataManagerType ? 'selected' : ''}>${escapeHtml(section.label)}</option>`).join('')}</select></label>
+      </div>
+      ${data.truncated ? '<p class="mongo-manager-truncated">La liste est limitée aux 1 000 entrées les plus récentes. Utilise la recherche pour retrouver un élément dans cette sélection.</p>' : ''}
+      <div class="mongo-manager-list">
+        ${rows.map(row => dataManagerRowHTML(row, state.dataManagerType)).join('') || `<div class="etat-vide"><div class="etat-vide-icone">✅</div><p>Aucun enregistrement dans cette catégorie</p></div>`}
+      </div>
+      <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>
+    </section>`;
+}
+
+function dataManagerRowHTML(row, type) {
+  const searchText = `${row.label || ''} ${row.detail || ''} ${row.id || ''} ${row.status || ''} ${row.userId || ''} ${row.profileId || ''}`.toLowerCase();
+  const when = dataManagerEscDate(row.timestamp);
+  return `
+    <article class="ligne mongo-manager-row" data-nom="${escapeAttr(searchText)}">
+      <div class="ligne-sigil">${escapeHtml(row.icon || '🗃️')}</div>
+      <div class="ligne-corps">
+        <div class="ligne-nom">${escapeHtml(row.label || row.id)}</div>
+        <div class="ligne-meta"><span class="badge badge-defaut">${escapeHtml(row.status || 'Enregistré')}</span><span class="badge badge-defaut">${escapeHtml(when)}</span>${row.userId ? `<span class="badge badge-defaut">Joueur ${escapeHtml(row.userId)}</span>` : ''}</div>
+        <div class="mongo-manager-detail">${escapeHtml(row.detail || '')}</div>
+        <div class="mongo-manager-id">ID Mongo / référence : <code>${escapeHtml(row.id || '—')}</code></div>
+      </div>
+      <button type="button" class="mongo-manager-delete" onclick="supprimerDonneeMongo('${jsAttr(type)}','${jsAttr(row.id)}')"><span aria-hidden="true">🗑️</span> Supprimer</button>
+    </article>`;
+}
+
+function messageSuppressionMongo(type, row) {
+  const name = row?.label || row?.id || 'cet enregistrement';
+  const notices = {
+    reservations: 'La réservation et son suivi Mongo seront supprimés. Si un profil est encore en brouillon, il sera retiré avec son inventaire éventuel. Le salon Discord ne sera pas supprimé.',
+    profils: 'Le profil sera supprimé avec son inventaire, ses achats de personnel, ses productions et ses crafts associés, ainsi que la réservation encore liée le cas échéant. La fiche Discord publiée ne sera pas supprimée.',
+    personnel: 'L’achat de personnel et les cycles de production associés seront supprimés. Aucun remboursement du coût d’achat ne sera effectué.',
+    productions: 'L’enregistrement de production sera supprimé. Les ingrédients précédemment consommés ne seront pas remboursés automatiquement.',
+    crafts: 'L’enregistrement du craft sera supprimé. Les ingrédients précédemment consommés ne seront pas remboursés automatiquement.',
+    tickets: 'Le suivi du ticket dans Mongo sera supprimé. Le salon Discord restera présent.',
+    rumeurs: 'L’entrée de rumeur dans Mongo sera supprimée. Un éventuel message Discord restera présent.',
+  };
+  return `Supprimer « ${name} » ?\n\n${notices[type] || 'Cette action supprime l’enregistrement de MongoDB.'}\n\nCette action ne peut pas être annulée depuis cette page.`;
+}
+
+async function supprimerDonneeMongo(type, id) {
+  const row = state.dataManagerRows.find(item => String(item.id) === String(id));
+  if (!row) return toast('Enregistrement introuvable dans la liste. Actualise la page.', 'erreur');
+  const ok = await confirmerAction({
+    titre: 'Confirmer la suppression',
+    message: messageSuppressionMongo(type, row),
+    texteValider: 'Supprimer définitivement',
+  });
+  if (!ok) return;
+  try {
+    const response = await apiFetch(`/api/admin/data-manager/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    const removed = Object.entries(result.deleted || {}).filter(([, count]) => Number(count) > 0).map(([key, count]) => `${count} ${key}`).join(', ');
+    toast(`Suppression effectuée : ${removed || 'enregistrement supprimé'}.`, 'succes');
+    await chargerDataManagerRows(type, true);
+  } catch (error) {
+    toast(`Suppression impossible : ${error.message}`, 'erreur');
+  }
+}
+
 function connexionLigneHTML(c) {
   return `
     <div class="ligne">
@@ -1624,6 +1783,7 @@ const LOG_ICONES = {
   personnel_type_cree: '👷',
   personnel_type_modifie: '✏️',
   personnel_type_supprime: '🗑️',
+  mongo_data_deleted: '🧹',
 };
 
 function logLigneHTML(entry) {
