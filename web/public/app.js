@@ -7,6 +7,8 @@ const state = {
   dataManagerType: 'reservations',
   dataManagerRows: [],
   dataManagerSummary: {},
+  ticketManagerRows: [],
+  ticketManagerStages: [],
   catalogue: [],
   catalogueCategorieActive: 'Tout',
   catalogueCategories: [],
@@ -118,6 +120,8 @@ function afficherUtilisateurConnecte(me) {
   document.getElementById('nav-admin').hidden = !me.isSuperAdmin;
   const navMongo = document.getElementById('nav-donnees-mongo');
   if (navMongo) navMongo.hidden = !me.isSuperAdmin;
+  const navTickets = document.getElementById('nav-tickets');
+  if (navTickets) navTickets.hidden = !me.isSuperAdmin;
 }
 
 // -----------------------------------------------------------------------
@@ -341,6 +345,14 @@ async function chargerDonnees(collection) {
     document.getElementById('titre-section').textContent = 'Primes';
     document.getElementById('sous-titre').textContent = 'Gère les primes des personnages. Les fiches actives sont publiées automatiquement dans le forum Discord des primes.';
     await chargerPrimesPage();
+  } else if (collection === 'ticket-manager') {
+    searchWrap.hidden = false;
+    const rechercheInput = document.getElementById('recherche');
+    rechercheInput.value = getPageFilter('ticket-manager', 'q', '');
+    rechercheInput.placeholder = 'Rechercher personnage, joueur ou ID de salon...';
+    document.getElementById('titre-section').textContent = 'Tickets';
+    document.getElementById('sous-titre').textContent = 'Consulte les tickets MongoDB et modifie l’étape des réservations. Clique ensuite sur Actualiser dans Discord pour afficher le nouveau panneau.';
+    await chargerTicketManagerPage();
   } else if (collection === 'data-manager') {
     searchWrap.hidden = false;
     const rechercheInput = document.getElementById('recherche');
@@ -953,7 +965,7 @@ function ligneInventaireHTML(profile, quantiteTotale, index) {
 function filtrerListe() {
   const recherche = document.getElementById('recherche');
   const q = (recherche?.value || '').trim().toLowerCase();
-  if (['profils', 'inventaire', 'catalogue', 'crafts', 'production', 'personnel', 'boutique'].includes(state.collectionActuelle)) {
+  if (['profils', 'inventaire', 'catalogue', 'crafts', 'production', 'personnel', 'boutique', 'ticket-manager'].includes(state.collectionActuelle)) {
     setPageFilter(state.collectionActuelle, 'q', q);
   }
   const aucun = document.getElementById('aucun-resultat');
@@ -1076,6 +1088,10 @@ async function chargerTraitsPage() {
   }
 }
 
+function traitTiretSimple(value) {
+  return String(value ?? '').replace(/\s*[—–]\s*/g, ' - ').replace(/ {2,}/g, ' ').trim();
+}
+
 function pointsTraitTexte(points) {
   const n = Number(points) || 0;
   return `${n > 0 ? '+' : ''}${n} pts`;
@@ -1145,11 +1161,11 @@ function renderTraitsPage() {
         const points = Number(trait.points) || 0;
         const type = points > 0 ? 'malus' : points < 0 ? 'bonus' : 'neutre';
         return `
-        <article class="trait-card ${trait.enabled === false ? 'trait-inactif' : ''}" data-trait-type="${type}" data-nom="${escapeAttr(`${trait.name} ${trait._id} ${trait.description || ''}`.toLowerCase())}">
+        <article class="trait-card ${trait.enabled === false ? 'trait-inactif' : ''}" data-trait-type="${type}" data-nom="${escapeAttr(`${traitTiretSimple(trait.name)} ${trait._id} ${traitTiretSimple(trait.description || '')}`.toLowerCase())}">
           <div class="trait-card-head"><span class="trait-point ${points > 0 ? 'trait-point-malus' : 'trait-point-bonus'}">${escapeHtml(pointsTraitTexte(points))}</span><span class="badge ${trait.enabled === false ? 'badge-sang' : 'badge-vert'}">${trait.enabled === false ? 'Désactivé' : 'Actif'}</span></div>
-          <h3>${escapeHtml(trait.name)}</h3>
-          <p>${escapeHtml(trait.description || 'Aucune description.')}</p>
-          <div class="trait-effets"><strong>Actions configurées</strong><span>${escapeHtml(resumeEffetsTrait(trait.effects))}</span></div>
+          <h3>${escapeHtml(traitTiretSimple(trait.name))}</h3>
+          <p>${escapeHtml(traitTiretSimple(trait.description || 'Aucune description.'))}</p>
+          <div class="trait-effets"><strong>Actions configurées</strong><span>${escapeHtml(traitTiretSimple(resumeEffetsTrait(trait.effects)))}</span></div>
           <div class="trait-actions"><button class="btn-secondaire" onclick="ouvrirEditeurTrait('${jsAttr(trait._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerTrait('${jsAttr(trait._id)}')">Supprimer</button></div>
         </article>`;
       }).join('') || '<div class="etat-vide"><p>Aucun trait configuré.</p></div>'}
@@ -1181,7 +1197,7 @@ async function ouvrirEditeurTrait(id) {
     state.traitActionsDraft = trait ? actionsTraitDepuisEffets(trait.effects || {}) : [{ type: 'moneyAdd', amount: '' }];
     document.getElementById('overlay-catalogue').classList.add('visible');
     document.getElementById('panneau-catalogue').classList.add('ouvert');
-    document.getElementById('panneau-catalogue-titre').textContent = trait ? trait.name : 'Nouveau bonus / malus';
+    document.getElementById('panneau-catalogue-titre').textContent = trait ? traitTiretSimple(trait.name) : 'Nouveau bonus / malus';
     document.getElementById('panneau-catalogue-corps').innerHTML = panneauTraitHTML(trait);
   } catch (error) {
     toast(`Impossible d’ouvrir l’éditeur : ${error.message}`, 'erreur');
@@ -1374,9 +1390,9 @@ function panneauTraitHTML(trait) {
   return `
     <div class="section-titre">${trait ? '✏️ Modifier le trait' : '➕ Nouveau trait'}</div>
     <div class="champ"><label for="f-trait-id">Identifiant</label><input type="text" id="f-trait-id" value="${escapeAttr(trait?._id || '')}" placeholder="ex. veteran-des-guerres" ${trait ? 'disabled' : ''} pattern="[A-Za-z0-9_-]+"><p class="section-note">Identifiant stable utilisé par le bot ; il ne peut plus être changé après création.</p></div>
-    <div class="champ"><label for="f-trait-name">Nom</label><input type="text" id="f-trait-name" maxlength="100" value="${escapeAttr(trait?.name || '')}" required></div>
+    <div class="champ"><label for="f-trait-name">Nom</label><input type="text" id="f-trait-name" maxlength="100" value="${escapeAttr(traitTiretSimple(trait?.name || ''))}" required></div>
     <div class="champ"><label for="f-trait-points">Points du trait (malus positif, bonus négatif)</label><input type="number" id="f-trait-points" min="-100" max="100" step="1" value="${Number(trait?.points) || 0}" required><p class="section-note">Le joueur commence à 0 et doit arriver exactement à 0, ou choisir « Aucun trait ». Un trait positif en points est un malus ; un trait négatif est un bonus.</p></div>
-    <div class="champ"><label for="f-trait-description">Description affichée aux joueurs</label><textarea id="f-trait-description" maxlength="1000">${escapeHtml(trait?.description || '')}</textarea></div>
+    <div class="champ"><label for="f-trait-description">Description affichée aux joueurs</label><textarea id="f-trait-description" maxlength="1000">${escapeHtml(traitTiretSimple(trait?.description || ''))}</textarea></div>
     <div class="section-titre trait-actions-titre">⚙️ Actions et prérequis</div>
     <p class="section-note">Ajoute une ou plusieurs actions. Chaque action affiche les champs requis selon son type. Une dette retire ses crédits de départ et diminue la relation avec la faction choisie.</p>
     <div id="trait-actions-container" class="trait-actions-liste">${(state.traitActionsDraft || []).map(renderActionTraitHTML).join('')}</div>
@@ -1598,6 +1614,103 @@ async function chargerAdminPage() {
     contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de connexion à l'API</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
     setStatutConnexion(false);
     console.error('Erreur Fetch:', error);
+  }
+}
+
+// -----------------------------------------------------------------------
+// Gestion des tickets et changement d'étape du parcours de réservation.
+// Cette page et ses routes serveur sont réservées au créateur du site.
+// -----------------------------------------------------------------------
+async function chargerTicketManagerPage() {
+  const contenu = document.getElementById('contenu');
+  contenu.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
+  try {
+    const response = await apiFetch('/api/admin/ticket-manager');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    state.ticketManagerRows = Array.isArray(data.rows) ? data.rows : [];
+    state.ticketManagerStages = Array.isArray(data.stages) ? data.stages : [];
+    renderTicketManagerPage(data);
+    filtrerListe();
+    setStatutConnexion(true);
+  } catch (error) {
+    contenu.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Gestion des tickets indisponible</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+    setStatutConnexion(false);
+  }
+}
+
+function renderTicketManagerPage(data = {}) {
+  const contenu = document.getElementById('contenu');
+  const rows = state.ticketManagerRows || [];
+  const reservations = rows.filter(row => row.kind === 'reservation').length;
+  const general = rows.filter(row => row.kind === 'general').length;
+  const closed = rows.filter(row => row.closed).length;
+  contenu.innerHTML = `
+    <section class="mongo-manager-intro ticket-manager-intro">
+      <div class="mongo-manager-intro-head"><span class="mongo-manager-icon">🎫</span><div><strong>Gestion des tickets</strong><p>Modifie l’étape d’un ticket de réservation sans toucher aux autres données du personnage.</p></div><button type="button" class="btn-secondaire" onclick="chargerTicketManagerPage()">↻ Actualiser la liste</button></div>
+      <div class="mongo-manager-warning"><strong>🔄 Après modification</strong><span>Dans le salon Discord concerné, clique sur <b>Actualiser</b>. Si le ticket est fermé, réouvre-le d’abord. Les bonus/malus déjà appliqués ne peuvent pas être annulés depuis cette page.</span></div>
+    </section>
+    <section class="mongo-manager-summary ticket-manager-summary">
+      <div class="mongo-manager-stat"><span>📝</span><strong>${reservations}</strong><small>Réservations</small></div>
+      <div class="mongo-manager-stat"><span>🎫</span><strong>${general}</strong><small>Tickets généraux</small></div>
+      <div class="mongo-manager-stat"><span>🔒</span><strong>${closed}</strong><small>Tickets fermés</small></div>
+    </section>
+    <section class="mongo-manager-list-section">
+      <div class="mongo-manager-list-head"><div><div class="section-titre">📋 Tickets enregistrés <span class="mongo-manager-total">${rows.length}</span></div><p class="section-note">Le changement d’étape agit sur les tickets de réservation. Les tickets généraux sont listés pour consultation.</p></div></div>
+      ${data.truncated ? '<p class="mongo-manager-truncated">La liste est limitée aux enregistrements les plus récents.</p>' : ''}
+      <div class="mongo-manager-list">
+        ${rows.map(ticketManagerRowHTML).join('') || '<div class="etat-vide"><div class="etat-vide-icone">✅</div><p>Aucun ticket enregistré dans MongoDB.</p></div>'}
+      </div>
+      <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun résultat pour cette recherche.</div>
+    </section>`;
+}
+
+function ticketManagerRowHTML(row) {
+  const searchable = `${row.label || ''} ${row.detail || ''} ${row.channelId || ''} ${row.userId || ''} ${row.status || ''} ${row.stepLabel || ''}`.toLowerCase();
+  const stages = (state.ticketManagerStages || []).map(stage => `<option value="${escapeAttr(stage.value)}" ${stage.value === row.step ? 'selected' : ''}>${escapeHtml(stage.label)}</option>`).join('');
+  const date = row.timestamp ? dataManagerEscDate(row.timestamp) : 'Date inconnue';
+  const isReservation = row.kind === 'reservation';
+  const stageBlock = isReservation
+    ? `<div class="ticket-manager-step-editor"><label for="ticket-stage-${escapeAttr(row.channelId)}"><span>Étape du joueur</span><select id="ticket-stage-${escapeAttr(row.channelId)}">${stages}</select></label><button type="button" class="btn-principal ticket-manager-save" onclick="modifierEtapeTicket('${jsAttr(row.channelId)}')">Enregistrer l’étape</button></div>`
+    : `<div class="ticket-manager-readonly">Étape du ticket général gérée depuis Discord.</div>`;
+  return `
+    <article class="ligne mongo-manager-row ticket-manager-row" data-nom="${escapeAttr(searchable)}">
+      <div class="ligne-sigil">${isReservation ? '📝' : '🎫'}</div>
+      <div class="ligne-corps">
+        <div class="ligne-nom">${escapeHtml(row.label || row.channelId)}</div>
+        <div class="ligne-meta"><span class="badge badge-defaut">${escapeHtml(row.status || 'En cours')}</span><span class="badge badge-defaut">${escapeHtml(date)}</span><span class="badge badge-defaut">${isReservation ? 'Réservation' : 'Ticket général'}</span>${row.userId ? `<span class="badge badge-defaut">Joueur ${escapeHtml(row.userId)}</span>` : ''}</div>
+        <div class="mongo-manager-detail">${escapeHtml(row.detail || '')}</div>
+        <div class="mongo-manager-id">Salon Discord : <code>${escapeHtml(row.channelId || '')}</code></div>
+        ${isReservation ? `<div class="ticket-manager-current-step">Étape actuelle : <strong>${escapeHtml(row.stepLabel || row.step || 'Inconnue')}</strong></div>` : ''}
+        ${stageBlock}
+      </div>
+    </article>`;
+}
+
+async function modifierEtapeTicket(channelId) {
+  const row = (state.ticketManagerRows || []).find(ticket => ticket.kind === 'reservation' && String(ticket.channelId) === String(channelId));
+  const select = document.getElementById(`ticket-stage-${channelId}`);
+  if (!row || !select) return toast('Ticket introuvable dans la liste. Actualise la page.', 'erreur');
+  const step = select.value;
+  const stage = (state.ticketManagerStages || []).find(item => item.value === step);
+  const confirmed = await confirmerAction({
+    titre: 'Modifier l’étape du ticket',
+    message: `Modifier le ticket de « ${row.label} » et le placer à l’étape « ${stage?.label || step} » ? Après l’enregistrement, clique sur Actualiser dans le ticket Discord.`,
+    texteValider: 'Enregistrer l’étape',
+  });
+  if (!confirmed) return;
+  try {
+    const response = await apiFetch(`/api/admin/ticket-manager/${encodeURIComponent(channelId)}/step`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ step }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    toast(`Étape enregistrée : ${result.stepLabel}.`, 'succes');
+    await chargerTicketManagerPage();
+  } catch (error) {
+    toast(`Modification impossible : ${error.message}`, 'erreur');
   }
 }
 

@@ -699,6 +699,184 @@ async function managerDeleteProfile(database, profile) {
   };
 }
 
+const TICKET_WORKFLOW_STEPS = [
+  { value: 'step1', label: 'Étape 1 - Informations du personnage' },
+  { value: 'step2', label: 'Étape 2 - Fiche et demande de liens' },
+  { value: 'validation', label: 'En attente de validation' },
+  { value: 'rejected', label: 'Fiche à corriger' },
+  { value: 'stats', label: 'Étape 3 - Répartition des statistiques' },
+  { value: 'traits', label: 'Étape 4 - Bonus / malus' },
+  { value: 'complete', label: 'Création terminée' },
+];
+const TICKET_WORKFLOW_LABELS = new Map(TICKET_WORKFLOW_STEPS.map(row => [row.value, row.label]));
+
+function ticketManagerDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function ticketManagerInferStep(profile, ticket) {
+  const valid = value => TICKET_WORKFLOW_LABELS.has(String(value || ''));
+  if (valid(profile?.ticketStep)) return String(profile.ticketStep);
+  if (valid(ticket?.ticketStep)) return String(ticket.ticketStep);
+  if (profile?.traitsApplied) return 'complete';
+  if (profile?.statsAllocated || profile?.statsRolled) return 'traits';
+  if (profile?.ficheStatus === 'validated' || profile?.ficheValidatedAt || profile?.ficheDiscordUrl) return 'stats';
+  if (profile?.ficheStatus === 'pending') return 'validation';
+  if (profile?.ficheStatus === 'rejected') return 'rejected';
+  if (profile?.ficheUrl || profile?.linkRequestChoiceMade) return 'step2';
+  return 'step1';
+}
+
+app.get('/api/admin/ticket-manager', async (req, res) => {
+  try {
+    const database = await connect();
+    const [profiles, reservationTickets, generalTickets] = await Promise.all([
+      database.collection('profils').find({ reservationChannelId: { $exists: true, $nin: [null, ''] } }).sort({ updatedAt: -1, createdAt: -1 }).limit(1000).toArray(),
+      database.collection('logsticket').find({ channelId: { $exists: true, $nin: [null, ''] } }).sort({ updatedAt: -1, createdAt: -1 }).limit(1000).toArray(),
+      database.collection('general_tickets').find({}).sort({ updatedAt: -1, createdAt: -1 }).limit(500).toArray(),
+    ]);
+    const profileByChannel = new Map(profiles.map(profile => [String(profile.reservationChannelId), profile]));
+    const ticketByChannel = new Map(reservationTickets.map(ticket => [String(ticket.channelId), ticket]));
+    const channelIds = new Set([...profileByChannel.keys(), ...ticketByChannel.keys()]);
+    const rows = [];
+
+    for (const channelId of channelIds) {
+      const profile = profileByChannel.get(channelId) || null;
+      const ticket = ticketByChannel.get(channelId) || null;
+      const step = ticketManagerInferStep(profile, ticket);
+      const closed = profile?.ticketStatus === 'closed' || ticket?.status === 'closed';
+      const status = closed ? 'Fermé' : profile?.ficheStatus === 'pending' ? 'En attente de validation'
+        : profile?.ficheStatus === 'rejected' ? 'Fiche à corriger'
+        : profile?.ficheStatus === 'validated' || profile?.ficheValidatedAt ? 'Fiche validée'
+        : 'En cours';
+      const date = profile?.updatedAt || ticket?.updatedAt || ticket?.createdAt || profile?.createdAt || null;
+      rows.push({
+        kind: 'reservation',
+        channelId,
+        profileId: profile?._id == null ? null : String(profile._id),
+        label: String(profile?.nomPrenom || ticket?.nomPrenom || ticket?.faceclaim || `Réservation ${channelId}`),
+        userId: String(profile?.userId || ticket?.userId || ''),
+        detail: [profile?.surnom ? `Surnom : ${profile.surnom}` : '', profile?.age ? `Âge : ${profile.age}` : '', profile?.faceclaim ? `Joué par : ${profile.faceclaim}` : '', `Salon Discord : ${channelId}`].filter(Boolean).join(' · '),
+        status,
+        step,
+        stepLabel: TICKET_WORKFLOW_LABELS.get(step) || step,
+        closed,
+        timestamp: ticketManagerDate(date),
+        canChangeStep: true,
+      });
+    }
+
+    for (const ticket of generalTickets) {
+      const channelId = String(ticket.channelId || ticket._id || '');
+      if (!channelId || channelIds.has(channelId)) continue;
+      const closed = ticket.status === 'closed';
+      const label = ticket.title || ticket.subject || (ticket.type === 'rumeur' ? 'Ticket rumeur' : `Ticket ${ticket.type || ''}`).trim();
+      const resolution = ticket.resolutionStatus === 'validated' ? ' - ✅ Validé'
+        : ticket.resolutionStatus === 'rejected' ? ' - ❌ Non validé' : '';
+      rows.push({
+        kind: 'general',
+        channelId,
+        profileId: null,
+        label: String(label || `Ticket ${channelId}`),
+        userId: String(ticket.userId || ''),
+        detail: [`Type : ${ticket.type || 'inconnu'}`, `Salon Discord : ${channelId}`, ticket.closedBy || ticket.lastClosedBy ? `Fermé par : ${ticket.lastClosedBy || ticket.closedBy}` : ''].filter(Boolean).join(' · '),
+        status: `${closed ? 'Fermé' : 'En cours'}${resolution}`,
+        step: closed ? 'closed' : 'open',
+        stepLabel: closed ? 'Fermé' : 'En cours',
+        closed,
+        timestamp: ticketManagerDate(ticket.updatedAt || ticket.createdAt),
+        canChangeStep: false,
+      });
+    }
+
+    rows.sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')));
+    res.set('Cache-Control', 'no-store');
+    res.json({ rows, stages: TICKET_WORKFLOW_STEPS, truncated: profiles.length >= 1000 || reservationTickets.length >= 1000 || generalTickets.length >= 500 });
+  } catch (err) {
+    console.error('Chargement de la gestion des tickets impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/admin/ticket-manager/:channelId/step', async (req, res) => {
+  try {
+    const channelId = String(req.params.channelId || '').trim();
+    const step = String(req.body?.step || '').trim();
+    if (!channelId || channelId.length > 100) return res.status(400).json({ error: 'Identifiant de salon invalide.' });
+    if (!TICKET_WORKFLOW_LABELS.has(step)) return res.status(400).json({ error: 'Étape inconnue.' });
+
+    const database = await connect();
+    const profiles = database.collection('profils');
+    const logTickets = database.collection('logsticket');
+    const profile = await profiles.findOne({ reservationChannelId: channelId });
+    const ticket = await logTickets.findOne({ channelId });
+    if (!profile && !ticket) return res.status(404).json({ error: 'Ticket de réservation introuvable dans MongoDB.' });
+
+    const alreadyValidated = Boolean(profile && (profile.ficheStatus === 'validated' || profile.ficheValidatedAt || profile.ficheDiscordUrl));
+    if (profile?.traitsApplied && step !== 'complete') {
+      return res.status(409).json({ error: 'Les bonus/malus ont déjà été appliqués : le parcours ne peut plus être ramené en arrière automatiquement.' });
+    }
+    if (alreadyValidated && ['step1', 'step2', 'validation', 'rejected'].includes(step)) {
+      return res.status(409).json({ error: 'Cette fiche est déjà validée. Pour corriger un blocage, choisis l’étape 3 ou 4 plutôt que de revenir à la fiche initiale.' });
+    }
+    if (['stats', 'traits', 'complete'].includes(step) && !alreadyValidated) {
+      return res.status(409).json({ error: 'La fiche n’est pas marquée comme validée. Valide-la avant de passer aux statistiques ou aux traits.' });
+    }
+    if (step === 'traits' && profile && !profile.statsAllocated && !profile.statsRolled) {
+      return res.status(409).json({ error: 'Les statistiques doivent être enregistrées avant de passer aux bonus/malus.' });
+    }
+    if (step === 'complete' && profile && !profile.traitsApplied) {
+      return res.status(409).json({ error: 'La création ne peut être marquée comme terminée que lorsque les bonus/malus ont été appliqués.' });
+    }
+
+    const now = new Date();
+    const actorId = String(req.session.user?.id || 'site-admin');
+    const profileUpdate = {
+      ticketStep: step,
+      ticketStepUpdatedAt: now,
+      ticketStepUpdatedBy: actorId,
+      updatedAt: now,
+    };
+    if (step === 'validation') profileUpdate.ficheStatus = 'pending';
+    if (step === 'rejected') profileUpdate.ficheStatus = 'rejected';
+    if (step === 'stats' && profile && !profile.traitsApplied) {
+      // Retourner à l'étape des statistiques permet au joueur de les ressaisir.
+      // On conserve les valeurs précédentes comme proposition de départ.
+      profileUpdate.statsAllocationDraft = profile.stats || {};
+      profileUpdate.statsAllocated = false;
+      profileUpdate.statsRolled = false;
+      profileUpdate.statsAllocation = null;
+      profileUpdate.statsPointsUsed = 0;
+      profileUpdate.statsAllocatedAt = null;
+    }
+    if (profile) await profiles.updateOne({ _id: profile._id }, { $set: profileUpdate });
+    await logTickets.updateOne(
+      { channelId },
+      { $set: { channelId, ticketStep: step, ticketStepUpdatedAt: now, ticketStepUpdatedBy: actorId, updatedAt: now }, $setOnInsert: { userId: profile?.userId || null, createdAt: now } },
+      { upsert: true },
+    );
+
+    try {
+      await logAction({
+        ...req.session.user,
+        action: 'ticket_step_changed',
+        details: `A modifié l’étape du ticket ${profile?.nomPrenom || channelId} : ${TICKET_WORKFLOW_LABELS.get(step)}.`,
+        metadata: { channelId, profileId: profile?._id == null ? null : String(profile._id), step },
+      });
+    } catch (logError) {
+      console.error('Journalisation du changement d’étape impossible :', logError?.message || logError);
+    }
+
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, channelId, step, stepLabel: TICKET_WORKFLOW_LABELS.get(step), note: 'Clique sur Actualiser dans le ticket Discord pour reconstruire le panneau. Si le ticket était fermé, réouvre-le avant de l’actualiser.' });
+  } catch (err) {
+    console.error('Modification de l’étape du ticket impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/admin/data-manager/summary', async (req, res) => {
   try {
     const database = await connect();
