@@ -980,10 +980,17 @@ app.delete('/api/admin/data-manager/:type/:id', async (req, res) => {
         rumeurs: 'rumeurs',
       }[type];
       const collection = database.collection(collectionName);
-      const doc = await managerFindById(collection, id);
+      let doc = await managerFindById(collection, id);
+      let deleteFilter = doc ? { _id: doc._id } : null;
+      // La section Tickets affiche le channelId Discord : accepte donc aussi
+      // une suppression directe par channelId, pas uniquement par _id Mongo.
+      if (!doc && type === 'tickets') {
+        doc = await collection.findOne({ channelId: id });
+        if (doc) deleteFilter = { _id: doc._id };
+      }
       if (!doc) return res.status(404).json({ error: 'Enregistrement introuvable ou déjà supprimé.' });
       name = doc.recipeName || doc.typeName || doc.title || doc.name || doc.profileName || id;
-      const result = await collection.deleteOne({ _id: doc._id });
+      const result = await collection.deleteOne(deleteFilter);
       deleted[type] = result.deletedCount || 0;
     }
 

@@ -1684,7 +1684,33 @@ function ticketManagerRowHTML(row) {
         ${isReservation ? `<div class="ticket-manager-current-step">Étape actuelle : <strong>${escapeHtml(row.stepLabel || row.step || 'Inconnue')}</strong></div>` : ''}
         ${stageBlock}
       </div>
+      <button type="button" class="mongo-manager-delete" onclick="supprimerTicketDepuisManager('${jsAttr(row.kind)}','${jsAttr(row.channelId)}')"><span aria-hidden="true">🗑️</span> Supprimer le ticket</button>
     </article>`;
+}
+
+async function supprimerTicketDepuisManager(kind, channelId) {
+  const row = (state.ticketManagerRows || []).find(ticket => String(ticket.channelId) === String(channelId) && ticket.kind === kind);
+  if (!row) return toast('Ticket introuvable dans la liste. Actualise la page.', 'erreur');
+  const ok = await confirmerAction({
+    titre: 'Supprimer le ticket',
+    message: `Supprimer « ${row.label || channelId} » de la gestion des tickets MongoDB ? Le salon Discord ne sera pas supprimé.`,
+    texteValider: 'Supprimer définitivement',
+  });
+  if (!ok) return;
+  try {
+    const type = kind === 'reservation' ? 'reservations' : 'tickets';
+    const response = await apiFetch(`/api/admin/data-manager/${encodeURIComponent(type)}/${encodeURIComponent(channelId)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    toast('Ticket supprimé de MongoDB.', 'succes');
+    await chargerTicketManagerPage();
+  } catch (error) {
+    toast(`Suppression impossible : ${error.message}`, 'erreur');
+  }
 }
 
 async function modifierEtapeTicket(channelId) {
