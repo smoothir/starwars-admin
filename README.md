@@ -28,13 +28,11 @@ fonctionnent avec ce dépôt tel quel, sans rien changer.
    `npm start`.
 4. Dans l'onglet **Variables** du service, ajoute :
    - `MONGO_URI` → la même valeur que dans le `.env` du bot
-   - `CLIENT_ID`, `CLIENT_SECRET`, `GUILD_ID` → ceux de l'application Discord du bot
-   - `DISCORD_REDIRECT_URI` → `https://<ton-site>/auth/discord/callback`
-     (à déclarer aussi dans le portail développeur Discord → OAuth2 → Redirects)
-   - `SESSION_SECRET` → une longue valeur aléatoire (ex. `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
+   - `ADMIN_USER` → ex. `admin`
+   - `ADMIN_PASSWORD` → un mot de passe fort
    (pas besoin d'ajouter `PORT`, Railway le fournit automatiquement)
 5. Railway te donne une URL publique (`https://....up.railway.app`) c'est
-   ton site : la connexion se fait uniquement via Discord (rôle Staff requis).
+   ton site, protégé par l'authentification définie ci-dessus.
 
 ## Déployer sur Render
 
@@ -71,11 +69,10 @@ il ne se met pas à jour tout seul entre les deux dépôts).
 
 ## Sécurité
 
-- Toutes les infos sensibles (`MONGO_URI`, `CLIENT_SECRET`, `SESSION_SECRET`)
+- Toutes les infos sensibles (`MONGO_URI`, `ADMIN_USER`, `ADMIN_PASSWORD`)
   vivent uniquement dans les variables d'environnement de l'hébergeur
   jamais dans le code, jamais commitées.
 - Le repo GitHub peut être public sans risque tant que `.env` n'y est jamais
   poussé (le `.gitignore` fourni s'en charge).
-- Railway/Render fournissent du HTTPS automatiquement, donc les cookies de
-  session ne circulent jamais en clair.
-- Ne mets jamais de vraie valeur dans `.env.example` (il est versionné).
+- Railway/Render fournissent du HTTPS automatiquement, donc le mot de passe
+  ne circule jamais en clair.
