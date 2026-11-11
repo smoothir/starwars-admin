@@ -465,25 +465,36 @@ async function addItem(profileId, itemId, quantity = 1) {
   return { ok: true, item, quantity: doc.items[item.id] };
 }
 
-async function removeItem(profileId, itemId, quantity = 1) {
+async function removeItem(profileId, itemId, quantity = 1, { exact = false } = {}) {
   const item = await getItem(itemId);
   if (!item) return { ok: false, reason: 'unknown_item' };
 
   const col = await getInvCollection();
-  const doc = await col.findOne({ _id: profileId });
-  const current = doc?.items?.[item.id] || 0;
-  if (current <= 0) return { ok: false, reason: 'not_owned', item };
-
   const qty = Math.max(1, Math.floor(quantity) || 1);
-  const removed = Math.min(qty, current);
-  const remaining = current - removed;
+  const path = `items.${item.id}`;
 
-  if (remaining > 0) {
-    await col.updateOne({ _id: profileId }, { $set: { [`items.${item.id}`]: remaining, updatedAt: new Date() } });
-  } else {
-    await col.updateOne({ _id: profileId }, { $unset: { [`items.${item.id}`]: '' }, $set: { updatedAt: new Date() } });
+  // Écriture « optimiste » : on ne modifie que si la quantité n'a pas bougé depuis
+  // la lecture (filtre sur la valeur lue). Si le bot, le site ou un autre module a
+  // modifié l'inventaire entre-temps, on relit et on réessaie : plus de pertes ni
+  // de doublons d'objets en cas d'actions simultanées.
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const doc = await col.findOne({ _id: profileId }, { projection: { [path]: 1 } });
+    const current = Number(doc?.items?.[item.id]) || 0;
+
+    if (current <= 0) return { ok: false, reason: 'not_owned', item };
+    // exact: true => refuse (sans rien retirer) si le joueur n'en a pas assez.
+    if (exact && current < qty) return { ok: false, reason: 'insufficient', item, owned: current };
+
+    const removed = Math.min(qty, current);
+    const remaining = current - removed;
+    const update = remaining > 0
+      ? { $set: { [path]: remaining, updatedAt: new Date() } }
+      : { $unset: { [path]: '' }, $set: { updatedAt: new Date() } };
+
+    const result = await col.updateOne({ _id: profileId, [path]: current }, update);
+    if (result.matchedCount === 1) return { ok: true, item, quantity: remaining, removed };
   }
-  return { ok: true, item, quantity: remaining, removed };
+  return { ok: false, reason: 'conflict', item };
 }
 
 /** Fixe directement la quantité d'un objet (au lieu d'incrémenter/décrémenter). */

@@ -2804,7 +2804,18 @@ function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function escapeAttr(str) { return escapeHtml(str); }
-function jsAttr(str) { return String(str ?? '').replace(/'/g, "\\'"); }
+// Sert UNIQUEMENT dans un onclick="fn('...')" : 1) échappe la chaîne JS ('), 2) puis le HTML
+// (" < > &). Le navigateur décode le HTML avant d'exécuter le JS, donc \' reste \' côté JS.
+function jsAttr(str) {
+  const js = String(str ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+  return escapeHtml(js);
+}
 
 // -----------------------------------------------------------------------
 // BOUTIQUE : objets, prix et stock (affichage / achats / ventes sur Discord)

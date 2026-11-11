@@ -63,7 +63,48 @@ const { connect, getItemCatalogCollection, getBoutiqueItemsCollection, getBoutiq
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
 // en base64 dans le corps JSON  une photo fait facilement 1-4 Mo encodée.
-app.use(express.json({ limit: '10mb' }));
+// Seules les routes qui reçoivent des images en base64 (portraits, images du catalogue)
+// acceptent un gros corps JSON ; partout ailleurs la limite est de 1 Mo.
+// L'ordre compte : le 1er parser qui correspond lit le corps, les suivants l'ignorent.
+const bigJson = express.json({ limit: '10mb' });
+app.use('/api/profils', bigJson);
+app.use('/api/inventaire/catalogue', bigJson);
+app.use(express.json({ limit: '1mb' }));
+
+// En-têtes de sécurité de base (équivalent minimal de helmet, sans dépendance).
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('Referrer-Policy', 'same-origin');
+  next();
+});
+
+// Limiteur de débit simple en mémoire (par IP) : suffit pour une instance unique.
+function createRateLimiter({ windowMs, max, message }) {
+  const hits = new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of hits) if (entry.reset <= now) hits.delete(key);
+  }, windowMs).unref();
+  return (req, res, next) => {
+    const now = Date.now();
+    const key = req.ip || 'inconnu';
+    let entry = hits.get(key);
+    if (!entry || entry.reset <= now) {
+      entry = { count: 0, reset: now + windowMs };
+      hits.set(key, entry);
+    }
+    entry.count += 1;
+    if (entry.count > max) {
+      res.set('Retry-After', String(Math.ceil((entry.reset - now) / 1000)));
+      return res.status(429).json({ error: message });
+    }
+    next();
+  };
+}
+app.use('/auth', createRateLimiter({ windowMs: 10 * 60 * 1000, max: 40, message: 'Trop de tentatives de connexion, réessaie dans quelques minutes.' }));
+app.use('/api', createRateLimiter({ windowMs: 60 * 1000, max: 600, message: 'Trop de requêtes, ralentis un peu.' }));
 
 // --- Connexion Discord (OAuth2) : SEUL moyen d'accéder au site, réservé aux
 // membres du serveur Discord qui ont le rôle Staff (Data/config.js). ---
@@ -110,7 +151,9 @@ app.use(session({
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    // 'auto' : secure dès que la requête arrive en HTTPS (via trust proxy sur Render),
+    // sans dépendre de NODE_ENV=production.
+    secure: 'auto',
     maxAge: 7 * 24 * 60 * 60 * 1000,
   },
 }));
@@ -570,11 +613,15 @@ app.get('/auth/discord/callback', async (req, res) => {
       return res.redirect('/?auth_error=' + encodeURIComponent("Tu n'as pas le role Staff requis sur le serveur Discord, connexion refusee."));
     }
 
-    req.session.user = {
+    const sessionUser = {
       id: me.id,
       username: me.global_name || me.username,
       avatar: me.avatar ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=64` : null,
     };
+    // Nouvel identifiant de session à la connexion (anti « session fixation »).
+    await new Promise((resolve, reject) => req.session.regenerate(err => (err ? reject(err) : resolve())));
+    req.session.user = sessionUser;
+    await new Promise((resolve, reject) => req.session.save(err => (err ? reject(err) : resolve())));
 
     // Suivi des connexions + journal, pour le panel Admin (créateur uniquement).
     // Ne doit jamais empêcher la connexion elle-même si Mongo a un souci passager.

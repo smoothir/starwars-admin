@@ -21,11 +21,10 @@ pourra être étendu pour le gérer aussi.
 
 ## Sécurité
 
-- Les identifiants (`ADMIN_USER` / `ADMIN_PASSWORD`) ne sont **jamais** dans
-  le code  uniquement dans `.env` (donc jamais poussés sur GitHub si le
+- Les secrets (`CLIENT_SECRET`, `SESSION_SECRET`, `MONGO_URI`) ne sont **jamais**
+  dans le code  uniquement dans `.env` (donc jamais poussés sur GitHub si le
   `.gitignore` est en place).
-- Authentification HTTP Basic simple : suffisant pour un usage staff
-  restreint, mais un seul compte partagé, pas de rôles/permissions par
-  personne.
-- En production, utilise HTTPS (Railway/Render le font automatiquement) 
-  sinon le mot de passe circule en clair.
+- Authentification par Discord OAuth2 : seuls les membres ayant le rôle Staff
+  du serveur peuvent se connecter ; le panel Admin est réservé au créateur.
+- En production, utilise HTTPS (Railway/Render le font automatiquement) :
+  le cookie de session n'est marqué « secure » que sur une connexion HTTPS.
