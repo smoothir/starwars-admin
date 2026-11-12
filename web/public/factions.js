@@ -62,8 +62,8 @@ function facRender() {
   const tabs = list.map(f => `<button class="fac-tab ${f.key === facState.key ? 'active' : ''}" onclick="facChoisir('${jsAttr(f.key)}')">${escapeHtml(f.label)}<small>🚀 ${f.shipCount}</small></button>`).join('');
 
   const leaderControl = players.ready
-    ? `<div class="fac-row"><select id="fac-leader"><option value="">— Aucun chef —</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === state.leaderUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select><button class="btn-secondaire" onclick="facEnregistrerChef()">OK</button></div>`
-    : `<div class="fac-big">${state.leaderUserId ? escapeHtml(playerName(state.leaderUserId)) : '—'}</div><div class="fac-ship-class">Sans chef désigné, le plus haut gradé présent commande en bataille. Désignation via <code>/faction chef</code>.</div>`;
+    ? `<div class="fac-row"><select id="fac-leader" class="fac-select"><option value="">Aucun chef désigné</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === state.leaderUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select><button class="btn-secondaire fac-btn" onclick="facEnregistrerChef()">Valider</button></div><div class="fac-hint">Sans chef, le plus haut gradé présent commande en bataille.</div>`
+    : `<div class="fac-value">${state.leaderUserId ? escapeHtml(playerName(state.leaderUserId)) : 'Aucun chef désigné'}</div><div class="fac-hint">Sans chef, le plus haut gradé présent commande en bataille. Désignation sur Discord avec <code>/faction chef</code>.</div>`;
 
   const creditItem = meta.creditsItemId;
   const otherItems = Object.entries(state.items).filter(([id]) => id !== creditItem);
@@ -77,24 +77,24 @@ function facRender() {
 
     <div class="fac-summary">
       <div class="fac-card"><h4>👑 Chef de faction</h4>${leaderControl}</div>
-      <div class="fac-card"><h4>🪖 Troupes</h4><div class="fac-row"><input id="fac-troops" type="number" min="0" value="${state.troops}"><button class="btn-secondaire" onclick="facEnregistrerTroupes()">Enregistrer</button></div></div>
-      <div class="fac-card"><h4>💰 Crédits</h4><div class="fac-row"><input id="fac-credits" type="number" min="0" value="${state.credits}"><button class="btn-secondaire" onclick="facEnregistrerCredits()">Enregistrer</button></div></div>
+      <div class="fac-card"><h4>🪖 Troupes</h4><div class="fac-row"><input id="fac-troops" class="fac-input" type="number" min="0" value="${state.troops}" placeholder="Nombre de soldats"><button class="btn-secondaire fac-btn" onclick="facEnregistrerTroupes()">Enregistrer</button></div><div class="fac-hint">Effectif total de la faction (utilisé par le recrutement et le massacre).</div></div>
+      <div class="fac-card"><h4>💰 Crédits</h4><div class="fac-row"><input id="fac-credits" class="fac-input" type="number" min="0" value="${state.credits}" placeholder="Montant en crédits"><button class="btn-secondaire fac-btn" onclick="facEnregistrerCredits()">Enregistrer</button></div><div class="fac-hint">Trésorerie de la faction (pillée en cas de défaite).</div></div>
     </div>
 
     <div class="fac-section">
-      <div class="fac-section-head"><div><h3>🚀 Vaisseaux (${ships.length})</h3><p>Propriété de la faction, attribués à un joueur selon son grade.</p></div><button class="btn-principal" onclick="facOuvrirVaisseau(null)">＋ Nouveau vaisseau</button></div>
-      <div class="fac-ships">${ships.map(s => facShipHTML(s)).join('') || '<div class="fac-note">Aucun vaisseau : crée le premier avec « Nouveau vaisseau ».</div>'}</div>
+      <div class="fac-section-head"><div><h3>🚀 Vaisseaux (${ships.length})</h3><p>Propriété de la faction, attribués à un joueur selon son grade.</p></div><button class="btn-principal" onclick="facOuvrirVaisseau(null)">+ Nouveau vaisseau</button></div>
+      ${ships.length ? `<div class="fac-ships">${ships.map(s => facShipHTML(s)).join('')}</div>` : '<div class="fac-note">Aucun vaisseau pour le moment. Crée le premier avec « Nouveau vaisseau ».</div>'}
     </div>
 
     <div class="fac-section">
       <div class="fac-section-head"><div><h3>👥 Joueurs de la faction</h3><p>Grades militaires lus depuis les rôles Discord.</p></div></div>
-      ${players.ready ? facPlayersHTML(ships) : '<div class="fac-note">Pour lister les joueurs et attribuer des vaisseaux depuis le site, ajoute <code>DISCORD_BOT_TOKEN</code> dans le .env du site. En attendant, utilise <code>/faction joueurs</code> et <code>/faction attribuer</code> sur Discord.</div>'}
+      ${players.ready ? facPlayersHTML(ships) : '<div class="fac-note">Pour lister les joueurs et attribuer des vaisseaux depuis le site, ajoute <code>DISCORD_BOT_TOKEN</code> dans le fichier <code>.env</code> du site. En attendant, utilise <code>/faction joueurs</code> et <code>/faction attribuer</code> sur Discord.</div>'}
     </div>
 
     <div class="fac-section">
       <div class="fac-section-head"><div><h3>🎒 Inventaire de faction</h3><p>Objets stockés par la faction (hors crédits).</p></div></div>
-      <div class="fac-items">${otherItems.map(([id, qty]) => { const info = facItemInfo(id); return `<div class="fac-item"><span>${escapeHtml(info.emoji)}</span><span class="fac-item-name" title="${escapeAttr(id)}">${escapeHtml(info.name)}</span><input type="number" min="0" value="${qty}" onchange="facSetItem('${jsAttr(id)}', this.value)"></div>`; }).join('') || '<div class="fac-note">Inventaire vide.</div>'}</div>
-      <div class="fac-row"><select id="fac-new-item"><option value="">Ajouter un objet…</option>${itemOptions}</select><input id="fac-new-qty" type="number" min="1" value="1" style="max-width:110px"><button class="btn-secondaire" onclick="facAjouterObjet()">Ajouter</button></div>
+      ${otherItems.length ? `<div class="fac-items">${otherItems.map(([id, qty]) => { const info = facItemInfo(id); return `<div class="fac-item"><span>${escapeHtml(info.emoji)}</span><span class="fac-item-name" title="${escapeAttr(id)}">${escapeHtml(info.name)}</span><input class="fac-input" type="number" min="0" value="${qty}" onchange="facSetItem('${jsAttr(id)}', this.value)"></div>`; }).join('')}</div>` : '<div class="fac-note" style="margin-bottom:18px">Inventaire vide.</div>'}
+      <div class="fac-add"><select id="fac-new-item" class="fac-select"><option value="">Ajouter un objet…</option>${itemOptions}</select><input id="fac-new-qty" class="fac-input" type="number" min="1" value="1" placeholder="Quantité"><button class="btn-secondaire fac-btn" onclick="facAjouterObjet()">Ajouter</button></div>
     </div>`;
 }
 
@@ -102,18 +102,18 @@ function facShipHTML(s) {
   const cls = facState.meta.classes.find(c => c.key === s.classKey);
   const players = facState.players;
   const pilotSelect = players.ready
-    ? `<select onchange="facAssigner('${jsAttr(s.id)}', this.value)"><option value="">— Non attribué —</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === s.assignedUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select>`
-    : `<div class="fac-ship-class">Pilote : ${s.assignedUserId ? 'ID ' + escapeHtml(s.assignedUserId) : 'non attribué'}</div>`;
+    ? `<div><span class="fac-label">Pilote</span><select class="fac-select" onchange="facAssigner('${jsAttr(s.id)}', this.value)"><option value="">Non attribué</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === s.assignedUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select></div>`
+    : `<div><span class="fac-label">Pilote</span><div class="fac-hint">${s.assignedUserId ? 'ID ' + escapeHtml(s.assignedUserId) : 'Non attribué'}</div></div>`;
   return `<div class="fac-ship">
     <div class="fac-ship-top"><strong class="fac-ship-name">${escapeHtml(s.name)}</strong><span class="fac-ship-class">${escapeHtml(s.className)}</span></div>
     <div class="fac-stats">
-      <div><span>PV</span> ${facNum(s.hp)}/${facNum(s.hpMax)}</div><div><span>Bouclier</span> ${facNum(s.shield)}</div>
-      <div><span>Équipage</span> ${facNum(s.crew)}</div><div><span>Portée</span> ${s.range} cases</div>
-      <div><span>Barrage</span> ${facNum(s.barrage)}</div><div><span>Tir ciblé</span> ${facNum(s.focus)}</div>
-      <div><span>Escadrons</span> ${facNum(s.squadrons)}</div><div><span>Grade requis</span> ${escapeHtml(cls?.requirement || '—')}</div>
+      <div><span>Points de vie</span>${facNum(s.hp)} / ${facNum(s.hpMax)}</div><div><span>Bouclier</span>${facNum(s.shield)} / ${facNum(s.shieldMax)}</div>
+      <div><span>Équipage</span>${facNum(s.crew)} / ${facNum(s.crewMax)}</div><div><span>Portée</span>${s.range} cases</div>
+      <div><span>Tir de barrage</span>${facNum(s.barrage)}</div><div><span>Tir ciblé</span>${facNum(s.focus)}</div>
+      <div><span>Escadrons</span>${facNum(s.squadrons)}</div><div><span>Grade requis</span>${escapeHtml(cls?.requirement || '—')}</div>
     </div>
     ${pilotSelect}
-    <div class="fac-ship-actions"><button class="btn-modifier" onclick="facOuvrirVaisseau('${jsAttr(s.id)}')">✏️ Modifier</button><button class="btn-danger btn-secondaire" onclick="facSupprimerVaisseau('${jsAttr(s.id)}')">🗑️ Supprimer</button></div>
+    <div class="fac-ship-actions"><button class="btn-modifier" onclick="facOuvrirVaisseau('${jsAttr(s.id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="facSupprimerVaisseau('${jsAttr(s.id)}')">Supprimer</button></div>
   </div>`;
 }
 
@@ -122,7 +122,7 @@ function facPlayersHTML(ships) {
     const mine = ships.filter(s => s.assignedUserId === p.id).map(s => escapeHtml(s.name));
     return `<tr><td>${p.avatar ? `<img class="fac-avatar" src="${escapeAttr(p.avatar)}" alt="">` : ''}${escapeHtml(p.name)}${p.isLeader ? ' 👑' : ''}</td><td>${p.rankName ? `<span class="fac-badge">${escapeHtml(p.rankName)}</span>` : '<span style="opacity:.5">—</span>'}</td><td>${mine.join(', ') || '<span style="opacity:.5">—</span>'}</td></tr>`;
   }).join('');
-  return `<div style="overflow-x:auto"><table class="fac-table"><thead><tr><th>Joueur</th><th>Grade</th><th>Vaisseau(x)</th></tr></thead><tbody>${rows || '<tr><td colspan="3" style="opacity:.6">Aucun joueur trouvé.</td></tr>'}</tbody></table></div>`;
+  return `<div class="fac-table-wrap"><table class="fac-table"><thead><tr><th>Joueur</th><th>Grade</th><th>Vaisseau(x)</th></tr></thead><tbody>${rows || '<tr><td colspan="3" style="opacity:.6">Aucun joueur trouvé.</td></tr>'}</tbody></table></div>`;
 }
 
 // ------------------------------------------------------------------ actions
@@ -171,18 +171,18 @@ function facOuvrirVaisseau(shipId) {
   overlay.id = 'fac-overlay';
   overlay.className = 'fac-overlay';
   overlay.onclick = (e) => { if (e.target === overlay) facFermerModale(); };
-  const field = (id, label, value, extra = '') => `<label>${label}<input id="${id}" type="number" min="0" value="${value}" ${extra}></label>`;
+  const field = (id, label, value, extra = '') => `<label><span class="fac-label">${label}</span><input id="${id}" class="fac-input" type="number" min="0" value="${value}" ${extra}></label>`;
   overlay.innerHTML = `<div class="fac-modal">
     <h3>${ship ? 'Modifier le vaisseau' : 'Nouveau vaisseau'}</h3>
     <div class="fac-form">
-      <label class="full">Nom<input id="fv-name" type="text" maxlength="60" value="${escapeAttr(v.name)}" placeholder="ex. Vengeance"></label>
-      <label class="full">Classe<select id="fv-class" onchange="facAppliquerClasse()">${classes.map(c => `<option value="${escapeAttr(c.key)}" ${c.key === v.classKey ? 'selected' : ''}>${escapeHtml(c.label)} (${escapeHtml(c.size)}) — ${escapeHtml(c.requirement)}</option>`).join('')}</select></label>
+      <label class="full"><span class="fac-label">Nom du vaisseau</span><input id="fv-name" class="fac-input" type="text" maxlength="60" value="${escapeAttr(v.name)}" placeholder="Ex. Vengeance, Faucon d'Argent…" autocomplete="off"></label>
+      <label class="full"><span class="fac-label">Classe</span><select id="fv-class" class="fac-select" onchange="facAppliquerClasse()">${classes.map(c => `<option value="${escapeAttr(c.key)}" ${c.key === v.classKey ? 'selected' : ''}>${escapeHtml(c.label)} (${escapeHtml(c.size)}) — ${escapeHtml(c.requirement)}</option>`).join('')}</select></label>
       ${field('fv-hp', 'PV max', v.hpMax, 'min="1"')}${field('fv-shield', 'Bouclier max', v.shieldMax)}
       ${field('fv-crew', 'Équipage max', v.crewMax)}${field('fv-range', 'Portée (cases)', v.range, 'min="1"')}
       ${field('fv-barrage', 'Dégâts tir de barrage', v.barrage)}${field('fv-focus', 'Dégâts tir ciblé', v.focus)}
       ${field('fv-squadrons', 'Escadrons de chasseurs', v.squadrons)}
     </div>
-    ${ship ? '<p class="fac-ship-class" style="margin-top:12px">Enregistrer remet PV, bouclier et équipage au maximum.</p>' : ''}
+    ${ship ? '<p class="fac-hint" style="margin-top:14px">Enregistrer remet les PV, le bouclier et l\'équipage au maximum.</p>' : '<p class="fac-hint" style="margin-top:14px">Choisir une classe pré-remplit des statistiques de départ : tu peux toutes les modifier.</p>'}
     <div class="fac-modal-actions"><button class="btn-secondaire" onclick="facFermerModale()">Annuler</button><button class="btn-principal" onclick="facSauverVaisseau(${ship ? `'${jsAttr(ship.id)}'` : 'null'})">${ship ? 'Enregistrer' : 'Créer'}</button></div>
   </div>`;
   document.body.appendChild(overlay);
