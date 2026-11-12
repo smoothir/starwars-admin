@@ -126,8 +126,8 @@ function normalizeShipFields(body, { partial = false } = {}) {
   const cls = SHIP_CLASSES[out.classKey || b.classKey];
   const d = cls?.defaults || {};
   // Valeurs par défaut de la classe, indexées par le nom du champ du vaisseau.
-  const fallback = { hpMax: d.hp, shieldMax: d.shield, crewMax: d.crew, range: d.range, barrage: d.barrage, focus: d.focus, squadrons: cls?.squadrons };
-  const limits = { hpMax: { min: 1, max: 1_000_000 }, shieldMax: { max: 1_000_000 }, crewMax: { max: 1_000_000 }, range: { min: 1, max: 50 }, barrage: { max: 100_000 }, focus: { max: 100_000 }, squadrons: { max: 1000 } };
+  const fallback = { hpMax: d.hp, shieldMax: d.shield, crewMax: d.crew, range: d.range, barrage: d.barrage, focus: d.focus, squadrons: cls?.squadrons, mapWidth: d.mapWidth, mapLength: d.mapLength };
+  const limits = { hpMax: { min: 1, max: 1_000_000 }, shieldMax: { max: 1_000_000 }, crewMax: { max: 1_000_000 }, range: { min: 1, max: 50 }, barrage: { max: 100_000 }, focus: { max: 100_000 }, squadrons: { max: 1000 }, mapWidth: { min: 1, max: 6 }, mapLength: { min: 1, max: 10 } };
   for (const field of Object.keys(fallback)) {
     if (partial && b[field] === undefined) continue;
     const raw = b[field] === undefined || b[field] === null || b[field] === '' ? fallback[field] : b[field];
@@ -148,6 +148,8 @@ function shipFromDoc(doc) {
     shieldMax: toInt(doc.shieldMax), shield: toInt(doc.shield ?? doc.shieldMax),
     crewMax: toInt(doc.crewMax), crew: toInt(doc.crew ?? doc.crewMax),
     squadrons: toInt(doc.squadrons),
+    mapWidth: toInt(doc.mapWidth, { min: 1, max: 6, fallback: SHIP_CLASSES[doc.classKey]?.defaults?.mapWidth || 1 }),
+    mapLength: toInt(doc.mapLength, { min: 1, max: 10, fallback: SHIP_CLASSES[doc.classKey]?.defaults?.mapLength || 1 }),
     range: toInt(doc.range, { min: 1, max: 50, fallback: 1 }),
     barrage: toInt(doc.barrage), focus: toInt(doc.focus),
     assignedUserId: doc.assignedUserId || null,

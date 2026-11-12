@@ -17,14 +17,14 @@ const RANKS = [
 // Les statistiques par défaut servent de modèle à la création d'un vaisseau sur le site
 // (tout reste modifiable vaisseau par vaisseau).
 const SHIP_CLASSES = {
-  TRANSPORT:        { label: 'Transport spatial',   size: '< 100 m',          squadrons: 0,   minRank: 0, defaults: { hp: 300,    shield: 100,   range: 3, crew: 20,   barrage: 5,   focus: 10 } },
-  CORVETTE:         { label: 'Corvette',            size: '100 – 200 m',      squadrons: 2,   minRank: 0, defaults: { hp: 600,    shield: 250,   range: 4, crew: 60,   barrage: 12,  focus: 30 } },
-  FREGATE:          { label: 'Frégate',             size: '200 – 400 m',      squadrons: 6,   minRank: 1, defaults: { hp: 1200,   shield: 500,   range: 5, crew: 200,  barrage: 25,  focus: 60 } },
-  CROISEUR_LEGER:   { label: 'Croiseur léger',      size: '400 – 600 m',      squadrons: 12,  minRank: 1, defaults: { hp: 2000,   shield: 800,   range: 6, crew: 400,  barrage: 40,  focus: 100 } },
-  CROISEUR_LOURD:   { label: 'Croiseur lourd',      size: '600 – 1 000 m',    squadrons: 25,  minRank: 2, defaults: { hp: 3500,   shield: 1400,  range: 7, crew: 800,  barrage: 60,  focus: 160 } },
-  DESTROYER:        { label: 'Destroyer stellaire', size: '1 000 – 2 000 m',  squadrons: 80,  minRank: 3, defaults: { hp: 6000,   shield: 2500,  range: 8, crew: 2500, barrage: 100, focus: 260 } },
-  CROISEUR_BATAILLE:{ label: 'Croiseur de bataille',size: '2 000 – 5 000 m',  squadrons: 130, leaderOnly: true, defaults: { hp: 10000,  shield: 4500,  range: 9, crew: 5000, barrage: 160, focus: 400 } },
-  CUIRASSE:         { label: 'Cuirassé',            size: '> 5 000 m',        squadrons: 200, leaderOnly: true, defaults: { hp: 16000,  shield: 7000,  range: 10, crew: 9000, barrage: 240, focus: 600 } },
+  TRANSPORT:        { label: 'Transport spatial',   size: '< 100 m',          squadrons: 0,   minRank: 0, defaults: { hp: 300,    shield: 100,   range: 3, crew: 20,   barrage: 5,   focus: 10, mapWidth: 1, mapLength: 1 } },
+  CORVETTE:         { label: 'Corvette',            size: '100 – 200 m',      squadrons: 2,   minRank: 0, defaults: { hp: 600,    shield: 250,   range: 4, crew: 60,   barrage: 12,  focus: 30, mapWidth: 1, mapLength: 2 } },
+  FREGATE:          { label: 'Frégate',             size: '200 – 400 m',      squadrons: 6,   minRank: 1, defaults: { hp: 1200,   shield: 500,   range: 5, crew: 200,  barrage: 25,  focus: 60, mapWidth: 2, mapLength: 2 } },
+  CROISEUR_LEGER:   { label: 'Croiseur léger',      size: '400 – 600 m',      squadrons: 12,  minRank: 1, defaults: { hp: 2000,   shield: 800,   range: 6, crew: 400,  barrage: 40,  focus: 100, mapWidth: 2, mapLength: 3 } },
+  CROISEUR_LOURD:   { label: 'Croiseur lourd',      size: '600 – 1 000 m',    squadrons: 25,  minRank: 2, defaults: { hp: 3500,   shield: 1400,  range: 7, crew: 800,  barrage: 60,  focus: 160, mapWidth: 2, mapLength: 4 } },
+  DESTROYER:        { label: 'Destroyer stellaire', size: '1 000 – 2 000 m',  squadrons: 80,  minRank: 3, defaults: { hp: 6000,   shield: 2500,  range: 8, crew: 2500, barrage: 100, focus: 260, mapWidth: 3, mapLength: 4 } },
+  CROISEUR_BATAILLE:{ label: 'Croiseur de bataille',size: '2 000 – 5 000 m',  squadrons: 130, leaderOnly: true, defaults: { hp: 10000,  shield: 4500,  range: 9, crew: 5000, barrage: 160, focus: 400, mapWidth: 3, mapLength: 5 } },
+  CUIRASSE:         { label: 'Cuirassé',            size: '> 5 000 m',        squadrons: 200, leaderOnly: true, defaults: { hp: 16000,  shield: 7000,  range: 10, crew: 9000, barrage: 240, focus: 600, mapWidth: 4, mapLength: 5 } },
 };
 
 // Ordre de taille (du plus petit au plus grand) : utile pour le rayon tracteur plus tard.

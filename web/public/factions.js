@@ -110,7 +110,7 @@ function facShipHTML(s) {
       <div><span>Points de vie</span>${facNum(s.hp)} / ${facNum(s.hpMax)}</div><div><span>Bouclier</span>${facNum(s.shield)} / ${facNum(s.shieldMax)}</div>
       <div><span>Équipage</span>${facNum(s.crew)} / ${facNum(s.crewMax)}</div><div><span>Portée</span>${s.range} cases</div>
       <div><span>Tir de barrage</span>${facNum(s.barrage)}</div><div><span>Tir ciblé</span>${facNum(s.focus)}</div>
-      <div><span>Escadrons</span>${facNum(s.squadrons)}</div><div><span>Grade requis</span>${escapeHtml(cls?.requirement || '—')}</div>
+      <div><span>Escadrons</span>${facNum(s.squadrons)}</div><div><span>Cases sur la carte</span>${facNum(s.mapWidth || 1)} × ${facNum(s.mapLength || 1)}</div><div><span>Grade requis</span>${escapeHtml(cls?.requirement || '—')}</div>
     </div>
     ${pilotSelect}
     <div class="fac-ship-actions"><button class="btn-modifier" onclick="facOuvrirVaisseau('${jsAttr(s.id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="facSupprimerVaisseau('${jsAttr(s.id)}')">Supprimer</button></div>
@@ -164,8 +164,8 @@ function facOuvrirVaisseau(shipId) {
   const ship = shipId ? facState.data.ships.find(s => s.id === shipId) : null;
   const classes = facState.meta.classes;
   const base = ship || { classKey: classes[0].key, ...Object.fromEntries(Object.entries(classes[0].defaults).map(([k, v]) => [k, v])), squadrons: classes[0].squadrons };
-  const v = ship ? { name: ship.name, classKey: ship.classKey, hpMax: ship.hpMax, shieldMax: ship.shieldMax, range: ship.range, crewMax: ship.crewMax, squadrons: ship.squadrons, barrage: ship.barrage, focus: ship.focus }
-    : { name: '', classKey: base.classKey, hpMax: base.hp, shieldMax: base.shield, range: base.range, crewMax: base.crew, squadrons: base.squadrons, barrage: base.barrage, focus: base.focus };
+  const v = ship ? { name: ship.name, classKey: ship.classKey, hpMax: ship.hpMax, shieldMax: ship.shieldMax, range: ship.range, crewMax: ship.crewMax, squadrons: ship.squadrons, barrage: ship.barrage, focus: ship.focus, mapWidth: ship.mapWidth || 1, mapLength: ship.mapLength || 1 }
+    : { name: '', classKey: base.classKey, hpMax: base.hp, shieldMax: base.shield, range: base.range, crewMax: base.crew, squadrons: base.squadrons, barrage: base.barrage, focus: base.focus, mapWidth: base.mapWidth || 1, mapLength: base.mapLength || 1 };
   facFermerModale();
   const overlay = document.createElement('div');
   overlay.id = 'fac-overlay';
@@ -181,6 +181,8 @@ function facOuvrirVaisseau(shipId) {
       ${field('fv-crew', 'Équipage max', v.crewMax)}${field('fv-range', 'Portée (cases)', v.range, 'min="1"')}
       ${field('fv-barrage', 'Dégâts tir de barrage', v.barrage)}${field('fv-focus', 'Dégâts tir ciblé', v.focus)}
       ${field('fv-squadrons', 'Escadrons de chasseurs', v.squadrons)}
+      ${field('fv-map-width', 'Largeur sur la carte (cases)', v.mapWidth, 'min="1" max="6"')}
+      ${field('fv-map-length', 'Longueur sur la carte (cases)', v.mapLength, 'min="1" max="10"')}
     </div>
     ${ship ? '<p class="fac-hint" style="margin-top:14px">Enregistrer remet les PV, le bouclier et l\'équipage au maximum.</p>' : '<p class="fac-hint" style="margin-top:14px">Choisir une classe pré-remplit des statistiques de départ : tu peux toutes les modifier.</p>'}
     <div class="fac-modal-actions"><button class="btn-secondaire" onclick="facFermerModale()">Annuler</button><button class="btn-principal" onclick="facSauverVaisseau(${ship ? `'${jsAttr(ship.id)}'` : 'null'})">${ship ? 'Enregistrer' : 'Créer'}</button></div>
@@ -197,6 +199,7 @@ function facAppliquerClasse() {
   set('fv-hp', cls.defaults.hp); set('fv-shield', cls.defaults.shield); set('fv-crew', cls.defaults.crew);
   set('fv-range', cls.defaults.range); set('fv-barrage', cls.defaults.barrage); set('fv-focus', cls.defaults.focus);
   set('fv-squadrons', cls.squadrons);
+  set('fv-map-width', cls.defaults.mapWidth || 1); set('fv-map-length', cls.defaults.mapLength || 1);
 }
 
 async function facSauverVaisseau(shipId) {
@@ -206,6 +209,7 @@ async function facSauverVaisseau(shipId) {
     hpMax: Number(val('fv-hp')), shieldMax: Number(val('fv-shield')), crewMax: Number(val('fv-crew')),
     range: Number(val('fv-range')), barrage: Number(val('fv-barrage')), focus: Number(val('fv-focus')),
     squadrons: Number(val('fv-squadrons')),
+    mapWidth: Number(val('fv-map-width')), mapLength: Number(val('fv-map-length')),
   };
   try {
     if (shipId) await facApi(facUrl(`/vaisseaux/${encodeURIComponent(shipId)}`), 'PUT', body);
