@@ -66,7 +66,7 @@ async function listLogs(limit = 200) {
   return col.find({}).sort({ timestamp: -1 }).limit(limit).toArray();
 }
 
-const BACKUP_COLLECTIONS = ['profils', 'inv', 'item_catalog', 'avatars', 'avatars_config', 'craft_recipes'];
+const BACKUP_COLLECTIONS = ['profils', 'inv', 'item_catalog', 'avatars', 'avatars_config', 'craft_recipes', 'factions', 'faction_ships'];
 const MAX_BACKUPS = 20;
 const BACKUP_BATCH_SIZE = 100;
 

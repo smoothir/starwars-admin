@@ -338,6 +338,11 @@ async function chargerDonnees(collection) {
     document.getElementById('titre-section').textContent = 'Primes';
     document.getElementById('sous-titre').textContent = 'Gère les primes des personnages. Les fiches actives sont publiées automatiquement dans le forum Discord des primes.';
     await chargerPrimesPage();
+  } else if (collection === 'factions') {
+    searchWrap.hidden = true;
+    document.getElementById('titre-section').textContent = 'Factions';
+    document.getElementById('sous-titre').textContent = 'Troupes, chef, vaisseaux, joueurs et inventaire de chaque faction.';
+    await chargerFactionsPage();
   } else if (collection === 'admin') {
     searchWrap.hidden = true;
     document.getElementById('titre-section').textContent = 'Admin';

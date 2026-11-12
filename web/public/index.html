@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Star wars : Mirage Admin</title>
 <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="factions.css">
 <link rel="icon" href="logoad.jpg">
 </head>
 <body>
@@ -102,6 +103,10 @@
           <span class="nav-icon" aria-hidden="true">🎯</span>
           <span class="nav-label">Primes</span>
         </button>
+        <button class="nav-btn" data-collection="factions" onclick="chargerDonnees('factions')">
+          <span class="nav-icon" aria-hidden="true">🏴</span>
+          <span class="nav-label">Factions</span>
+        </button>
 <button class="nav-btn" data-collection="admin" onclick="chargerDonnees('admin')" id="nav-admin" hidden>
           <span class="nav-icon" aria-hidden="true">🛡️</span>
           <span class="nav-label">Admin</span>
@@ -171,5 +176,6 @@
   <div id="toast-container" class="toast-container"></div>
 
   <script src="app.js"></script>
+  <script src="factions.js"></script>
 </body>
 </html>

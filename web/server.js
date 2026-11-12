@@ -1653,6 +1653,9 @@ app.delete('/api/boutique/:itemId', async (req, res) => {
 });
 
 
+// Catégorie « Factions » (troupes, chef, vaisseaux, inventaire) — protégée par le middleware /api ci-dessus.
+require('./factionRoutes.js').register(app, { logFromReq });
+
 app.listen(PORT, () => {
   console.log(`✅ Site admin lancé sur http://localhost:${PORT}`);
 });
