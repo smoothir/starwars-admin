@@ -19,9 +19,8 @@ const facNum = (n) => Number(n || 0).toLocaleString('fr-FR');
 async function chargerFactionsPage() {
   const contenu = document.getElementById('contenu');
   contenu.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
-  // Le catalogue n'est pas nécessaire pour afficher les factions : on le charge en parallèle,
-  // sans retarder l'affichage des vaisseaux et des données principales.
-  void facChargerCatalogue().catch(() => {});
+  // Le catalogue peut être volumineux : il sera chargé uniquement à l'ouverture
+  // du sélecteur d'inventaire, sans ralentir l'affichage initial de la faction.
   try {
     const [meta, list] = await Promise.all([
       facApi('/api/factions/meta'),
@@ -176,7 +175,7 @@ function facRender() {
     <div class="fac-section">
       <div class="fac-section-head"><div><h3>🎒 Inventaire de faction</h3><p>Objets stockés par la faction (hors crédits).</p></div></div>
       ${otherItems.length ? `<div class="fac-items">${otherItems.map(([id, qty]) => { const info = facItemInfo(id); return `<div class="fac-item"><span>${escapeHtml(info.emoji)}</span><span class="fac-item-name" title="${escapeAttr(id)}">${escapeHtml(info.name)}</span><input class="fac-input" type="number" min="0" value="${qty}" onchange="facSetItem('${jsAttr(id)}', this.value)"></div>`; }).join('')}</div>` : '<div class="fac-note" style="margin-bottom:18px">Inventaire vide.</div>'}
-      <div class="fac-add"><select id="fac-new-item" class="fac-select"><option value="">${facState.catalogueLoaded ? 'Ajouter un objet…' : 'Chargement du catalogue…'}</option>${facState.catalogue.map(c => `<option value="${escapeAttr(c.id ?? c._id)}">${escapeHtml((c.emoji || '') + ' ' + (c.name || c.id))}</option>`).join('')}</select><input id="fac-new-qty" class="fac-input" type="number" min="1" value="1" placeholder="Quantité"><button class="btn-secondaire fac-btn" onclick="facAjouterObjet()">Ajouter</button></div>
+      <div class="fac-add"><select id="fac-new-item" class="fac-select" onfocus="facChargerCatalogue().catch(err => toast(err.message, 'erreur'))"><option value="">${facState.catalogueLoaded ? 'Ajouter un objet…' : 'Charger le catalogue…'}</option>${facState.catalogue.map(c => `<option value="${escapeAttr(c.id ?? c._id)}">${escapeHtml((c.emoji || '') + ' ' + (c.name || c.id))}</option>`).join('')}</select><input id="fac-new-qty" class="fac-input" type="number" min="1" value="1" placeholder="Quantité"><button class="btn-secondaire fac-btn" onclick="facAjouterObjet()">Ajouter</button></div>
     </div>`;
 }
 
