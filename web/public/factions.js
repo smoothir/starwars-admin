@@ -79,6 +79,7 @@ function facRender() {
       <div class="fac-card"><h4>👑 Chef de faction</h4>${leaderControl}</div>
       <div class="fac-card"><h4>🪖 Troupes</h4><div class="fac-row"><input id="fac-troops" class="fac-input" type="number" min="0" value="${state.troops}" placeholder="Nombre de soldats"><button class="btn-secondaire fac-btn" onclick="facEnregistrerTroupes()">Enregistrer</button></div><div class="fac-hint">Effectif total de la faction (utilisé par le recrutement et le massacre).</div></div>
       <div class="fac-card"><h4>💰 Crédits</h4><div class="fac-row"><input id="fac-credits" class="fac-input" type="number" min="0" value="${state.credits}" placeholder="Montant en crédits"><button class="btn-secondaire fac-btn" onclick="facEnregistrerCredits()">Enregistrer</button></div><div class="fac-hint">Trésorerie de la faction (pillée en cas de défaite).</div></div>
+      <div class="fac-card"><h4>⭐ Réputation</h4><div class="fac-row"><input id="fac-reputation" class="fac-input" type="number" min="0" max="100" value="${state.reputation ?? 50}" placeholder="0 à 100"><button class="btn-secondaire fac-btn" onclick="facEnregistrerReputation()">Enregistrer</button></div><div class="fac-hint">Réputation diplomatique de la faction, de 0 (détestée) à 100 (prestigieuse).</div></div>
     </div>
 
     <div class="fac-section">
@@ -98,22 +99,36 @@ function facRender() {
     </div>`;
 }
 
+function facFootprintHTML(width, length) {
+  const w = Math.max(1, Math.min(6, Number(width) || 1));
+  const l = Math.max(1, Math.min(10, Number(length) || 1));
+  return `<div class="fac-footprint" style="--footprint-w:${w};--footprint-l:${l}" aria-label="Empreinte ${w} par ${l}">${Array.from({ length: w * l }, () => '<i></i>').join('')}</div>`;
+}
+
 function facShipHTML(s) {
   const cls = facState.meta.classes.find(c => c.key === s.classKey);
   const players = facState.players;
   const pilotSelect = players.ready
     ? `<div><span class="fac-label">Pilote</span><select class="fac-select" onchange="facAssigner('${jsAttr(s.id)}', this.value)"><option value="">Non attribué</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === s.assignedUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select></div>`
     : `<div><span class="fac-label">Pilote</span><div class="fac-hint">${s.assignedUserId ? 'ID ' + escapeHtml(s.assignedUserId) : 'Non attribué'}</div></div>`;
+  const damaged = s.hp < s.hpMax || s.shield < s.shieldMax || s.crew < s.crewMax;
   return `<div class="fac-ship">
+    ${cls?.image ? `<img class="fac-ship-image" src="${escapeAttr(cls.image)}" alt="Illustration ${escapeAttr(cls.label)}" loading="lazy">` : '<div class="fac-ship-image fac-ship-image-empty">Aucune image de classe</div>'}
     <div class="fac-ship-top"><strong class="fac-ship-name">${escapeHtml(s.name)}</strong><span class="fac-ship-class">${escapeHtml(s.className)}</span></div>
+    <div class="fac-class-meta"><span>${escapeHtml(cls?.id || s.classId || 'ID non défini')}</span><span>${escapeHtml(cls?.size || '')}</span><span>Gabarit : ${facNum(s.mapWidth || 1)} × ${facNum(s.mapLength || 1)}</span>${facFootprintHTML(s.mapWidth, s.mapLength)}</div>
     <div class="fac-stats">
       <div><span>Points de vie</span>${facNum(s.hp)} / ${facNum(s.hpMax)}</div><div><span>Bouclier</span>${facNum(s.shield)} / ${facNum(s.shieldMax)}</div>
       <div><span>Équipage</span>${facNum(s.crew)} / ${facNum(s.crewMax)}</div><div><span>Portée</span>${s.range} cases</div>
       <div><span>Tir de barrage</span>${facNum(s.barrage)}</div><div><span>Tir ciblé</span>${facNum(s.focus)}</div>
-      <div><span>Escadrons</span>${facNum(s.squadrons)}</div><div><span>Cases sur la carte</span>${facNum(s.mapWidth || 1)} × ${facNum(s.mapLength || 1)}</div><div><span>Grade requis</span>${escapeHtml(cls?.requirement || '—')}</div>
+      <div><span>Escadrons</span>${facNum(s.squadrons)}</div><div><span>Grade requis</span>${escapeHtml(cls?.requirement || '—')}</div>
     </div>
     ${pilotSelect}
-    <div class="fac-ship-actions"><button class="btn-modifier" onclick="facOuvrirVaisseau('${jsAttr(s.id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="facSupprimerVaisseau('${jsAttr(s.id)}')">Supprimer</button></div>
+    <div class="fac-ship-actions">
+      <button class="btn-modifier" onclick="facOuvrirVaisseau('${jsAttr(s.id)}')">Modifier</button>
+      <button class="btn-secondaire" ${damaged ? '' : 'disabled'} onclick="facReparerVaisseau('${jsAttr(s.id)}')">Réparer</button>
+      <button class="btn-secondaire" onclick="ouvrirHistorique('vaisseau','${jsAttr(s.id)}','${jsAttr(s.name)}')">Historique</button>
+      <button class="btn-secondaire btn-danger" onclick="facSupprimerVaisseau('${jsAttr(s.id)}')">Supprimer</button>
+    </div>
   </div>`;
 }
 
@@ -141,6 +156,7 @@ const facUrl = (suffix = '') => `/api/factions/${encodeURIComponent(facState.key
 function facEnregistrerTroupes() { return facAction(() => facApi(facUrl(), 'PUT', { troops: Number(document.getElementById('fac-troops').value) }), 'Troupes enregistrées.'); }
 function facEnregistrerChef() { return facAction(() => facApi(facUrl(), 'PUT', { leaderUserId: document.getElementById('fac-leader').value || null }), 'Chef de faction enregistré.'); }
 function facEnregistrerCredits() { return facAction(() => facApi(facUrl(`/inventaire/${encodeURIComponent(facState.meta.creditsItemId)}`), 'PUT', { quantity: Number(document.getElementById('fac-credits').value) }), 'Crédits enregistrés.'); }
+function facEnregistrerReputation() { const value = Number(document.getElementById('fac-reputation').value); if (!Number.isInteger(value) || value < 0 || value > 100) return toast('La réputation doit être comprise entre 0 et 100.', 'erreur'); return facAction(() => facApi(facUrl(), 'PUT', { reputation: value }), 'Réputation enregistrée.'); }
 function facSetItem(id, qty) { return facAction(() => facApi(facUrl(`/inventaire/${encodeURIComponent(id)}`), 'PUT', { quantity: Number(qty) }), 'Inventaire mis à jour.'); }
 function facAjouterObjet() {
   const id = document.getElementById('fac-new-item').value;
@@ -149,6 +165,13 @@ function facAjouterObjet() {
   return facSetItem(id, qty);
 }
 function facAssigner(shipId, userId) { return facAction(() => facApi(facUrl(`/vaisseaux/${encodeURIComponent(shipId)}/pilote`), 'PUT', { userId: userId || null }), userId ? 'Vaisseau attribué.' : 'Vaisseau retiré à son pilote.'); }
+
+async function facReparerVaisseau(shipId) {
+  const ship = facState.data.ships.find(s => s.id === shipId);
+  const ok = await confirmerAction({ titre: 'Réparer le vaisseau', message: `Restaurer les PV, le bouclier et l’équipage de « ${ship?.name || shipId} » à leur maximum ?`, texteValider: 'Réparer' });
+  if (!ok) return;
+  return facAction(() => facApi(facUrl(`/vaisseaux/${encodeURIComponent(shipId)}/reparer`), 'PUT', {}), 'Vaisseau réparé.');
+}
 
 async function facSupprimerVaisseau(shipId) {
   const ship = facState.data.ships.find(s => s.id === shipId);
@@ -164,8 +187,8 @@ function facOuvrirVaisseau(shipId) {
   const ship = shipId ? facState.data.ships.find(s => s.id === shipId) : null;
   const classes = facState.meta.classes;
   const base = ship || { classKey: classes[0].key, ...Object.fromEntries(Object.entries(classes[0].defaults).map(([k, v]) => [k, v])), squadrons: classes[0].squadrons };
-  const v = ship ? { name: ship.name, classKey: ship.classKey, hpMax: ship.hpMax, shieldMax: ship.shieldMax, range: ship.range, crewMax: ship.crewMax, squadrons: ship.squadrons, barrage: ship.barrage, focus: ship.focus, mapWidth: ship.mapWidth || 1, mapLength: ship.mapLength || 1 }
-    : { name: '', classKey: base.classKey, hpMax: base.hp, shieldMax: base.shield, range: base.range, crewMax: base.crew, squadrons: base.squadrons, barrage: base.barrage, focus: base.focus, mapWidth: base.mapWidth || 1, mapLength: base.mapLength || 1 };
+  const v = ship ? { name: ship.name, classKey: ship.classKey, hpMax: ship.hpMax, shieldMax: ship.shieldMax, range: ship.range, crewMax: ship.crewMax, squadrons: ship.squadrons, barrage: ship.barrage, focus: ship.focus }
+    : { name: '', classKey: base.classKey, hpMax: base.hp, shieldMax: base.shield, range: base.range, crewMax: base.crew, squadrons: base.squadrons, barrage: base.barrage, focus: base.focus };
   facFermerModale();
   const overlay = document.createElement('div');
   overlay.id = 'fac-overlay';
@@ -177,18 +200,51 @@ function facOuvrirVaisseau(shipId) {
     <div class="fac-form">
       <label class="full"><span class="fac-label">Nom du vaisseau</span><input id="fv-name" class="fac-input" type="text" maxlength="60" value="${escapeAttr(v.name)}" placeholder="Ex. Vengeance, Faucon d'Argent…" autocomplete="off"></label>
       <label class="full"><span class="fac-label">Classe</span><select id="fv-class" class="fac-select" onchange="facAppliquerClasse()">${classes.map(c => `<option value="${escapeAttr(c.key)}" ${c.key === v.classKey ? 'selected' : ''}>${escapeHtml(c.label)} (${escapeHtml(c.size)}) — ${escapeHtml(c.requirement)}</option>`).join('')}</select></label>
+      <div class="fac-class-preview full" id="fv-class-preview"></div>
+      <label class="full"><span class="fac-label">Illustration de cette catégorie</span><input id="fv-class-image" class="fac-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onchange="facUploaderImageClasse(this)"><span class="fac-hint">PNG, JPEG, WEBP ou GIF · 4 Mo maximum. L’image sera enregistrée dans web/ship.</span></label>
       ${field('fv-hp', 'PV max', v.hpMax, 'min="1"')}${field('fv-shield', 'Bouclier max', v.shieldMax)}
       ${field('fv-crew', 'Équipage max', v.crewMax)}${field('fv-range', 'Portée (cases)', v.range, 'min="1"')}
       ${field('fv-barrage', 'Dégâts tir de barrage', v.barrage)}${field('fv-focus', 'Dégâts tir ciblé', v.focus)}
       ${field('fv-squadrons', 'Escadrons de chasseurs', v.squadrons)}
-      ${field('fv-map-width', 'Largeur sur la carte (cases)', v.mapWidth, 'min="1" max="6"')}
-      ${field('fv-map-length', 'Longueur sur la carte (cases)', v.mapLength, 'min="1" max="10"')}
     </div>
-    ${ship ? '<p class="fac-hint" style="margin-top:14px">Enregistrer remet les PV, le bouclier et l\'équipage au maximum.</p>' : '<p class="fac-hint" style="margin-top:14px">Choisir une classe pré-remplit des statistiques de départ : tu peux toutes les modifier.</p>'}
+    ${ship ? '<p class="fac-hint" style="margin-top:14px">Les PV, boucliers et l’équipage actuels sont conservés. Utilise « Réparer » pour les restaurer.</p>' : '<p class="fac-hint" style="margin-top:14px">Le gabarit est défini par la classe et ne se modifie pas vaisseau par vaisseau.</p>'}
     <div class="fac-modal-actions"><button class="btn-secondaire" onclick="facFermerModale()">Annuler</button><button class="btn-principal" onclick="facSauverVaisseau(${ship ? `'${jsAttr(ship.id)}'` : 'null'})">${ship ? 'Enregistrer' : 'Créer'}</button></div>
   </div>`;
   document.body.appendChild(overlay);
+  facMettreAJourApercuClasse();
   document.getElementById('fv-name').focus();
+}
+
+function facMettreAJourApercuClasse() {
+  const key = document.getElementById('fv-class')?.value;
+  const cls = facState.meta.classes.find(c => c.key === key);
+  const target = document.getElementById('fv-class-preview');
+  if (!cls || !target) return;
+  const width = cls.defaults.mapWidth || 1;
+  const length = cls.defaults.mapLength || 1;
+  target.innerHTML = `${cls.image ? `<img src="${escapeAttr(cls.image)}" alt="${escapeAttr(cls.label)}">` : '<div class="fac-class-preview-empty">Illustration non définie</div>'}<div class="fac-class-preview-info"><strong>${escapeHtml(cls.label)}</strong><span>ID : ${escapeHtml(cls.id)}</span><span>Longueur réelle : ${escapeHtml(cls.size)}</span><span>Empreinte : ${width} × ${length} cases</span>${facFootprintHTML(width, length)}</div>`;
+}
+
+async function facUploaderImageClasse(input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) { toast('Format accepté : PNG, JPEG, WEBP ou GIF.', 'erreur'); input.value = ''; return; }
+  if (file.size > 4 * 1024 * 1024) { toast('L’image doit peser 4 Mo maximum.', 'erreur'); input.value = ''; return; }
+  try {
+    const imageData = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Lecture de l’image impossible.'));
+      reader.readAsDataURL(file);
+    });
+    const classKey = document.getElementById('fv-class').value;
+    const result = await facApi(`/api/factions/classes/${encodeURIComponent(classKey)}/image`, 'POST', { imageData });
+    const cls = facState.meta.classes.find(c => c.key === classKey);
+    if (cls) cls.image = result.image;
+    facMettreAJourApercuClasse();
+    toast('Illustration de classe enregistrée.');
+  } catch (err) { toast(err.message, 'erreur'); }
+  finally { input.value = ''; }
 }
 
 // Pré-remplit les statistiques avec le modèle de la classe choisie.
@@ -199,7 +255,7 @@ function facAppliquerClasse() {
   set('fv-hp', cls.defaults.hp); set('fv-shield', cls.defaults.shield); set('fv-crew', cls.defaults.crew);
   set('fv-range', cls.defaults.range); set('fv-barrage', cls.defaults.barrage); set('fv-focus', cls.defaults.focus);
   set('fv-squadrons', cls.squadrons);
-  set('fv-map-width', cls.defaults.mapWidth || 1); set('fv-map-length', cls.defaults.mapLength || 1);
+  facMettreAJourApercuClasse();
 }
 
 async function facSauverVaisseau(shipId) {
@@ -209,7 +265,6 @@ async function facSauverVaisseau(shipId) {
     hpMax: Number(val('fv-hp')), shieldMax: Number(val('fv-shield')), crewMax: Number(val('fv-crew')),
     range: Number(val('fv-range')), barrage: Number(val('fv-barrage')), focus: Number(val('fv-focus')),
     squadrons: Number(val('fv-squadrons')),
-    mapWidth: Number(val('fv-map-width')), mapLength: Number(val('fv-map-length')),
   };
   try {
     if (shipId) await facApi(facUrl(`/vaisseaux/${encodeURIComponent(shipId)}`), 'PUT', body);

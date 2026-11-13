@@ -2,6 +2,8 @@
 // réservé au créateur (Data/config.js -> SUPER_ADMIN_ID). Rien ici n'est lu
 // ni utilisé par le bot Discord : c'est uniquement pour le site web.
 const { getSiteConnexionsCollection, getSiteLogsCollection, getSiteBackupsCollection, connect } = require('./mongo.js');
+const fs = require('fs/promises');
+const path = require('path');
 
 // Nombre de logs conservés au total (le plus vieux est supprimé au-delà,
 // pour ne pas laisser la collection grossir indéfiniment).
@@ -66,14 +68,21 @@ async function listLogs(limit = 200) {
   return col.find({}).sort({ timestamp: -1 }).limit(limit).toArray();
 }
 
-const BACKUP_COLLECTIONS = ['profils', 'inv', 'item_catalog', 'avatars', 'avatars_config', 'craft_recipes', 'factions', 'faction_ships'];
+const BACKUP_EXCLUDED_COLLECTIONS = new Set(['site_backups', 'site_sessions', 'sessions']);
 const MAX_BACKUPS = 20;
 const BACKUP_BATCH_SIZE = 100;
 
-/**
- * Cree un snapshot durable des donnees gerees par le site.
- * Les documents sont stockes un par un dans Mongo pour ne jamais depasser
- * la limite de taille d'un document BSON.
+async function listBackupCollections(database) {
+  const entries = await database.listCollections({}, { nameOnly: true }).toArray();
+  return entries.map(entry => entry.name)
+    .filter(name => name && !name.startsWith('system.') && !BACKUP_EXCLUDED_COLLECTIONS.has(name))
+    .sort((a, b) => a.localeCompare(b, 'en'));
+}
+
+/** Snapshot complet des collections applicatives du bot et du site.
+ * Les sessions d'authentification et la collection qui contient les snapshots
+ * sont exclues volontairement : restaurer une ancienne session pourrait
+ * réactiver un accès révoqué, et sauvegarder les sauvegardes créerait une boucle.
  */
 async function createBackup({ discordId, username, avatar, preserveSnapshotIds = [] } = {}) {
   const col = await getSiteBackupsCollection();
@@ -81,36 +90,48 @@ async function createBackup({ discordId, username, avatar, preserveSnapshotIds =
   const createdAt = new Date();
   const database = await connect();
   const counts = {};
-
   try {
-    for (const collectionName of BACKUP_COLLECTIONS) {
-      const documents = await database.collection(collectionName).find({}).toArray();
-      counts[collectionName] = documents.length;
-
-      for (let i = 0; i < documents.length; i += BACKUP_BATCH_SIZE) {
-        const chunk = documents.slice(i, i + BACKUP_BATCH_SIZE).map((document, offset) => ({
-          _id: `${snapshotId}:data:${collectionName}:${i + offset}`,
-          kind: 'data',
-          snapshotId,
-          collection: collectionName,
-          index: i + offset,
-          document,
-        }));
-        if (chunk.length) await col.insertMany(chunk, { ordered: true });
+    const collectionNames = await listBackupCollections(database);
+    for (const collectionName of collectionNames) {
+      const cursor = database.collection(collectionName).find({}).batchSize(BACKUP_BATCH_SIZE);
+      let chunk = [];
+      let index = 0;
+      while (await cursor.hasNext()) {
+        const document = await cursor.next();
+        chunk.push({ _id: `${snapshotId}:data:${collectionName}:${index}`, kind: 'data', snapshotId, collection: collectionName, index, document });
+        index++;
+        if (chunk.length >= BACKUP_BATCH_SIZE) {
+          await col.insertMany(chunk, { ordered: true });
+          chunk = [];
+        }
       }
+      if (chunk.length) await col.insertMany(chunk, { ordered: true });
+      counts[collectionName] = index;
+    }
+
+    // Les illustrations de classes sont des fichiers locaux, pas des documents
+    // Mongo : elles sont donc intégrées au snapshot pour qu'une restauration
+    // complète remette aussi les images de web/ship.
+    const shipDirectory = path.join(__dirname, '..', 'web', 'ship');
+    const files = [];
+    try {
+      for (const filename of await fs.readdir(shipDirectory)) {
+        if (!/^[a-z0-9-]+\.(?:png|jpe?g|webp|gif)$/i.test(filename)) continue;
+        const data = await fs.readFile(path.join(shipDirectory, filename));
+        await col.insertOne({ _id: `${snapshotId}:file:${filename}`, kind: 'file', snapshotId, filename, data });
+        files.push(filename);
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
     }
 
     await col.insertOne({
-      _id: snapshotId,
-      kind: 'meta',
-      snapshotId,
-      createdAt,
+      _id: snapshotId, kind: 'meta', snapshotId, createdAt,
       createdBy: { discordId: discordId || null, username: username || 'Inconnu', avatar: avatar || null },
-      collections: counts,
+      fullSnapshot: true, databaseName: database.databaseName, collections: counts, files,
     });
-
     await pruneBackups(preserveSnapshotIds);
-    return { snapshotId, createdAt, createdBy: username || 'Inconnu', collections: counts };
+    return { snapshotId, createdAt, createdBy: username || 'Inconnu', fullSnapshot: true, collections: counts };
   } catch (err) {
     await col.deleteMany({ snapshotId }).catch(() => {});
     throw err;
@@ -135,57 +156,80 @@ async function getBackup(snapshotId) {
 async function restoreBackup(snapshotId, actor = {}) {
   const meta = await getBackup(snapshotId);
   if (!meta) throw new Error('Sauvegarde introuvable.');
-
-  const safetyBackup = await createBackup(actor);
-  const backupCol = await getSiteBackupsCollection();
-  const database = await connect();
-
+  const safetyBackup = await createBackup({ ...actor, preserveSnapshotIds: [snapshotId] });
   try {
-    for (const collectionName of BACKUP_COLLECTIONS) {
-      // Les anciennes sauvegardes précèdent certaines collections (ex. craft_recipes).
-      // Si la collection n'était pas incluse dans le snapshot, on la préserve.
-      if (!Object.prototype.hasOwnProperty.call(meta.collections || {}, collectionName)) continue;
-      const target = database.collection(collectionName);
-      const dataDocs = await backupCol.find({ kind: 'data', snapshotId, collection: collectionName })
-        .sort({ index: 1 })
-        .toArray();
-
-      await target.deleteMany({});
-      for (let i = 0; i < dataDocs.length; i += BACKUP_BATCH_SIZE) {
-        const documents = dataDocs.slice(i, i + BACKUP_BATCH_SIZE).map((entry) => entry.document);
-        if (documents.length) await target.insertMany(documents, { ordered: true });
-      }
-    }
+    await restoreBackupWithoutSafety(snapshotId);
   } catch (err) {
-    // Tente de revenir a l'etat juste avant le rollback.
     await restoreBackupWithoutSafety(safetyBackup.snapshotId).catch((restoreErr) => {
       console.error('❌ Impossible de restaurer la sauvegarde de sécurité :', restoreErr.message);
     });
     throw err;
   }
-
   return { restoredSnapshotId: snapshotId, safetyBackupId: safetyBackup.snapshotId };
 }
 
 async function restoreBackupWithoutSafety(snapshotId) {
   const meta = await getBackup(snapshotId);
-  if (!meta) throw new Error('Sauvegarde de sécurité introuvable.');
+  if (!meta) throw new Error('Sauvegarde introuvable.');
   const backupCol = await getSiteBackupsCollection();
   const database = await connect();
-
-  for (const collectionName of BACKUP_COLLECTIONS) {
-    // Compatibilité avec les snapshots créés avant l'ajout d'une collection.
-    if (!Object.prototype.hasOwnProperty.call(meta.collections || {}, collectionName)) continue;
-    const target = database.collection(collectionName);
-    const dataDocs = await backupCol.find({ kind: 'data', snapshotId, collection: collectionName })
-      .sort({ index: 1 })
-      .toArray();
-    await target.deleteMany({});
-    for (let i = 0; i < dataDocs.length; i += BACKUP_BATCH_SIZE) {
-      const documents = dataDocs.slice(i, i + BACKUP_BATCH_SIZE).map((entry) => entry.document);
-      if (documents.length) await target.insertMany(documents, { ordered: true });
+  const snapshotCollections = Object.keys(meta.collections || {}).filter(name =>
+    name && !name.startsWith('system.') && !BACKUP_EXCLUDED_COLLECTIONS.has(name)
+  );
+  if (meta.fullSnapshot === true) {
+    const currentCollections = await listBackupCollections(database);
+    const keep = new Set(snapshotCollections);
+    for (const collectionName of currentCollections) {
+      if (!keep.has(collectionName)) {
+        await database.collection(collectionName).drop().catch(err => {
+          if (err.codeName !== 'NamespaceNotFound' && err.code !== 26) throw err;
+        });
+      }
     }
   }
+  for (const collectionName of snapshotCollections) {
+    const target = database.collection(collectionName);
+    await target.deleteMany({});
+    const cursor = backupCol.find({ kind: 'data', snapshotId, collection: collectionName }).sort({ index: 1 }).batchSize(BACKUP_BATCH_SIZE);
+    let documents = [];
+    while (await cursor.hasNext()) {
+      const entry = await cursor.next();
+      documents.push(entry.document);
+      if (documents.length >= BACKUP_BATCH_SIZE) {
+        await target.insertMany(documents, { ordered: true });
+        documents = [];
+      }
+    }
+    if (documents.length) await target.insertMany(documents, { ordered: true });
+  }
+
+  // Restaure les images de classes associées au snapshot. Les fichiers README
+  // et tout autre contenu non image du dossier sont préservés.
+  if (meta.fullSnapshot === true) {
+    const shipDirectory = path.join(__dirname, '..', 'web', 'ship');
+    await fs.mkdir(shipDirectory, { recursive: true });
+    const retained = new Set((meta.files || []).filter(name => /^[a-z0-9-]+\.(?:png|jpe?g|webp|gif)$/i.test(name)));
+    for (const filename of await fs.readdir(shipDirectory)) {
+      if (/^[a-z0-9-]+\.(?:png|jpe?g|webp|gif)$/i.test(filename) && !retained.has(filename)) {
+        await fs.unlink(path.join(shipDirectory, filename)).catch(() => {});
+      }
+    }
+    for (const filename of retained) {
+      const saved = await backupCol.findOne({ kind: 'file', snapshotId, filename });
+      if (saved?.data) await fs.writeFile(path.join(shipDirectory, filename), saved.data);
+    }
+  }
+}
+
+async function deleteBackup(snapshotId) {
+  const id = String(snapshotId || '');
+  if (!/^backup_[A-Za-z0-9_-]+$/.test(id)) throw new Error('Identifiant de sauvegarde invalide.');
+  const col = await getSiteBackupsCollection();
+  const meta = await col.findOne({ _id: id, kind: 'meta' });
+  if (!meta) throw new Error('Sauvegarde introuvable.');
+  await col.deleteMany({ snapshotId: id });
+  await col.deleteOne({ _id: id, kind: 'meta' });
+  return { deletedSnapshotId: id };
 }
 
 async function pruneBackups(protectedSnapshotIds = []) {
@@ -206,4 +250,5 @@ module.exports = {
   listBackups,
   getBackup,
   restoreBackup,
+  deleteBackup,
 };

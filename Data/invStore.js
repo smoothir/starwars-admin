@@ -1,32 +1,29 @@
-// -----------------------------------------------------------------------
-// SYNCHRO AVEC LE BOT
-// -----------------------------------------------------------------------
-// Le catalogue d'objets vit dans MongoDB (collection "item_catalog"), la
-// MÊME que celle lue par le bot Discord. Les marqueurs internes
-// ("__seeded__", "__migrated_equipement__") et les champs slot/image/usable
-// doivent rester IDENTIQUES à ceux du bot (Data/invStore.js côté bot).
-// -----------------------------------------------------------------------
+// Catalogue et inventaires partagés par le bot Discord et le site admin.
+// Les deux projets utilisent volontairement ce même contrat et la même
+// collection MongoDB : item_catalog (catalogue) et inv (inventaires).
 
 const { getInvCollection, getItemCatalogCollection } = require('./mongo.js');
+const { applyPermanentStatChange, addTemporaryStatEffect, normalizeStatName } = require('./profileStore.js');
 
-// Catalogue de départ (copie exacte de celui du bot).
 const EQUIPMENT_SLOTS = ['casque', 'plastron', 'mainGauche', 'mainDroite', 'jambes', 'pieds'];
 const EQUIPMENT_SLOT_LABELS = {
-  casque: 'Casque',
-  plastron: 'Plastron',
-  mainGauche: 'Main gauche',
-  mainDroite: 'Main droite',
-  jambes: 'Jambes',
-  pieds: 'Pieds',
+  casque: 'Casque', plastron: 'Plastron', mainGauche: 'Main gauche',
+  mainDroite: 'Main droite', jambes: 'Jambes', pieds: 'Pieds',
 };
+const ITEM_RARITIES = ['Épique', 'Rare', 'Peu commun', 'Commun'];
+const SEED_MARKER_ID = '__seeded__';
+const MIGRATION_MARKER_ID = '__migrated_equipement__';
+const RARITY_MIGRATION_MARKER_ID = '__migrated_rarete__';
+const MARKER_IDS = [SEED_MARKER_ID, MIGRATION_MARKER_ID, RARITY_MIGRATION_MARKER_ID];
+const RESERVED_ID = /^__.*__$/;
+const MAX_IMAGE_DATAURL_LENGTH = 400 * 1024;
 
 function emptyEquipement() {
-  return Object.fromEntries(EQUIPMENT_SLOTS.map(s => [s, null]));
+  return Object.fromEntries(EQUIPMENT_SLOTS.map(slot => [slot, null]));
 }
 
-// Catalogue de départ, utilisé pour "amorcer" la collection Mongo la toute
-// première fois. Garder cette liste identique à celle du site évite une
-// incohérence si l'un des deux démarre avant l'autre sur une base vide.
+// Source de vérité unique pour le catalogue de départ. À maintenir identique
+// côté bot et site ; les documents existants ne sont jamais écrasés au seed.
 const DEFAULT_CATALOG = [
   { id: 'sabre_laser', name: 'Sabre laser', emoji: '🗡️', category: 'Arme', rarity: 'Commun', description: 'Arme rituelle forgée avec un cristal kyber.', slot: 'mainDroite', image: null, usable: true, statBonus: { 'Corps-à-corps': 15 } },
   { id: 'blaster', name: 'Pistolet blaster', emoji: '🔫', category: 'Arme', rarity: 'Commun', description: 'Arme de poing standard, à énergie.', slot: 'mainDroite', image: null, usable: true, statBonus: { 'Tir & Précision': 15 } },
@@ -51,171 +48,111 @@ const DEFAULT_CATALOG = [
   { id: 'cape', name: 'Cape', emoji: '🧥', category: 'Divers', rarity: 'Commun', description: "Vêtement d'extérieur, souvent à capuche.", slot: null, image: null, usable: false, statBonus: {} },
 ];
 
-const SEED_MARKER_ID = '__seeded__';
-const MIGRATION_MARKER_ID = '__migrated_equipement__';
-const RARITY_MIGRATION_MARKER_ID = '__migrated_rarete__';
-const MARKER_IDS = [SEED_MARKER_ID, MIGRATION_MARKER_ID, RARITY_MIGRATION_MARKER_ID];
-
-const ITEM_RARITIES = ['Épique', 'Rare', 'Peu commun', 'Commun'];
-
-// Tout identifiant de la forme "__xxx__" est un document interne (marqueur
-// posé par le bot ou le site), jamais un vrai objet : on les cache et on les
-// protège TOUS, y compris ceux que le bot ajouterait plus tard.
-const RESERVED_ID = /^__.*__$/;
 const isReservedId = (id) => RESERVED_ID.test(String(id || ''));
-
-// Taille max d'une image enregistrée directement en base (data URL). Le site
-// réduit déjà l'image côté navigateur (≈256 px) : ceci n'est qu'un garde-fou.
-const MAX_IMAGE_DATAURL_LENGTH = 400 * 1024;
-
-function slugify(str) {
-  return String(str || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+function slugify(value) {
+  return String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
-
-/**
- * Valide/normalise le champ "image" d'un objet. Formats acceptés :
- *  - null / '' : pas d'image (l'emoji est utilisé à la place)
- *  - data:image/(png|jpeg|webp|gif);base64,... : image envoyée depuis le site
- *  - http(s)://... : image hébergée ailleurs
- *  - /image/... : chemin relatif à la racine du bot (ancien format)
- */
-function normalizeImage(image) {
-  if (image === undefined) return undefined;
-  if (image === null || image === '') return null;
-  if (typeof image !== 'string') throw new Error("Image invalide.");
-  const value = image.trim();
-  if (/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(value)) {
-    if (value.length > MAX_IMAGE_DATAURL_LENGTH) throw new Error('Image trop lourde (max ~300 Ko).');
-    return value;
-  }
-  if (/^https?:\/\/\S{1,500}$/.test(value)) return value;
-  if (/^\/image\/[\w\-./]+$/.test(value)) return value;
-  throw new Error("Image invalide (PNG, JPEG, WebP ou GIF attendu).");
+function normalizeRarity(value) {
+  if (value === undefined || value === null || value === '') return 'Commun';
+  const rarity = String(value).trim();
+  if (!ITEM_RARITIES.includes(rarity)) throw new Error(`Rareté invalide : ${rarity}`);
+  return rarity;
 }
-
 function normalizeSlot(slot) {
   if (slot === undefined) return undefined;
   if (slot === null || slot === '') return null;
   if (!EQUIPMENT_SLOTS.includes(slot)) throw new Error(`Emplacement invalide : ${slot}`);
   return slot;
 }
-
-/** Valide/normalise le bonus de stats d'un objet : { "Nom de la stat": nombre entier, ... }. */
-function normalizeRarity(rarity) {
-  if (rarity === undefined || rarity === null || rarity === '') return 'Commun';
-  const value = String(rarity).trim();
-  if (!ITEM_RARITIES.includes(value)) throw new Error(`Rareté invalide : ${value}`);
-  return value;
+function normalizeImage(image) {
+  if (image === undefined) return undefined;
+  if (image === null || image === '') return null;
+  if (typeof image !== 'string') throw new Error('Image invalide.');
+  const value = image.trim();
+  if (/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(value)) {
+    if (value.length > MAX_IMAGE_DATAURL_LENGTH) throw new Error('Image trop lourde (max ~300 Ko).');
+    return value;
+  }
+  if (/^https?:\/\/\S{1,500}$/.test(value) || /^\/(?:image|ship)\/[\w\-./]+$/.test(value)) return value;
+  throw new Error('Image invalide (PNG, JPEG, WebP ou GIF attendu).');
 }
-
-
-/** Valide/normalise l'action déclenchée par le bouton "Utiliser". */
+function normalizeStatBonus(value) {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Bonus de statistiques invalide.');
+  const result = {};
+  for (const [stat, raw] of Object.entries(value)) {
+    const amount = Math.round(Number(raw));
+    if (!Number.isFinite(amount) || amount === 0) continue;
+    const canonicalStat = normalizeStatName(stat);
+    result[canonicalStat.slice(0, 100)] = (result[canonicalStat.slice(0, 100)] || 0) + amount;
+  }
+  return result;
+}
 function normalizeUseAction(useAction) {
   if (useAction === undefined || useAction === null || useAction === '' || useAction?.type === 'aucune') return null;
-  if (typeof useAction !== 'object' || Array.isArray(useAction)) throw new Error('Utilité d\'objet invalide.');
-
+  if (typeof useAction !== 'object' || Array.isArray(useAction)) throw new Error("Utilité d'objet invalide.");
   const type = String(useAction.type || 'aucune');
   if (type === 'donner_objet') {
-    const rewardItemId = String(useAction.itemId || '').trim();
+    const itemId = String(useAction.itemId || '').trim();
     const quantity = Math.max(1, Math.floor(Number(useAction.quantity) || 1));
-    if (!rewardItemId) throw new Error('L\'objet à donner est obligatoire.');
-    return { type, itemId: rewardItemId, quantity };
+    if (!itemId || isReservedId(itemId)) throw new Error("L'objet à donner est obligatoire.");
+    return { type, itemId, quantity };
   }
-
   if (type === 'message') {
     const message = String(useAction.message || '').trim();
     if (!message) throw new Error('Le message à envoyer est obligatoire.');
     return { type, message: message.slice(0, 2000) };
   }
-
   if (type === 'stat') {
-    const stat = String(useAction.stat || '').trim();
+    const stat = normalizeStatName(useAction.stat);
     const amount = Math.round(Number(useAction.amount) || 0);
     const mode = useAction.mode === 'temporaire' ? 'temporaire' : 'permanent';
     const durationMinutes = Math.max(1, Math.floor(Number(useAction.durationMinutes) || 1));
-    if (!stat) throw new Error('La statistique est obligatoire.');
-    if (!amount) throw new Error('La valeur de modification de statistique ne peut pas être 0.');
+    if (!stat || !amount) throw new Error('Statistique et valeur de modification obligatoires.');
     return { type, stat: stat.slice(0, 100), amount, mode, durationMinutes };
   }
-
   throw new Error(`Utilité inconnue : ${type}`);
 }
-
-function normalizeStatBonus(statBonus) {
-  if (statBonus === undefined || statBonus === null) return {};
-  if (typeof statBonus !== 'object' || Array.isArray(statBonus)) throw new Error('Bonus de stats invalide.');
-  const out = {};
-  for (const [stat, value] of Object.entries(statBonus)) {
-    const n = Math.round(Number(value));
-    if (!Number.isFinite(n) || n === 0) continue; // 0/vide = pas de bonus sur cette stat, inutile de le stocker
-    out[String(stat).slice(0, 60)] = n;
-  }
-  return out;
-}
-
 function toItem(doc) {
   return {
-    id: doc._id,
-    name: doc.name,
-    emoji: doc.emoji,
-    category: doc.category,
-    rarity: normalizeRarity(doc.rarity),
-    description: doc.description,
-    useAction: normalizeUseAction(doc.useAction),
-    slot: doc.slot || null,
-    image: doc.image || null,
-    usable: Boolean(doc.usable),
-    statBonus: doc.statBonus || {},
+    id: String(doc._id), name: doc.name || String(doc._id), emoji: doc.emoji || '❔',
+    category: doc.category || 'Divers', rarity: normalizeRarity(doc.rarity),
+    description: doc.description || '', useAction: normalizeUseAction(doc.useAction),
+    slot: doc.slot || null, image: doc.image || null, usable: Boolean(doc.usable),
+    statBonus: normalizeStatBonus(doc.statBonus),
   };
 }
 
-/**
- * Retourne le catalogue (trié par catégorie puis nom). Amorçage et migration
- * identiques à ceux du bot (une seule fois à vie, marqueurs dédiés).
- */
 let catalogInitializationPromise = null;
-
 async function ensureCatalogInitialized(col) {
   if (catalogInitializationPromise) return catalogInitializationPromise;
   catalogInitializationPromise = (async () => {
-    const dejaAmorce = await col.findOne({ _id: SEED_MARKER_ID }, { projection: { _id: 1 } });
-    if (!dejaAmorce) {
-      if (DEFAULT_CATALOG.length > 0) {
-        const operations = DEFAULT_CATALOG.map(it => ({
-          updateOne: { filter: { _id: it.id }, update: { $setOnInsert: { ...it, _id: it.id } }, upsert: true },
-        }));
-        await col.bulkWrite(operations, { ordered: false });
-      }
+    const seeded = await col.findOne({ _id: SEED_MARKER_ID }, { projection: { _id: 1 } });
+    if (!seeded) {
+      const operations = DEFAULT_CATALOG.map(item => ({
+        updateOne: { filter: { _id: item.id }, update: { $setOnInsert: { ...item, _id: item.id } }, upsert: true },
+      }));
+      if (operations.length) await col.bulkWrite(operations, { ordered: false });
       await col.updateOne({ _id: SEED_MARKER_ID }, { $setOnInsert: { seededAt: new Date() } }, { upsert: true });
     }
 
-    const dejaMigre = await col.findOne({ _id: MIGRATION_MARKER_ID }, { projection: { _id: 1 } });
-    if (!dejaMigre) {
-      const migration = DEFAULT_CATALOG.map(it => ({
+    const migrated = await col.findOne({ _id: MIGRATION_MARKER_ID }, { projection: { _id: 1 } });
+    if (!migrated) {
+      const operations = DEFAULT_CATALOG.map(item => ({
         updateOne: {
-          filter: { _id: it.id, usable: { $exists: false } },
-          update: { $set: { slot: it.slot, image: it.image, usable: it.usable } },
+          filter: { _id: item.id, usable: { $exists: false } },
+          update: { $set: { slot: item.slot, image: item.image, usable: item.usable, statBonus: item.statBonus } },
         },
       }));
-      if (migration.length > 0) await col.bulkWrite(migration, { ordered: false });
+      if (operations.length) await col.bulkWrite(operations, { ordered: false });
       await col.updateOne({ _id: MIGRATION_MARKER_ID }, { $setOnInsert: { migratedAt: new Date() } }, { upsert: true });
     }
 
-    const dejaMigreRarete = await col.findOne({ _id: RARITY_MIGRATION_MARKER_ID }, { projection: { _id: 1 } });
-    if (!dejaMigreRarete) {
-      await col.updateMany(
-        { _id: { $not: RESERVED_ID }, rarity: { $exists: false } },
-        { $set: { rarity: 'Commun' } },
-      );
-      await col.updateOne(
-        { _id: RARITY_MIGRATION_MARKER_ID },
-        { $setOnInsert: { migratedAt: new Date() } },
-        { upsert: true },
-      );
+    const rarityMigrated = await col.findOne({ _id: RARITY_MIGRATION_MARKER_ID }, { projection: { _id: 1 } });
+    if (!rarityMigrated) {
+      await col.updateMany({ _id: { $not: RESERVED_ID }, rarity: { $exists: false } }, { $set: { rarity: 'Commun' } });
+      await col.updateOne({ _id: RARITY_MIGRATION_MARKER_ID }, { $setOnInsert: { migratedAt: new Date() } }, { upsert: true });
     }
   })().catch(error => {
     catalogInitializationPromise = null;
@@ -223,38 +160,25 @@ async function ensureCatalogInitialized(col) {
   });
   return catalogInitializationPromise;
 }
-
-async function getCatalog() {
+async function catalogCollection() {
   const col = await getItemCatalogCollection();
   await ensureCatalogInitialized(col);
-  const docs = (await col.find({ _id: { $not: RESERVED_ID } }).toArray()).filter(d => !isReservedId(d._id));
-  return docs
-    .map(toItem)
-    .sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name));
+  return col;
 }
-
-/**
- * Retourne l'ensemble des identifiants (parmi ceux demandés) qui existent dans
- * le catalogue. Ne charge QUE les _id : pas d'images base64, donc très rapide
- * (à utiliser pour valider des listes d'objets plutôt que getCatalog()).
- */
+async function getCatalog() {
+  const col = await catalogCollection();
+  const docs = await col.find({ _id: { $not: RESERVED_ID } }).toArray();
+  return docs.map(toItem).sort((a, b) => a.category.localeCompare(b.category, 'fr') || a.name.localeCompare(b.name, 'fr'));
+}
 async function getExistingCatalogIds(ids) {
-  const col = await getItemCatalogCollection();
-  await ensureCatalogInitialized(col);
-  const wanted = [...new Set((ids || []).map(String))];
+  const col = await catalogCollection();
+  const wanted = [...new Set((ids || []).map(String).filter(id => !isReservedId(id)))];
   if (!wanted.length) return new Set();
   const docs = await col.find({ _id: { $in: wanted } }, { projection: { _id: 1 } }).toArray();
-  return new Set(docs.map(d => String(d._id)));
+  return new Set(docs.map(doc => String(doc._id)));
 }
-
-/**
- * Version légère du catalogue destinée aux listes du site.
- * Les images base64 ne sont jamais renvoyées dans le JSON : elles deviennent
- * une URL chargée séparément par le navigateur au moment où l'image apparaît.
- */
 async function getCatalogMetadata() {
-  const col = await getItemCatalogCollection();
-  await ensureCatalogInitialized(col);
+  const col = await catalogCollection();
   const embeddedImage = {
     $regexMatch: {
       input: { $convert: { input: '$image', to: 'string', onError: '', onNull: '' } },
@@ -264,272 +188,291 @@ async function getCatalogMetadata() {
   const docs = await col.aggregate([
     { $match: { _id: { $not: RESERVED_ID } } },
     { $project: {
-      _id: 1,
-      name: 1,
-      emoji: 1,
-      category: 1,
-      rarity: 1,
-      description: 1,
-      useAction: 1,
-      slot: 1,
-      usable: 1,
-      statBonus: 1,
-      image: {
-        $cond: [
-          embeddedImage,
-          { $concat: ['/api/inventaire/catalogue/', { $toString: '$_id' }, '/image'] },
-          '$image',
-        ],
-      },
+      _id: 1, name: 1, emoji: 1, category: 1, rarity: 1, description: 1,
+      useAction: 1, slot: 1, usable: 1, statBonus: 1,
+      image: { $cond: [embeddedImage, { $concat: ['/api/inventaire/catalogue/', { $toString: '$_id' }, '/image'] }, '$image'] },
     } },
   ]).toArray();
-  return docs
-    .filter(doc => !isReservedId(doc._id))
-    .map(toItem)
-    .sort((a, b) => (a.category || '').localeCompare(b.category || '') || String(a.name || '').localeCompare(String(b.name || ''), 'fr'));
+  return docs.map(toItem).sort((a, b) => a.category.localeCompare(b.category, 'fr') || a.name.localeCompare(b.name, 'fr'));
 }
-
-/** Données binaires d'une image intégrée en base, sans charger tout le catalogue. */
 async function getCatalogImageData(itemId) {
   if (!itemId || isReservedId(itemId)) return null;
-  const col = await getItemCatalogCollection();
+  const col = await catalogCollection();
   const doc = await col.findOne({ _id: String(itemId) }, { projection: { image: 1 } });
-  if (!doc || typeof doc.image !== 'string') return null;
+  if (typeof doc?.image !== 'string') return null;
   const match = doc.image.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
-  if (!match) return null;
-  return { contentType: match[1], data: Buffer.from(match[2], 'base64') };
+  return match ? { contentType: match[1], data: Buffer.from(match[2], 'base64') } : null;
 }
-
 async function getItem(itemId) {
   if (!itemId || isReservedId(itemId)) return null;
-  const col = await getItemCatalogCollection();
-  const doc = await col.findOne({ _id: itemId });
+  const col = await catalogCollection();
+  const doc = await col.findOne({ _id: String(itemId) });
   return doc ? toItem(doc) : null;
 }
 
-/** Ajoute un nouvel objet au catalogue. Génère un id à partir du nom si non fourni. */
 async function addCatalogItem({ id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction }) {
-  if (!name) throw new Error('Le nom est obligatoire.');
+  if (!String(name || '').trim()) throw new Error('Le nom est obligatoire.');
   const finalId = slugify(id || name);
-  if (!finalId || isReservedId(finalId)) throw new Error("Impossible de déduire un identifiant valide pour cet objet.");
+  if (!finalId || isReservedId(finalId)) throw new Error('Identifiant de catalogue invalide.');
   const finalSlot = normalizeSlot(slot);
   const normalizedUseAction = normalizeUseAction(useAction);
-
-  const col = await getItemCatalogCollection();
-  if (normalizedUseAction?.type === 'donner_objet') {
-    const reward = await col.findOne({ _id: normalizedUseAction.itemId });
-    if (!reward || isReservedId(reward._id)) throw new Error("L'objet à donner n'existe pas dans le catalogue.");
+  const col = await catalogCollection();
+  if (normalizedUseAction?.type === 'donner_objet' && !(await col.findOne({ _id: normalizedUseAction.itemId }))) {
+    throw new Error("L'objet à donner n'existe pas dans le catalogue.");
   }
-  const existing = await col.findOne({ _id: finalId });
-  if (existing) throw new Error(`Un objet avec l'identifiant "${finalId}" existe déjà.`);
-
+  if (await col.findOne({ _id: finalId }, { projection: { _id: 1 } })) throw new Error(`Un objet avec l'identifiant "${finalId}" existe déjà.`);
   const doc = {
-    _id: finalId,
-    name,
-    emoji: emoji || '❔',
-    category: category || 'Divers',
-    rarity: normalizeRarity(rarity),
-    description: description || '',
-    useAction: normalizedUseAction,
-    slot: finalSlot,
-    image: normalizeImage(image) || null,
-    usable: finalSlot ? true : Boolean(usable),
-    statBonus: normalizeStatBonus(statBonus),
+    _id: finalId, name: String(name).trim().slice(0, 100), emoji: String(emoji || '❔').slice(0, 32),
+    category: String(category || 'Divers').slice(0, 80), rarity: normalizeRarity(rarity),
+    description: String(description || '').slice(0, 2000), useAction: normalizedUseAction,
+    slot: finalSlot || null, image: normalizeImage(image) || null,
+    usable: finalSlot ? true : Boolean(usable), statBonus: normalizeStatBonus(statBonus),
+    createdAt: new Date(), updatedAt: new Date(),
   };
   await col.insertOne(doc);
   return toItem(doc);
 }
 
-/** Met à jour un objet. Un champ `undefined` est laissé tel quel (slot/usable ne sont jamais touchés ici). */
 async function updateCatalogItem(itemId, { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction }) {
-  if (isReservedId(itemId)) throw new Error('Objet introuvable.');
-  const col = await getItemCatalogCollection();
-  const oldDoc = await col.findOne({ _id: itemId });
-  if (!oldDoc) throw new Error('Objet introuvable.');
-
+  const col = await catalogCollection();
+  const oldDoc = await col.findOne({ _id: String(itemId) });
+  if (!oldDoc || isReservedId(oldDoc._id)) throw new Error('Objet introuvable.');
   const requestedId = id === undefined || id === null || String(id).trim() === '' ? itemId : id;
   const newId = slugify(requestedId);
-  if (!newId || isReservedId(newId)) throw new Error('Identifiant invalide. Utilise uniquement des lettres, chiffres, tirets ou underscores.');
-
-  if (newId !== itemId) {
-    const conflict = await col.findOne({ _id: newId });
-    if (conflict) throw new Error(`Un objet avec l'identifiant "${newId}" existe déjà.`);
+  if (!newId || isReservedId(newId)) throw new Error('Identifiant invalide.');
+  if (newId !== String(itemId) && await col.findOne({ _id: newId }, { projection: { _id: 1 } })) {
+    throw new Error(`Un objet avec l'identifiant "${newId}" existe déjà.`);
   }
 
   const fields = {};
-  if (name !== undefined) fields.name = name;
-  if (emoji !== undefined) fields.emoji = emoji;
-  if (category !== undefined) fields.category = category;
+  if (name !== undefined) fields.name = String(name).trim().slice(0, 100);
+  if (emoji !== undefined) fields.emoji = String(emoji || '❔').slice(0, 32);
+  if (category !== undefined) fields.category = String(category || 'Divers').slice(0, 80);
   if (rarity !== undefined) fields.rarity = normalizeRarity(rarity);
-  if (useAction !== undefined) fields.useAction = normalizeUseAction(useAction);
-  if (description !== undefined) fields.description = description;
+  if (description !== undefined) fields.description = String(description || '').slice(0, 2000);
   if (image !== undefined) fields.image = normalizeImage(image);
-  if (slot !== undefined) {
-    fields.slot = normalizeSlot(slot);
-    if (fields.slot) fields.usable = true;
-  }
+  if (slot !== undefined) { fields.slot = normalizeSlot(slot); if (fields.slot) fields.usable = true; }
   if (usable !== undefined) fields.usable = Boolean(usable);
   if (statBonus !== undefined) fields.statBonus = normalizeStatBonus(statBonus);
+  if (useAction !== undefined) fields.useAction = normalizeUseAction(useAction);
+  if (fields.useAction?.type === 'donner_objet' && !(await col.findOne({ _id: fields.useAction.itemId }))) {
+    throw new Error("L'objet à donner n'existe pas dans le catalogue.");
+  }
+  fields.updatedAt = new Date();
 
-  if (fields.useAction?.type === 'donner_objet') {
-    const reward = await col.findOne({ _id: fields.useAction.itemId });
-    if (!reward || isReservedId(reward._id)) throw new Error("L'objet à donner n'existe pas dans le catalogue.");
+  if (newId === String(itemId)) {
+    const result = await col.findOneAndUpdate({ _id: String(itemId) }, { $set: fields }, { returnDocument: 'after' });
+    const doc = result?.value || result;
+    if (!doc) throw new Error('Objet introuvable.');
+    return toItem(doc);
   }
 
-  if (newId === itemId) {
-    const result = await col.findOneAndUpdate({ _id: itemId }, { $set: fields }, { returnDocument: 'after' });
-    if (!result) throw new Error('Objet introuvable.');
-    return toItem(result);
-  }
-
-  // MongoDB interdit de modifier directement _id : on recrée le document sous
-  // le nouvel ID puis on migre les références connues (inventaires, équipement
-  // et utilités « donner un objet ») avant de supprimer l'ancien document.
+  // Renommage : migre inventaires, emplacements et actions donnant cet objet.
   const newDoc = { ...oldDoc, ...fields, _id: newId };
   await col.insertOne(newDoc);
-
   try {
     const invCol = await getInvCollection();
-    await invCol.updateMany(
-      { [`items.${itemId}`]: { $exists: true } },
-      { $rename: { [`items.${itemId}`]: `items.${newId}` }, $set: { updatedAt: new Date() } }
-    );
-
+    await invCol.updateMany({ [`items.${itemId}`]: { $exists: true } }, { $rename: { [`items.${itemId}`]: `items.${newId}` }, $set: { updatedAt: new Date() } });
     for (const slotName of EQUIPMENT_SLOTS) {
-      await invCol.updateMany(
-        { [`equipement.${slotName}`]: itemId },
-        { $set: { [`equipement.${slotName}`]: newId, updatedAt: new Date() } }
-      );
+      await invCol.updateMany({ [`equipement.${slotName}`]: String(itemId) }, { $set: { [`equipement.${slotName}`]: newId, updatedAt: new Date() } });
     }
-
-    await col.updateMany(
-      { 'useAction.itemId': itemId },
-      { $set: { 'useAction.itemId': newId } }
-    );
-
-    await col.deleteOne({ _id: itemId });
-  } catch (err) {
-    // Si la migration des références échoue, on supprime le doublon créé et
-    // laisse l'ancien objet intact pour éviter une perte de catalogue.
+    await col.updateMany({ 'useAction.itemId': String(itemId) }, { $set: { 'useAction.itemId': newId, updatedAt: new Date() } });
+    await col.deleteOne({ _id: String(itemId) });
+  } catch (error) {
     await col.deleteOne({ _id: newId }).catch(() => {});
-    throw err;
+    throw error;
   }
-
   return toItem(newDoc);
 }
-/**
- * Supprime un objet du catalogue. Les personnages qui en possédaient gardent
- * l'entrée dans leur inventaire (avec une quantité), juste affichée avec un
- * nom générique — pas de suppression en cascade.
- */
 async function removeCatalogItem(itemId) {
   if (isReservedId(itemId)) return false;
-  const col = await getItemCatalogCollection();
-  const result = await col.deleteOne({ _id: itemId });
+  const col = await catalogCollection();
+  const result = await col.deleteOne({ _id: String(itemId) });
   return result.deletedCount > 0;
 }
-
-/** Supprime tout le catalogue d'un coup, SAUF les marqueurs (sinon le bot/site réamorcerait les objets par défaut). */
 async function clearCatalog() {
-  const col = await getItemCatalogCollection();
+  const col = await catalogCollection();
   const result = await col.deleteMany({ _id: { $not: RESERVED_ID } });
   return result.deletedCount || 0;
 }
 
-/** Inventaire brut d'un profil (jamais null : { _id, items: {} } si rien n'existe encore). */
 async function getInventory(profileId) {
   const col = await getInvCollection();
-  const doc = await col.findOne({ _id: profileId });
-  return doc || { _id: profileId, items: {} };
+  const doc = await col.findOne({ _id: String(profileId) });
+  return { _id: String(profileId), items: doc?.items || {}, equipement: { ...emptyEquipement(), ...(doc?.equipement || {}) }, updatedAt: doc?.updatedAt || null };
 }
-
-/** Inventaires de TOUS les profils d'un coup (pour la liste "Inventaire" du site). */
 async function listAllInventories() {
   const col = await getInvCollection();
-  return col.find().toArray();
+  return col.find({}).toArray();
 }
-
 async function addItem(profileId, itemId, quantity = 1) {
   const item = await getItem(itemId);
   if (!item) return { ok: false, reason: 'unknown_item' };
-
-  const qty = Math.max(1, Math.floor(quantity) || 1);
+  const qty = Math.max(1, Math.floor(Number(quantity) || 1));
   const col = await getInvCollection();
-  await col.updateOne(
-    { _id: profileId },
-    { $inc: { [`items.${item.id}`]: qty }, $set: { updatedAt: new Date() } },
-    { upsert: true },
-  );
-
-  const doc = await col.findOne({ _id: profileId });
-  return { ok: true, item, quantity: doc.items[item.id] };
+  await col.updateOne({ _id: String(profileId) }, { $inc: { [`items.${item.id}`]: qty }, $set: { updatedAt: new Date() } }, { upsert: true });
+  const doc = await col.findOne({ _id: String(profileId) });
+  return { ok: true, item, quantity: Number(doc?.items?.[item.id]) || 0 };
 }
-
 async function removeItem(profileId, itemId, quantity = 1, { exact = false } = {}) {
   const item = await getItem(itemId);
   if (!item) return { ok: false, reason: 'unknown_item' };
-
   const col = await getInvCollection();
-  const qty = Math.max(1, Math.floor(quantity) || 1);
+  const qty = Math.max(1, Math.floor(Number(quantity) || 1));
   const path = `items.${item.id}`;
-
-  // Écriture « optimiste » : on ne modifie que si la quantité n'a pas bougé depuis
-  // la lecture (filtre sur la valeur lue). Si le bot, le site ou un autre module a
-  // modifié l'inventaire entre-temps, on relit et on réessaie : plus de pertes ni
-  // de doublons d'objets en cas d'actions simultanées.
   for (let attempt = 0; attempt < 8; attempt++) {
-    const doc = await col.findOne({ _id: profileId }, { projection: { [path]: 1 } });
+    const doc = await col.findOne({ _id: String(profileId) }, { projection: { [path]: 1 } });
     const current = Number(doc?.items?.[item.id]) || 0;
-
     if (current <= 0) return { ok: false, reason: 'not_owned', item };
-    // exact: true => refuse (sans rien retirer) si le joueur n'en a pas assez.
     if (exact && current < qty) return { ok: false, reason: 'insufficient', item, owned: current };
-
     const removed = Math.min(qty, current);
     const remaining = current - removed;
     const update = remaining > 0
       ? { $set: { [path]: remaining, updatedAt: new Date() } }
       : { $unset: { [path]: '' }, $set: { updatedAt: new Date() } };
-
-    const result = await col.updateOne({ _id: profileId, [path]: current }, update);
+    const result = await col.updateOne({ _id: String(profileId), [path]: current }, update);
     if (result.matchedCount === 1) return { ok: true, item, quantity: remaining, removed };
   }
   return { ok: false, reason: 'conflict', item };
 }
-
-/** Fixe directement la quantité d'un objet (au lieu d'incrémenter/décrémenter). */
 async function setItemQuantity(profileId, itemId, quantity) {
   const item = await getItem(itemId);
   if (!item) return { ok: false, reason: 'unknown_item' };
-
-  const qty = Math.max(0, Math.floor(quantity) || 0);
+  const qty = Math.max(0, Math.floor(Number(quantity) || 0));
   const col = await getInvCollection();
-
-  if (qty <= 0) {
-    await col.updateOne({ _id: profileId }, { $unset: { [`items.${item.id}`]: '' }, $set: { updatedAt: new Date() } }, { upsert: true });
-  } else {
-    await col.updateOne({ _id: profileId }, { $set: { [`items.${item.id}`]: qty, updatedAt: new Date() } }, { upsert: true });
-  }
+  const update = qty > 0
+    ? { $set: { [`items.${item.id}`]: qty, updatedAt: new Date() } }
+    : { $unset: { [`items.${item.id}`]: '' }, $set: { updatedAt: new Date() } };
+  await col.updateOne({ _id: String(profileId) }, update, { upsert: true });
   return { ok: true, item, quantity: qty };
 }
 
+async function useItem(profileId, itemId, options = {}) {
+  const item = await getItem(itemId);
+  if (!item) return { ok: false, reason: 'unknown_item' };
+  const inventory = await getInventory(profileId);
+  if (!(Number(inventory.items[itemId]) > 0)) return { ok: false, reason: 'not_owned', item };
+  if (!item.usable) return { ok: false, reason: 'not_usable', item };
+
+  if (item.useAction) {
+    const action = item.useAction;
+    if (action.type === 'message') {
+      if (typeof options.sendMessage !== 'function') return { ok: false, reason: 'message_sender_missing', item };
+      const variables = options.variables || {};
+      const content = action.message.replaceAll('{joueur}', variables.joueur || '')
+        .replaceAll('{personnage}', variables.personnage || '').replaceAll('{objet}', item.name || '');
+      const removed = await removeItem(profileId, itemId, 1);
+      if (!removed.ok) return removed;
+      try { await options.sendMessage(content); }
+      catch (error) { await addItem(profileId, itemId, 1); return { ok: false, reason: 'message_failed', item, error }; }
+      return { ok: true, item, consumed: true, quantity: removed.quantity, actionType: 'message' };
+    }
+    if (action.type === 'donner_objet') {
+      const reward = await getItem(action.itemId);
+      if (!reward) return { ok: false, reason: 'reward_unknown', item };
+      const removed = await removeItem(profileId, itemId, 1);
+      if (!removed.ok) return removed;
+      const added = await addItem(profileId, reward.id, action.quantity || 1);
+      if (!added.ok) { await addItem(profileId, itemId, 1); return { ok: false, reason: 'reward_failed', item }; }
+      return { ok: true, item, consumed: true, quantity: removed.quantity, actionType: 'donner_objet', reward, rewardQuantity: action.quantity || 1, rewardTotalQuantity: added.quantity };
+    }
+    if (action.type === 'stat') {
+      const removed = await removeItem(profileId, itemId, 1);
+      if (!removed.ok) return removed;
+      try {
+        const statResult = action.mode === 'temporaire'
+          ? await addTemporaryStatEffect(profileId, action.stat, action.amount, action.durationMinutes)
+          : await applyPermanentStatChange(profileId, action.stat, action.amount);
+        if (!statResult) throw new Error('Profil introuvable.');
+        return { ok: true, item, consumed: true, quantity: removed.quantity, actionType: 'stat', stat: action.stat, amount: action.amount, mode: action.mode, durationMinutes: action.durationMinutes, statResult };
+      } catch (error) {
+        await addItem(profileId, itemId, 1).catch(() => {});
+        return { ok: false, reason: 'stat_failed', item, error };
+      }
+    }
+  }
+  if (item.slot) return equipItem(profileId, itemId);
+  const removed = await removeItem(profileId, itemId, 1);
+  return removed.ok ? { ok: true, item, consumed: true, quantity: removed.quantity } : removed;
+}
+async function equipItem(profileId, itemId) {
+  const item = await getItem(itemId);
+  if (!item) return { ok: false, reason: 'unknown_item' };
+  if (!item.slot) return { ok: false, reason: 'not_equipable', item };
+  const inventory = await getInventory(profileId);
+  if (!(Number(inventory.items[itemId]) > 0)) return { ok: false, reason: 'not_owned', item };
+  const previousItemId = inventory.equipement[item.slot] || null;
+  const removed = await removeItem(profileId, itemId, 1);
+  if (!removed.ok) return removed;
+  const col = await getInvCollection();
+  await col.updateOne({ _id: String(profileId) }, { $set: { [`equipement.${item.slot}`]: itemId, updatedAt: new Date() } }, { upsert: true });
+  if (previousItemId) await addItem(profileId, previousItemId, 1);
+  return { ok: true, item, slot: item.slot, previousItem: previousItemId ? await getItem(previousItemId) : null };
+}
+async function unequipSlot(profileId, slot) {
+  if (!EQUIPMENT_SLOTS.includes(slot)) return { ok: false, reason: 'invalid_slot' };
+  const inventory = await getInventory(profileId);
+  const itemId = inventory.equipement[slot];
+  if (!itemId) return { ok: false, reason: 'empty_slot' };
+  const col = await getInvCollection();
+  await col.updateOne({ _id: String(profileId) }, { $set: { [`equipement.${slot}`]: null, updatedAt: new Date() } }, { upsert: true });
+  await addItem(profileId, itemId, 1);
+  return { ok: true, item: await getItem(itemId), slot };
+}
+async function getEquippedStatBonuses(profileId) {
+  const inventory = await getInventory(profileId);
+  const ids = EQUIPMENT_SLOTS.map(slot => inventory.equipement[slot]).filter(Boolean);
+  if (!ids.length) return {};
+  const items = await Promise.all(ids.map(getItem));
+  const result = {};
+  for (const item of items) for (const [stat, value] of Object.entries(item?.statBonus || {})) {
+    const amount = Number(value) || 0;
+    if (amount) result[stat] = (result[stat] || 0) + amount;
+  }
+  return result;
+}
+async function giveItem(fromProfileId, toProfileId, itemId, quantity = 1) {
+  const removed = await removeItem(fromProfileId, itemId, quantity, { exact: true });
+  if (!removed.ok) return removed;
+  const added = await addItem(toProfileId, itemId, removed.removed);
+  if (!added.ok) { await addItem(fromProfileId, itemId, removed.removed); return added; }
+  return { ok: true, item: removed.item, quantity: removed.removed, quantityDestinataire: added.quantity };
+}
+async function formatInventory(profileId, nomPrenom) {
+  const inventory = await getInventory(profileId);
+  const catalog = await getCatalog();
+  const lookup = new Map(catalog.map(item => [item.id, item]));
+  const entries = Object.entries(inventory.items || {}).filter(([, quantity]) => Number(quantity) > 0);
+  const lines = [`# 🎒 Inventaire - ${nomPrenom}`, ''];
+  if (!entries.length) lines.push('*Inventaire vide.*');
+  else {
+    const grouped = new Map();
+    for (const [id, quantity] of entries) {
+      const item = lookup.get(id) || { id, name: id, emoji: '❔', category: 'Autre' };
+      if (!grouped.has(item.category || 'Autre')) grouped.set(item.category || 'Autre', []);
+      grouped.get(item.category || 'Autre').push({ item, quantity });
+    }
+    for (const [category, items] of grouped) {
+      lines.push(`**${category}**`);
+      for (const { item, quantity } of items) lines.push(`${item.emoji || '❔'} ${item.name} - x${quantity}`);
+      lines.push('');
+    }
+  }
+  const equipped = EQUIPMENT_SLOTS.map(slot => [slot, inventory.equipement[slot]]).filter(([, id]) => id);
+  if (equipped.length) {
+    lines.push('**Équipé**');
+    for (const [slot, id] of equipped) {
+      const item = lookup.get(id) || { name: id, emoji: '❔' };
+      lines.push(`${item.emoji} ${EQUIPMENT_SLOT_LABELS[slot]} : ${item.name}`);
+    }
+  }
+  return lines.join('\n').trim();
+}
+
 module.exports = {
-  EQUIPMENT_SLOTS,
-  EQUIPMENT_SLOT_LABELS,
-  ITEM_RARITIES,
-  normalizeUseAction,
-  getCatalog,
-  getExistingCatalogIds,
-  getCatalogMetadata,
-  getCatalogImageData,
-  getItem,
-  addCatalogItem,
-  updateCatalogItem,
-  removeCatalogItem,
-  clearCatalog,
-  getInventory,
-  listAllInventories,
-  addItem,
-  removeItem,
-  setItemQuantity,
+  EQUIPMENT_SLOTS, EQUIPMENT_SLOT_LABELS, ITEM_RARITIES, DEFAULT_CATALOG,
+  normalizeUseAction, getCatalog, getExistingCatalogIds, getCatalogMetadata, getCatalogImageData,
+  getItem, addCatalogItem, updateCatalogItem, removeCatalogItem, clearCatalog,
+  getInventory, listAllInventories, addItem, removeItem, setItemQuantity,
+  useItem, equipItem, unequipSlot, getEquippedStatBonuses, giveItem, formatInventory,
 };

@@ -1571,7 +1571,7 @@ async function chargerAdminPage() {
       <div class="admin-backup-bar">
         <div>
           <strong>💾 Sauvegarde</strong>
-          <p>Enregistre les profils, inventaires, catalogue et avatars dans MongoDB pour pouvoir restaurer l'état du site.</p>
+          <p>Enregistre toutes les collections applicatives du bot et du site dans MongoDB. Les sessions de connexion et les snapshots eux-mêmes sont exclus.</p>
         </div>
         <button class="btn-principal admin-backup-btn" onclick="creerBackup()">Créer une sauvegarde</button>
       </div>
@@ -1626,6 +1626,7 @@ const LOG_ICONES = {
   inventaire_retrait: '📤',
   backup_created: '💾',
   backup_restored: '↩️',
+  backup_deleted: '🗑️',
   craft_cree: '🛠️',
   craft_modifie: '✏️',
   craft_supprime: '🗑️',
@@ -1665,16 +1666,16 @@ function backupLigneHTML(backup) {
       <div class="backup-corps">
         <div class="backup-nom">${escapeHtml(backup.snapshotId || backup._id || 'Sauvegarde')}</div>
         <div class="backup-meta">${formatDateLog(backup.createdAt)} · ${escapeHtml(backup.createdBy?.username || 'Inconnu')}</div>
-        <div class="backup-meta">${collections}</div>
+        <div class="backup-meta">${backup.fullSnapshot ? `Sauvegarde complète · ${backup.files?.length || 0} image(s) · ` : 'Sauvegarde historique · '}${collections}</div>
       </div>
-      <button class="btn-secondaire btn-backup-restore" onclick="restaurerBackup('${jsAttr(backup.snapshotId || backup._id)}')">Restaurer</button>
+      <div class="backup-actions"><button class="btn-secondaire btn-backup-restore" onclick="restaurerBackup('${jsAttr(backup.snapshotId || backup._id)}')">Restaurer</button><button class="btn-secondaire btn-danger" onclick="supprimerBackup('${jsAttr(backup.snapshotId || backup._id)}')">Supprimer</button></div>
     </div>`;
 }
 
 async function creerBackup() {
   const ok = await confirmerAction({
     titre: 'Créer une sauvegarde',
-    message: 'Créer un instantané des profils, inventaires, catalogue et avatars actuels ?',
+    message: 'Créer une sauvegarde complète de toutes les collections applicatives du bot et du site ? Les sessions de connexion ne sont pas incluses.',
     texteValider: 'Sauvegarder',
   });
   if (!ok) return;
@@ -1692,7 +1693,7 @@ async function creerBackup() {
 async function restaurerBackup(backupId) {
   const ok = await confirmerAction({
     titre: 'Restaurer cette sauvegarde ?',
-    message: 'Le contenu actuel sera remplacé. Une sauvegarde de sécurité de l’état actuel sera créée automatiquement avant la restauration.',
+    message: 'Toutes les données applicatives seront remplacées par celles de cette sauvegarde. Une sauvegarde de sécurité complète de l’état actuel sera créée automatiquement avant la restauration.',
     texteValider: 'Restaurer',
   });
   if (!ok) return;
@@ -1704,6 +1705,24 @@ async function restaurerBackup(backupId) {
     await chargerAdminPage();
   } catch (error) {
     toast(`Échec de la restauration : ${error.message}`, 'erreur');
+  }
+}
+
+async function supprimerBackup(backupId) {
+  const ok = await confirmerAction({
+    titre: 'Supprimer cette sauvegarde ?',
+    message: 'Cette sauvegarde et toutes les données qui lui appartiennent seront définitivement supprimées. Cette action est irréversible.',
+    texteValider: 'Supprimer',
+  });
+  if (!ok) return;
+  try {
+    const r = await apiFetch(`/api/admin/backups/${encodeURIComponent(backupId)}`, { method: 'DELETE' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    toast('Sauvegarde supprimée.', 'succes');
+    await chargerAdminPage();
+  } catch (error) {
+    toast(`Échec de la suppression : ${error.message}`, 'erreur');
   }
 }
 

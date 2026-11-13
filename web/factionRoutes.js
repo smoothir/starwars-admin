@@ -1,6 +1,8 @@
 // Routes API de la catégorie « Factions » du site (troupes, chef, vaisseaux, inventaire, joueurs).
 // Les routes sont protégées par le même middleware d'authentification que le reste de /api
 // (ce fichier est branché dans server.js APRÈS ce middleware).
+const fs = require('fs/promises');
+const path = require('path');
 const store = require('../Data/factionStore.js');
 const { RANKS, SHIP_CLASSES, getRankIndex } = require('../Data/shipClasses.js');
 
@@ -49,7 +51,7 @@ async function getFactionMembers(factionKey) {
   return members.map(memberView);
 }
 
-function register(app, { logFromReq }) {
+function register(app, { logFromReq, recordEntityHistory }) {
   const wrap = (handler) => async (req, res) => {
     try {
       await handler(req, res);
@@ -66,11 +68,13 @@ function register(app, { logFromReq }) {
 
   app.get('/api/factions/meta', wrap(async (req, res) => {
     res.set('Cache-Control', 'no-store');
+    const images = await store.listShipClassImages();
     res.json({
       factions: store.listFactionDefs(),
       ranks: RANKS.map(r => ({ key: r.key, name: r.name })),
       classes: Object.entries(SHIP_CLASSES).map(([key, c]) => ({
-        key, label: c.label, size: c.size, squadrons: c.squadrons, defaults: c.defaults,
+        key, id: c.id, image: images[key] ? `/ship/${encodeURIComponent(images[key])}` : null,
+        label: c.label, size: c.size, squadrons: c.squadrons, defaults: c.defaults,
         requirement: c.leaderOnly ? 'Chef de faction' : RANKS[c.minRank].name,
       })),
       creditsItemId: store.CREDITS_ITEM_ID,
@@ -83,7 +87,7 @@ function register(app, { logFromReq }) {
     const out = [];
     for (const def of store.listFactionDefs()) {
       const [state, ships] = await Promise.all([store.getFactionState(def.key), store.listShips(def.key)]);
-      out.push({ ...def, troops: state.troops, credits: state.credits, leaderUserId: state.leaderUserId, shipCount: ships.length });
+      out.push({ ...def, troops: state.troops, credits: state.credits, reputation: state.reputation, leaderUserId: state.leaderUserId, shipCount: ships.length });
     }
     res.json(out);
   }));
@@ -123,6 +127,10 @@ function register(app, { logFromReq }) {
       await store.setLeader(def.key, leaderId);
       logFromReq(req, 'faction_chef', `${def.label} : chef = ${leaderId || 'aucun'}`);
     }
+    if (body.reputation !== undefined) {
+      const state = await store.setReputation(def.key, body.reputation);
+      logFromReq(req, 'faction_reputation', `${def.label} : réputation = ${state.reputation}/100`);
+    }
     res.json(await store.getFactionState(def.key));
   }));
 
@@ -133,9 +141,42 @@ function register(app, { logFromReq }) {
     res.json(state);
   }));
 
+  app.post('/api/factions/classes/:classKey/image', wrap(async (req, res) => {
+    const classKey = String(req.params.classKey || '');
+    const cls = SHIP_CLASSES[classKey];
+    if (!cls) throw new Error('Classe de vaisseau inconnue.');
+    const imageData = String(req.body?.imageData || '');
+    const match = imageData.match(/^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/=]+)$/i);
+    if (!match) throw new Error('Format d’image invalide (PNG, JPEG, WEBP ou GIF attendu).');
+    const mime = match[1].toLowerCase();
+    const buffer = Buffer.from(match[2], 'base64');
+    if (!buffer.length || buffer.length > 4 * 1024 * 1024) throw new Error('L’image doit peser 4 Mo maximum.');
+    const signatures = {
+      png: buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+      jpeg: buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff,
+      webp: buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP',
+      gif: ['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString()),
+    };
+    if (!signatures[mime]) throw new Error('Le contenu du fichier ne correspond pas à son format annoncé.');
+    const ext = mime === 'jpeg' ? 'jpg' : mime;
+    const filename = `${cls.imageBaseName}.${ext}`;
+    const directory = path.join(__dirname, 'ship');
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(path.join(directory, filename), buffer, { flag: 'w' });
+    const image = await store.setShipClassImage(classKey, filename);
+    for (const oldExt of ['png', 'jpg', 'jpeg', 'webp', 'gif']) {
+      const previousFilename = `${cls.imageBaseName}.${oldExt}`;
+      if (previousFilename !== filename) await fs.unlink(path.join(directory, previousFilename)).catch(() => {});
+    }
+    logFromReq(req, 'faction_classe_image', `Image de classe remplacée : ${cls.label} (${cls.id})`);
+    res.json({ ok: true, image });
+  }));
+
   app.post('/api/factions/:key/vaisseaux', wrap(async (req, res) => {
     const def = needFaction(req, res); if (!def) return;
     const ship = await store.createShip(def.key, req.body);
+    const afterDocument = await store.getShipRecord(ship.id);
+    if (recordEntityHistory) await recordEntityHistory(req, { entityType: 'vaisseau', collectionName: 'faction_ships', beforeDocument: null, afterDocument, action: 'creation', entityName: ship.name });
     logFromReq(req, 'faction_vaisseau_creation', `${def.label} : ${ship.name} (${ship.className})`);
     res.status(201).json(ship);
   }));
@@ -149,16 +190,31 @@ function register(app, { logFromReq }) {
 
   app.put('/api/factions/:key/vaisseaux/:shipId', wrap(async (req, res) => {
     const ctx = await ownShip(req, res); if (!ctx) return;
+    const beforeDocument = await store.getShipRecord(ctx.ship.id);
     const updated = await store.updateShip(ctx.ship.id, req.body);
+    const afterDocument = await store.getShipRecord(ctx.ship.id);
+    if (recordEntityHistory) await recordEntityHistory(req, { entityType: 'vaisseau', collectionName: 'faction_ships', beforeDocument, afterDocument, action: 'modification', entityName: updated.name });
     logFromReq(req, 'faction_vaisseau_modification', `${ctx.def.label} : ${updated.name}`);
     res.json(updated);
   }));
 
   app.delete('/api/factions/:key/vaisseaux/:shipId', wrap(async (req, res) => {
     const ctx = await ownShip(req, res); if (!ctx) return;
+    const beforeDocument = await store.getShipRecord(ctx.ship.id);
     await store.deleteShip(ctx.ship.id);
+    if (recordEntityHistory) await recordEntityHistory(req, { entityType: 'vaisseau', collectionName: 'faction_ships', beforeDocument, afterDocument: null, action: 'suppression', entityName: ctx.ship.name });
     logFromReq(req, 'faction_vaisseau_suppression', `${ctx.def.label} : ${ctx.ship.name}`);
     res.json({ ok: true });
+  }));
+
+  app.put('/api/factions/:key/vaisseaux/:shipId/reparer', wrap(async (req, res) => {
+    const ctx = await ownShip(req, res); if (!ctx) return;
+    const beforeDocument = await store.getShipRecord(ctx.ship.id);
+    const repaired = await store.repairShip(ctx.ship.id);
+    const afterDocument = await store.getShipRecord(ctx.ship.id);
+    if (recordEntityHistory) await recordEntityHistory(req, { entityType: 'vaisseau', collectionName: 'faction_ships', beforeDocument, afterDocument, action: 'réparation', entityName: repaired.name });
+    logFromReq(req, 'faction_vaisseau_reparation', `${ctx.def.label} : ${repaired.name} réparé`);
+    res.json(repaired);
   }));
 
   app.put('/api/factions/:key/vaisseaux/:shipId/pilote', wrap(async (req, res) => {
@@ -172,7 +228,10 @@ function register(app, { logFromReq }) {
       const state = await store.getFactionState(ctx.def.key);
       member = { inFaction: Boolean(target), rankIndex: target ? getRankIndex(target.roles) : -1, isLeader: state.leaderUserId === userId };
     }
+    const beforeDocument = await store.getShipRecord(ctx.ship.id);
     const updated = await store.assignShip(ctx.ship.id, userId, member);
+    const afterDocument = await store.getShipRecord(ctx.ship.id);
+    if (recordEntityHistory) await recordEntityHistory(req, { entityType: 'vaisseau', collectionName: 'faction_ships', beforeDocument, afterDocument, action: 'changement de pilote', entityName: updated.name });
     logFromReq(req, 'faction_vaisseau_pilote', `${ctx.def.label} : ${updated.name} → ${userId || 'personne'}`);
     res.json(updated);
   }));

@@ -60,7 +60,7 @@
 .fac-tab small { opacity: .6; font-size: .75rem; font-weight: 600; }
 
 /* ---------- Cartes de résumé ---------- */
-.fac-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 38px; }
+.fac-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 38px; }
 .fac-card {
   background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
   padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0;
@@ -100,6 +100,24 @@
 .fac-stats span { display: block; opacity: .55; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; margin-bottom: 1px; }
 .fac-ship-actions { display: flex; gap: 8px; margin-top: auto; }
 .fac-ship-actions button { flex: 1; height: 38px; padding: 0 10px; }
+
+
+.fac-ship-image { width: 100%; height: 128px; object-fit: contain; border-radius: var(--radius); background: rgba(0,0,0,.16); }
+.fac-ship-image-empty { display: grid; place-items: center; color: var(--text-muted); font-size: .8rem; }
+.fac-class-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: .75rem; opacity: .8; }
+.fac-class-meta > span:first-child, .fac-class-preview-info > span:first-of-type { font-family: monospace; }
+.fac-footprint { display: grid; grid-template-columns: repeat(var(--footprint-w), 9px); gap: 2px; width: max-content; }
+.fac-footprint i { display: block; width: 9px; height: 9px; border: 1px solid var(--border-gold); background: rgba(199,166,92,.4); border-radius: 1px; }
+.fac-ship-actions { flex-wrap: wrap; }
+.fac-ship-actions button { flex: 1 1 40%; }
+.fac-ship-actions button:disabled { opacity: .35; cursor: not-allowed; }
+.fac-class-preview { display: flex; align-items: center; gap: 16px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: rgba(255,255,255,.025); }
+.fac-class-preview img, .fac-class-preview-empty { width: 150px; height: 94px; flex: 0 0 150px; object-fit: contain; border-radius: 6px; background: rgba(0,0,0,.18); }
+.fac-class-preview-empty { display: grid; place-items: center; text-align: center; font-size: .75rem; opacity: .55; }
+.fac-class-preview-info { display: flex; flex-direction: column; gap: 5px; font-size: .8rem; }
+.fac-class-preview-info strong { color: #fff; font-size: .95rem; }
+.fac-class-preview-info .fac-footprint { margin-top: 4px; }
+@media (max-width: 520px) { .fac-class-preview { align-items: flex-start; flex-direction: column; } }
 
 /* ---------- Joueurs ---------- */
 .fac-table-wrap { overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-card); }

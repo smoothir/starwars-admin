@@ -57,7 +57,7 @@ const {
   removeItem,
   setItemQuantity,
 } = require('../Data/invStore.js');
-const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup } = require('../Data/adminStore.js');
+const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup, deleteBackup } = require('../Data/adminStore.js');
 const { connect, getItemCatalogCollection, getBoutiqueItemsCollection, getBoutiqueStateCollection, getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection, getCharacterTraitsCollection } = require('../Data/mongo.js');
 
 const app = express();
@@ -69,6 +69,7 @@ const app = express();
 const bigJson = express.json({ limit: '10mb' });
 app.use('/api/profils', bigJson);
 app.use('/api/inventaire/catalogue', bigJson);
+app.use('/api/factions/classes', bigJson);
 app.use(express.json({ limit: '1mb' }));
 
 // En-têtes de sécurité de base (équivalent minimal de helmet, sans dépendance).
@@ -187,6 +188,7 @@ app.get('/iconpages.png', (req, res) => {
   return res.sendFile(iconPath);
 });
 
+app.use('/ship', express.static(path.join(__dirname, 'ship'), { maxAge: '1d' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Qui est connecte (utilise par le site au chargement pour savoir si une
@@ -318,7 +320,7 @@ function logFromReq(req, action, details) {
 
 
 const HISTORY_COLLECTION = 'site_change_history';
-const HISTORY_ALLOWED_COLLECTIONS = new Set(['profils', 'item_catalog', 'craft_recipes', 'production_recipes', 'personnel_types', 'boutique_items', 'inv']);
+const HISTORY_ALLOWED_COLLECTIONS = new Set(['profils', 'item_catalog', 'craft_recipes', 'production_recipes', 'personnel_types', 'boutique_items', 'inv', 'faction_ships']);
 
 async function recordEntityHistory(req, { entityType, collectionName, beforeDocument, afterDocument, action, entityName }) {
   try {
@@ -505,7 +507,7 @@ app.get('/api/admin/backups', async (req, res) => {
 app.post('/api/admin/backups', async (req, res) => {
   try {
     const backup = await createBackup(req.session.user);
-    const details = `A créé une sauvegarde des données du site (${Object.entries(backup.collections).map(([name, count]) => `${name}: ${count}`).join(', ')}).`;
+    const details = `A créé une sauvegarde complète des données applicatives (${Object.entries(backup.collections).map(([name, count]) => `${name}: ${count}`).join(', ')}).`;
     await logAction({
       ...req.session.user,
       action: 'backup_created',
@@ -534,6 +536,23 @@ app.post('/api/admin/backups/:backupId/restore', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/admin/backups/:backupId', async (req, res) => {
+  try {
+    const backupId = String(req.params.backupId || '');
+    const result = await deleteBackup(backupId);
+    await logAction({
+      ...req.session.user,
+      action: 'backup_deleted',
+      details: `A supprimé la sauvegarde ${backupId}.`,
+      metadata: { backupId },
+    });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error(err);
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -1654,7 +1673,7 @@ app.delete('/api/boutique/:itemId', async (req, res) => {
 
 
 // Catégorie « Factions » (troupes, chef, vaisseaux, inventaire) — protégée par le middleware /api ci-dessus.
-require('./factionRoutes.js').register(app, { logFromReq });
+require('./factionRoutes.js').register(app, { logFromReq, recordEntityHistory });
 
 app.listen(PORT, () => {
   console.log(`✅ Site admin lancé sur http://localhost:${PORT}`);

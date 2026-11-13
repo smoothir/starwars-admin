@@ -674,12 +674,14 @@ h1, h2, h3, h4 {
 .backup-corps { flex: 1; min-width: 0; }
 .backup-nom { color: var(--text-primary); font-size: 0.8rem; font-weight: 700; overflow-wrap: anywhere; }
 .backup-meta { margin-top: 3px; color: var(--text-muted); font-size: 0.68rem; line-height: 1.4; }
+.backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 .btn-backup-restore { flex-shrink: 0; padding: 8px 12px; }
 .log-entry .btn-backup-restore { align-self: center; }
 @media (max-width: 700px) {
   .admin-backup-bar { align-items: flex-start; flex-direction: column; }
   .admin-backup-btn { width: 100%; }
   .backup-ligne { align-items: flex-start; }
+  .backup-actions { flex-direction: column; }
 }
 
 /* =========================================================================
