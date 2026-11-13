@@ -115,6 +115,26 @@ async function listShips(factionKey) {
   const docs = await (await shipsCol()).find(factionKey ? { factionKey } : {}).sort({ name: 1 }).toArray();
   return docs.map(shipFromDoc);
 }
+/** Résumé de toutes les factions en deux lectures MongoDB, sans charger les vaisseaux complets. */
+async function listFactionSummaries() {
+  const defs = listFactionDefs();
+  if (!defs.length) return [];
+  const keys = defs.map(def => def.key);
+  const [states, counts] = await Promise.all([
+    (await factionsCol()).find({ _id: { $in: keys } }).project({ troops: 1, leaderUserId: 1, reputation: 1, items: 1 }).toArray(),
+    (await shipsCol()).aggregate([
+      { $match: { factionKey: { $in: keys } } },
+      { $group: { _id: '$factionKey', shipCount: { $sum: 1 } } },
+    ]).toArray(),
+  ]);
+  const stateByKey = new Map(states.map(doc => [doc._id, doc]));
+  const countByKey = new Map(counts.map(doc => [doc._id, doc.shipCount]));
+  return defs.map(def => {
+    const state = normalizeState(def.key, stateByKey.get(def.key));
+    return { ...def, troops: state.troops, credits: state.credits, reputation: state.reputation,
+      leaderUserId: state.leaderUserId, shipCount: countByKey.get(def.key) || 0 };
+  });
+}
 async function getShipRecord(shipId) { return (await shipsCol()).findOne({ _id: String(shipId) }); }
 async function getShip(shipId) { return shipFromDoc(await getShipRecord(shipId)); }
 async function createShip(factionKey, body) {
@@ -220,6 +240,6 @@ async function setShipClassImage(classKey, filename, imageData = null) {
 }
 module.exports = {
   repairShip, transferShip, assertShipNotInBattle, getShipRecord, listShipClassImages, getShipClassImageBuffer, setShipClassImage,
-  CREDITS_ITEM_ID, listFactionDefs, getFactionDef, getFactionState, setTroops, adjustTroops, setLeader, setReputation,
+  CREDITS_ITEM_ID, listFactionDefs, listFactionSummaries, getFactionDef, getFactionState, setTroops, adjustTroops, setLeader, setReputation,
   setFactionItem, adjustFactionItem, listShips, getShip, createShip, updateShip, deleteShip, assignShip,
 };

@@ -81,19 +81,10 @@ function register(app, { logFromReq, recordEntityHistory }) {
     if (!meta || Date.now() - classMetaCache.at > CLASS_META_TTL_MS) {
       if (!classMetaPromise) {
         classMetaPromise = (async () => {
+          // Ne jamais synchroniser les fichiers d'images pendant l'ouverture de la page.
+          // La migration est inutile pour construire les métadonnées et provoquait une
+          // série de lectures MongoDB + disque (une par classe) à chaque expiration du cache.
           const images = await store.listShipClassImages();
-          // Migration des anciennes images en parallèle, une seule fois par période de cache.
-          await Promise.all(Object.entries(images).map(async ([classKey, filename]) => {
-            try {
-              if (await store.getShipClassImageBuffer(classKey)) return;
-              const safeFilename = path.basename(String(filename || ''));
-              if (!safeFilename) return;
-              const imageBuffer = await fs.readFile(path.join(__dirname, 'ship', safeFilename));
-              await store.setShipClassImage(classKey, safeFilename, imageBuffer);
-            } catch (err) {
-              if (err.code !== 'ENOENT') console.warn(`Image de classe ${classKey} non synchronisée :`, err.message);
-            }
-          }));
           return {
             factions: store.listFactionDefs(),
             ranks: RANKS.map(r => ({ key: r.key, name: r.name })),
@@ -118,10 +109,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
 
   app.get('/api/factions', wrap(async (req, res) => {
     res.set('Cache-Control', 'private, max-age=15, stale-while-revalidate=30');
-    const out = await Promise.all(store.listFactionDefs().map(async def => {
-      const [state, ships] = await Promise.all([store.getFactionState(def.key), store.listShips(def.key)]);
-      return { ...def, troops: state.troops, credits: state.credits, reputation: state.reputation, leaderUserId: state.leaderUserId, shipCount: ships.length };
-    }));
+    const out = await store.listFactionSummaries();
     res.json(out);
   }));
 
