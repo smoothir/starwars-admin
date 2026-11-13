@@ -8,7 +8,11 @@ const { RANKS, SHIP_CLASSES, getRankIndex } = require('../Data/shipClasses.js');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const MEMBERS_TTL_MS = 60 * 1000;
+const CLASS_META_TTL_MS = 5 * 60 * 1000;
 let membersCache = { at: 0, list: null };
+let membersPromise = null;
+let classMetaCache = { at: 0, value: null };
+let classMetaPromise = null;
 
 function botToken() { return process.env.DISCORD_BOT_TOKEN || ''; }
 function discordReady() { return Boolean(botToken() && process.env.GUILD_ID); }
@@ -23,16 +27,21 @@ async function discordGet(path) {
 async function fetchGuildMembers(force = false) {
   if (!discordReady()) return [];
   if (!force && membersCache.list && Date.now() - membersCache.at < MEMBERS_TTL_MS) return membersCache.list;
-  const all = [];
-  let after = '0';
-  for (let page = 0; page < 10; page++) {
-    const batch = await discordGet(`/guilds/${process.env.GUILD_ID}/members?limit=1000&after=${after}`);
-    all.push(...batch);
-    if (batch.length < 1000) break;
-    after = batch[batch.length - 1].user.id;
-  }
-  membersCache = { at: Date.now(), list: all };
-  return all;
+  if (membersPromise) return membersPromise;
+  membersPromise = (async () => {
+    const all = [];
+    let after = '0';
+    for (let page = 0; page < 10; page++) {
+      const batch = await discordGet(`/guilds/${process.env.GUILD_ID}/members?limit=1000&after=${after}`);
+      all.push(...batch);
+      if (batch.length < 1000) break;
+      after = batch[batch.length - 1].user.id;
+    }
+    membersCache = { at: Date.now(), list: all };
+    return all;
+  })();
+  try { return await membersPromise; }
+  finally { membersPromise = null; }
 }
 
 function memberView(m) {
@@ -67,42 +76,52 @@ function register(app, { logFromReq, recordEntityHistory }) {
   };
 
   app.get('/api/factions/meta', wrap(async (req, res) => {
-    res.set('Cache-Control', 'no-store');
-    const images = await store.listShipClassImages();
-    // Migration transparente : les anciennes images étaient enregistrées sur disque
-    // et seul leur nom était stocké dans MongoDB. Le bot lit désormais les octets
-    // depuis MongoDB, commun au site et au bot.
-    for (const [classKey, filename] of Object.entries(images)) {
-      if (await store.getShipClassImageBuffer(classKey)) continue;
-      const safeFilename = path.basename(String(filename || ''));
-      if (!safeFilename) continue;
+    res.set('Cache-Control', 'private, max-age=60');
+    let meta = classMetaCache.value;
+    if (!meta || Date.now() - classMetaCache.at > CLASS_META_TTL_MS) {
+      if (!classMetaPromise) {
+        classMetaPromise = (async () => {
+          const images = await store.listShipClassImages();
+          // Migration des anciennes images en parallèle, une seule fois par période de cache.
+          await Promise.all(Object.entries(images).map(async ([classKey, filename]) => {
+            try {
+              if (await store.getShipClassImageBuffer(classKey)) return;
+              const safeFilename = path.basename(String(filename || ''));
+              if (!safeFilename) return;
+              const imageBuffer = await fs.readFile(path.join(__dirname, 'ship', safeFilename));
+              await store.setShipClassImage(classKey, safeFilename, imageBuffer);
+            } catch (err) {
+              if (err.code !== 'ENOENT') console.warn(`Image de classe ${classKey} non synchronisée :`, err.message);
+            }
+          }));
+          return {
+            factions: store.listFactionDefs(),
+            ranks: RANKS.map(r => ({ key: r.key, name: r.name })),
+            classes: Object.entries(SHIP_CLASSES).map(([key, c]) => ({
+              key, id: c.id, image: images[key] ? `/ship/${encodeURIComponent(images[key])}` : null,
+              label: c.label, size: c.size, squadrons: c.squadrons, defaults: c.defaults,
+              requirement: c.leaderOnly ? 'Chef de faction' : RANKS[c.minRank].name,
+            })),
+            creditsItemId: store.CREDITS_ITEM_ID,
+          };
+        })();
+      }
       try {
-        const imageBuffer = await fs.readFile(path.join(__dirname, 'ship', safeFilename));
-        await store.setShipClassImage(classKey, safeFilename, imageBuffer);
-      } catch (err) {
-        if (err.code !== 'ENOENT') console.warn(`Image de classe ${classKey} non synchronisée :`, err.message);
+        meta = await classMetaPromise;
+        classMetaCache = { at: Date.now(), value: meta };
+      } finally {
+        classMetaPromise = null;
       }
     }
-    res.json({
-      factions: store.listFactionDefs(),
-      ranks: RANKS.map(r => ({ key: r.key, name: r.name })),
-      classes: Object.entries(SHIP_CLASSES).map(([key, c]) => ({
-        key, id: c.id, image: images[key] ? `/ship/${encodeURIComponent(images[key])}` : null,
-        label: c.label, size: c.size, squadrons: c.squadrons, defaults: c.defaults,
-        requirement: c.leaderOnly ? 'Chef de faction' : RANKS[c.minRank].name,
-      })),
-      creditsItemId: store.CREDITS_ITEM_ID,
-      discordReady: discordReady(),
-    });
+    res.json({ ...meta, discordReady: discordReady() });
   }));
 
   app.get('/api/factions', wrap(async (req, res) => {
-    res.set('Cache-Control', 'no-store');
-    const out = [];
-    for (const def of store.listFactionDefs()) {
+    res.set('Cache-Control', 'private, max-age=15, stale-while-revalidate=30');
+    const out = await Promise.all(store.listFactionDefs().map(async def => {
       const [state, ships] = await Promise.all([store.getFactionState(def.key), store.listShips(def.key)]);
-      out.push({ ...def, troops: state.troops, credits: state.credits, reputation: state.reputation, leaderUserId: state.leaderUserId, shipCount: ships.length });
-    }
+      return { ...def, troops: state.troops, credits: state.credits, reputation: state.reputation, leaderUserId: state.leaderUserId, shipCount: ships.length };
+    }));
     res.json(out);
   }));
 
@@ -178,6 +197,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(path.join(directory, filename), buffer, { flag: 'w' });
     const image = await store.setShipClassImage(classKey, filename, buffer);
+    classMetaCache = { at: 0, value: null };
     for (const baseName of new Set([cls.id, cls.imageBaseName])) {
       for (const oldExt of ['png', 'jpg', 'jpeg', 'webp', 'gif']) {
         const previousFilename = `${baseName}.${oldExt}`;

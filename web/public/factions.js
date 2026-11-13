@@ -1,7 +1,8 @@
 // Page « Factions » : troupes, chef, vaisseaux, joueurs, inventaire de faction.
 // Utilise les fonctions globales de app.js : apiFetch, escapeHtml, jsAttr, toast, confirmerAction.
 
-const facState = { meta: null, list: [], key: null, data: null, players: { ready: false, players: [] }, catalogue: [] };
+const facState = { meta: null, list: [], key: null, data: null, players: { ready: false, loading: false, players: [] }, catalogue: [], catalogueLoaded: false };
+let facCataloguePromise = null;
 
 async function facApi(url, method = 'GET', body) {
   const options = { method, headers: {} };
@@ -18,15 +19,16 @@ const facNum = (n) => Number(n || 0).toLocaleString('fr-FR');
 async function chargerFactionsPage() {
   const contenu = document.getElementById('contenu');
   contenu.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
+  // Le catalogue n'est pas nécessaire pour afficher les factions : on le charge en parallèle,
+  // sans retarder l'affichage des vaisseaux et des données principales.
+  void facChargerCatalogue().catch(() => {});
   try {
-    const [meta, list, catalogue] = await Promise.all([
+    const [meta, list] = await Promise.all([
       facApi('/api/factions/meta'),
       facApi('/api/factions'),
-      facApi('/api/inventaire/catalogue/meta').catch(() => []),
     ]);
     facState.meta = meta;
     facState.list = list;
-    facState.catalogue = Array.isArray(catalogue) ? catalogue : (catalogue.items || []);
     if (!facState.key || !list.some(f => f.key === facState.key)) facState.key = list[0]?.key || null;
     await facChargerFaction();
   } catch (err) {
@@ -34,49 +36,128 @@ async function chargerFactionsPage() {
   }
 }
 
-async function facChargerFaction() {
-  if (!facState.key) { document.getElementById('contenu').innerHTML = '<div class="etat-vide"><p>Aucune faction configurée.</p></div>'; return; }
-  const [data, players, list] = await Promise.all([
-    facApi(`/api/factions/${encodeURIComponent(facState.key)}`),
-    facApi(`/api/factions/${encodeURIComponent(facState.key)}/joueurs`).catch(() => ({ ready: false, players: [] })),
-    facApi('/api/factions'),
-  ]);
-  facState.data = data;
-  facState.players = players;
-  facState.list = list;
-  facRender();
+async function facChargerCatalogue() {
+  if (facState.catalogueLoaded) return facState.catalogue;
+  if (!facCataloguePromise) {
+    facCataloguePromise = (async () => {
+      const result = await facApi('/api/inventaire/catalogue/meta');
+      facState.catalogue = Array.isArray(result) ? result : (result.items || []);
+      facState.catalogueLoaded = true;
+      facActualiserSelecteurObjets();
+      return facState.catalogue;
+    })();
+  }
+  try { return await facCataloguePromise; }
+  finally { facCataloguePromise = null; }
 }
 
-function facChoisir(key) { facState.key = key; facChargerFaction().catch(err => toast(err.message, 'erreur')); }
+function facActualiserSelecteurObjets() {
+  const select = document.getElementById('fac-new-item');
+  if (!select || !facState.data) return;
+  const previous = select.value;
+  const creditItem = facState.meta.creditsItemId;
+  const existing = facState.data.state.items || {};
+  const options = facState.catalogue
+    .filter(c => String(c.id ?? c._id) !== creditItem && !(String(c.id ?? c._id) in existing))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'fr'))
+    .map(c => `<option value="${escapeAttr(c.id ?? c._id)}">${escapeHtml((c.emoji || '') + ' ' + (c.name || c.id))}</option>`).join('');
+  select.innerHTML = `<option value="">${facState.catalogueLoaded ? 'Ajouter un objet…' : 'Catalogue en cours de chargement…'}</option>${options}`;
+  if (previous && [...select.options].some(option => option.value === previous)) select.value = previous;
+}
+
+async function facChargerFaction() {
+  const selectedKey = facState.key;
+  if (!selectedKey) { document.getElementById('contenu').innerHTML = '<div class="etat-vide"><p>Aucune faction configurée.</p></div>'; return; }
+  document.getElementById('contenu').innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
+  const data = await facApi(`/api/factions/${encodeURIComponent(selectedKey)}`);
+  // Une réponse lente d'une ancienne sélection ne doit pas écraser la faction choisie ensuite.
+  if (selectedKey !== facState.key) return;
+  facState.data = data;
+  facState.players = { ready: false, loading: true, players: [] };
+  facState.list = facState.list.map(f => f.key === selectedKey ? {
+    ...f, troops: data.state.troops, credits: data.state.credits, reputation: data.state.reputation,
+    leaderUserId: data.state.leaderUserId, shipCount: data.ships.length,
+  } : f);
+  facRender();
+  // Discord peut prendre du temps (serveurs volumineux / pagination) : ce chargement
+  // reste indépendant afin que les cartes des vaisseaux apparaissent immédiatement.
+  void facChargerJoueurs(selectedKey);
+}
+
+async function facChargerJoueurs(selectedKey) {
+  try {
+    const players = await facApi(`/api/factions/${encodeURIComponent(selectedKey)}/joueurs`);
+    if (selectedKey !== facState.key) return;
+    facState.players = { ...players, loading: false, players: players.players || [] };
+  } catch (err) {
+    if (selectedKey !== facState.key) return;
+    facState.players = { ready: false, loading: false, players: [], error: err.message };
+  }
+  facActualiserJoueursUI();
+}
+
+function facChoisir(key) {
+  if (key === facState.key) return;
+  facState.key = key;
+  facChargerFaction().catch(err => toast(err.message, 'erreur'));
+}
 
 function facItemInfo(id) {
   const it = facState.catalogue.find(c => String(c.id ?? c._id) === String(id));
   return { name: it?.name || id, emoji: it?.emoji || '📦' };
 }
 
+function facLeaderControlHTML(state, players) {
+  if (players.loading) return '<div class="fac-hint">Chargement des joueurs Discord…</div>';
+  if (players.ready) {
+    return `<div class="fac-row"><select id="fac-leader" class="fac-select"><option value="">Aucun chef désigné</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === state.leaderUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select><button class="btn-secondaire fac-btn" onclick="facEnregistrerChef()">Valider</button></div><div class="fac-hint">Sans chef, le plus haut gradé présent commande en bataille.</div>`;
+  }
+  const playerName = players.players.find(p => p.id === state.leaderUserId)?.name || (state.leaderUserId ? `ID ${state.leaderUserId}` : 'Aucun chef désigné');
+  const note = players.error
+    ? `Impossible de charger les joueurs Discord : ${escapeHtml(players.error)}`
+    : 'Sans chef, le plus haut gradé présent commande en bataille. Désignation sur Discord avec <code>/faction chef</code>.';
+  return `<div class="fac-value">${escapeHtml(playerName)}</div><div class="fac-hint">${note}</div>`;
+}
+
+function facPlayersContentHTML(ships, players) {
+  if (players.loading) return '<div class="fac-note">Chargement des joueurs Discord… Les vaisseaux sont déjà disponibles.</div>';
+  if (players.ready) return facPlayersHTML(ships);
+  if (players.error) return `<div class="fac-note">Impossible de charger les joueurs Discord : ${escapeHtml(players.error)}</div>`;
+  return '<div class="fac-note">Pour lister les joueurs et attribuer des vaisseaux depuis le site, ajoute <code>DISCORD_BOT_TOKEN</code> dans le fichier <code>.env</code> du site. En attendant, utilise <code>/faction joueurs</code> et <code>/faction attribuer</code> sur Discord.</div>';
+}
+
+function facPilotControlHTML(ship, players) {
+  if (players.ready) {
+    return `<div><span class="fac-label">Pilote</span><select class="fac-select" onchange="facAssigner('${jsAttr(ship.id)}', this.value)"><option value="">Non attribué</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === ship.assignedUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select></div>`;
+  }
+  const status = players.loading ? 'Chargement…' : (ship.assignedUserId ? 'ID ' + escapeHtml(ship.assignedUserId) : 'Non attribué');
+  return `<div><span class="fac-label">Pilote</span><div class="fac-hint">${status}</div></div>`;
+}
+
+function facActualiserJoueursUI() {
+  if (!facState.data) return;
+  const leader = document.getElementById('fac-leader-control');
+  if (leader) leader.innerHTML = facLeaderControlHTML(facState.data.state, facState.players);
+  const players = document.getElementById('fac-players-content');
+  if (players) players.innerHTML = facPlayersContentHTML(facState.data.ships, facState.players);
+  for (const ship of facState.data.ships) {
+    const pilot = document.getElementById(`fac-ship-pilot-${ship.id}`);
+    if (pilot) pilot.innerHTML = facPilotControlHTML(ship, facState.players);
+  }
+}
+
 function facRender() {
   const { data, players, meta, list } = facState;
   const { def, state, ships } = data;
-  const playerName = (id) => players.players.find(p => p.id === id)?.name || (id ? `ID ${id}` : '');
-
   const tabs = list.map(f => `<button class="fac-tab ${f.key === facState.key ? 'active' : ''}" onclick="facChoisir('${jsAttr(f.key)}')">${escapeHtml(f.label)}<small>🚀 ${f.shipCount}</small></button>`).join('');
-
-  const leaderControl = players.ready
-    ? `<div class="fac-row"><select id="fac-leader" class="fac-select"><option value="">Aucun chef désigné</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === state.leaderUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select><button class="btn-secondaire fac-btn" onclick="facEnregistrerChef()">Valider</button></div><div class="fac-hint">Sans chef, le plus haut gradé présent commande en bataille.</div>`
-    : `<div class="fac-value">${state.leaderUserId ? escapeHtml(playerName(state.leaderUserId)) : 'Aucun chef désigné'}</div><div class="fac-hint">Sans chef, le plus haut gradé présent commande en bataille. Désignation sur Discord avec <code>/faction chef</code>.</div>`;
 
   const creditItem = meta.creditsItemId;
   const otherItems = Object.entries(state.items).filter(([id]) => id !== creditItem);
-  const itemOptions = facState.catalogue
-    .filter(c => String(c.id ?? c._id) !== creditItem && !(String(c.id ?? c._id) in state.items))
-    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'fr'))
-    .map(c => `<option value="${escapeAttr(c.id ?? c._id)}">${escapeHtml((c.emoji || '') + ' ' + (c.name || c.id))}</option>`).join('');
-
   document.getElementById('contenu').innerHTML = `
     <div class="fac-tabs">${tabs}</div>
 
     <div class="fac-summary">
-      <div class="fac-card"><h4>👑 Chef de faction</h4>${leaderControl}</div>
+      <div class="fac-card"><h4>👑 Chef de faction</h4><div id="fac-leader-control">${facLeaderControlHTML(state, players)}</div></div>
       <div class="fac-card"><h4>🪖 Troupes</h4><div class="fac-row"><input id="fac-troops" class="fac-input" type="number" min="0" value="${state.troops}" placeholder="Nombre de soldats"><button class="btn-secondaire fac-btn" onclick="facEnregistrerTroupes()">Enregistrer</button></div><div class="fac-hint">Effectif total de la faction (utilisé par le recrutement et le massacre).</div></div>
       <div class="fac-card"><h4>💰 Crédits</h4><div class="fac-row"><input id="fac-credits" class="fac-input" type="number" min="0" value="${state.credits}" placeholder="Montant en crédits"><button class="btn-secondaire fac-btn" onclick="facEnregistrerCredits()">Enregistrer</button></div><div class="fac-hint">Trésorerie de la faction (pillée en cas de défaite).</div></div>
       <div class="fac-card"><h4>⭐ Réputation</h4><div class="fac-row"><input id="fac-reputation" class="fac-input" type="number" min="0" max="100" value="${state.reputation ?? 50}" placeholder="0 à 100"><button class="btn-secondaire fac-btn" onclick="facEnregistrerReputation()">Enregistrer</button></div><div class="fac-hint">Réputation diplomatique de la faction, de 0 (détestée) à 100 (prestigieuse).</div></div>
@@ -89,13 +170,13 @@ function facRender() {
 
     <div class="fac-section">
       <div class="fac-section-head"><div><h3>👥 Joueurs de la faction</h3><p>Grades militaires lus depuis les rôles Discord.</p></div></div>
-      ${players.ready ? facPlayersHTML(ships) : '<div class="fac-note">Pour lister les joueurs et attribuer des vaisseaux depuis le site, ajoute <code>DISCORD_BOT_TOKEN</code> dans le fichier <code>.env</code> du site. En attendant, utilise <code>/faction joueurs</code> et <code>/faction attribuer</code> sur Discord.</div>'}
+      <div id="fac-players-content">${facPlayersContentHTML(ships, players)}</div>
     </div>
 
     <div class="fac-section">
       <div class="fac-section-head"><div><h3>🎒 Inventaire de faction</h3><p>Objets stockés par la faction (hors crédits).</p></div></div>
       ${otherItems.length ? `<div class="fac-items">${otherItems.map(([id, qty]) => { const info = facItemInfo(id); return `<div class="fac-item"><span>${escapeHtml(info.emoji)}</span><span class="fac-item-name" title="${escapeAttr(id)}">${escapeHtml(info.name)}</span><input class="fac-input" type="number" min="0" value="${qty}" onchange="facSetItem('${jsAttr(id)}', this.value)"></div>`; }).join('')}</div>` : '<div class="fac-note" style="margin-bottom:18px">Inventaire vide.</div>'}
-      <div class="fac-add"><select id="fac-new-item" class="fac-select"><option value="">Ajouter un objet…</option>${itemOptions}</select><input id="fac-new-qty" class="fac-input" type="number" min="1" value="1" placeholder="Quantité"><button class="btn-secondaire fac-btn" onclick="facAjouterObjet()">Ajouter</button></div>
+      <div class="fac-add"><select id="fac-new-item" class="fac-select"><option value="">${facState.catalogueLoaded ? 'Ajouter un objet…' : 'Chargement du catalogue…'}</option>${facState.catalogue.map(c => `<option value="${escapeAttr(c.id ?? c._id)}">${escapeHtml((c.emoji || '') + ' ' + (c.name || c.id))}</option>`).join('')}</select><input id="fac-new-qty" class="fac-input" type="number" min="1" value="1" placeholder="Quantité"><button class="btn-secondaire fac-btn" onclick="facAjouterObjet()">Ajouter</button></div>
     </div>`;
 }
 
@@ -108,9 +189,6 @@ function facFootprintHTML(width, length) {
 function facShipHTML(s) {
   const cls = facState.meta.classes.find(c => c.key === s.classKey);
   const players = facState.players;
-  const pilotSelect = players.ready
-    ? `<div><span class="fac-label">Pilote</span><select class="fac-select" onchange="facAssigner('${jsAttr(s.id)}', this.value)"><option value="">Non attribué</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === s.assignedUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select></div>`
-    : `<div><span class="fac-label">Pilote</span><div class="fac-hint">${s.assignedUserId ? 'ID ' + escapeHtml(s.assignedUserId) : 'Non attribué'}</div></div>`;
   const damaged = s.hp < s.hpMax || s.shield < s.shieldMax || s.crew < s.crewMax;
   return `<div class="fac-ship">
     ${cls?.image ? `<img class="fac-ship-image" src="${escapeAttr(cls.image)}" alt="Illustration ${escapeAttr(cls.label)}" loading="lazy">` : '<div class="fac-ship-image fac-ship-image-empty">Aucune image de classe</div>'}
@@ -122,7 +200,7 @@ function facShipHTML(s) {
       <div><span>Tir de barrage</span>${facNum(s.barrage)}</div><div><span>Tir ciblé</span>${facNum(s.focus)}</div>
       <div><span>Escadrons</span>${facNum(s.squadrons)}</div><div><span>Grade requis</span>${escapeHtml(cls?.requirement || '—')}</div>
     </div>
-    ${pilotSelect}
+    <div class="fac-ship-pilot" id="fac-ship-pilot-${jsAttr(s.id)}">${facPilotControlHTML(s, players)}</div>
     <div class="fac-ship-actions">
       <button class="btn-modifier" onclick="facOuvrirVaisseau('${jsAttr(s.id)}')">Modifier</button>
       <button class="btn-secondaire" ${damaged ? '' : 'disabled'} onclick="facReparerVaisseau('${jsAttr(s.id)}')">Réparer</button>
@@ -159,6 +237,7 @@ function facEnregistrerCredits() { return facAction(() => facApi(facUrl(`/invent
 function facEnregistrerReputation() { const value = Number(document.getElementById('fac-reputation').value); if (!Number.isInteger(value) || value < 0 || value > 100) return toast('La réputation doit être comprise entre 0 et 100.', 'erreur'); return facAction(() => facApi(facUrl(), 'PUT', { reputation: value }), 'Réputation enregistrée.'); }
 function facSetItem(id, qty) { return facAction(() => facApi(facUrl(`/inventaire/${encodeURIComponent(id)}`), 'PUT', { quantity: Number(qty) }), 'Inventaire mis à jour.'); }
 function facAjouterObjet() {
+  if (!facState.catalogueLoaded) return toast('Le catalogue est encore en cours de chargement.', 'erreur');
   const id = document.getElementById('fac-new-item').value;
   const qty = Number(document.getElementById('fac-new-qty').value);
   if (!id) return toast('Choisis un objet.', 'erreur');
