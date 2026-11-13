@@ -69,6 +69,20 @@ function register(app, { logFromReq, recordEntityHistory }) {
   app.get('/api/factions/meta', wrap(async (req, res) => {
     res.set('Cache-Control', 'no-store');
     const images = await store.listShipClassImages();
+    // Migration transparente : les anciennes images étaient enregistrées sur disque
+    // et seul leur nom était stocké dans MongoDB. Le bot lit désormais les octets
+    // depuis MongoDB, commun au site et au bot.
+    for (const [classKey, filename] of Object.entries(images)) {
+      if (await store.getShipClassImageBuffer(classKey)) continue;
+      const safeFilename = path.basename(String(filename || ''));
+      if (!safeFilename) continue;
+      try {
+        const imageBuffer = await fs.readFile(path.join(__dirname, 'ship', safeFilename));
+        await store.setShipClassImage(classKey, safeFilename, imageBuffer);
+      } catch (err) {
+        if (err.code !== 'ENOENT') console.warn(`Image de classe ${classKey} non synchronisée :`, err.message);
+      }
+    }
     res.json({
       factions: store.listFactionDefs(),
       ranks: RANKS.map(r => ({ key: r.key, name: r.name })),
@@ -159,14 +173,16 @@ function register(app, { logFromReq, recordEntityHistory }) {
     };
     if (!signatures[mime]) throw new Error('Le contenu du fichier ne correspond pas à son format annoncé.');
     const ext = mime === 'jpeg' ? 'jpg' : mime;
-    const filename = `${cls.imageBaseName}.${ext}`;
+    const filename = `${cls.id}.${ext}`;
     const directory = path.join(__dirname, 'ship');
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(path.join(directory, filename), buffer, { flag: 'w' });
-    const image = await store.setShipClassImage(classKey, filename);
-    for (const oldExt of ['png', 'jpg', 'jpeg', 'webp', 'gif']) {
-      const previousFilename = `${cls.imageBaseName}.${oldExt}`;
-      if (previousFilename !== filename) await fs.unlink(path.join(directory, previousFilename)).catch(() => {});
+    const image = await store.setShipClassImage(classKey, filename, buffer);
+    for (const baseName of new Set([cls.id, cls.imageBaseName])) {
+      for (const oldExt of ['png', 'jpg', 'jpeg', 'webp', 'gif']) {
+        const previousFilename = `${baseName}.${oldExt}`;
+        if (previousFilename !== filename) await fs.unlink(path.join(directory, previousFilename)).catch(() => {});
+      }
     }
     logFromReq(req, 'faction_classe_image', `Image de classe remplacée : ${cls.label} (${cls.id})`);
     res.json({ ok: true, image });

@@ -182,15 +182,44 @@ async function listShipClassImages() {
   const docs = await (await connect()).collection(COLLECTION_CLASS_SETTINGS).find({}).toArray();
   return Object.fromEntries(docs.filter(d => d.filename).map(d => [d._id, d.filename]));
 }
-async function setShipClassImage(classKey, filename) {
+function imageValueToBuffer(value) {
+  if (!value) return null;
+  if (Buffer.isBuffer(value)) return Buffer.from(value);
+  if (value.buffer && (Buffer.isBuffer(value.buffer) || value.buffer instanceof Uint8Array)) {
+    const length = Number.isInteger(value.position) ? value.position : value.buffer.length;
+    return Buffer.from(value.buffer).subarray(0, length);
+  }
+  if (typeof value.value === 'function') {
+    try { return Buffer.from(value.value(true)); } catch { /* format BSON alternatif */ }
+  }
+  try { return Buffer.from(value); } catch { return null; }
+}
+async function getShipClassImageBuffer(classKey) {
+  if (!SHIP_CLASSES[classKey]) return null;
+  const doc = await (await connect()).collection(COLLECTION_CLASS_SETTINGS).findOne(
+    { _id: classKey }, { projection: { imageData: 1 } },
+  );
+  return imageValueToBuffer(doc?.imageData);
+}
+async function setShipClassImage(classKey, filename, imageData = null) {
   if (!SHIP_CLASSES[classKey]) throw new Error('Classe de vaisseau inconnue.');
   const safe = String(filename || '');
-  if (!new RegExp(`^${SHIP_CLASSES[classKey].imageBaseName}\\.(?:png|jpe?g|webp|gif)$`, 'i').test(safe)) throw new Error('Nom de fichier d’image invalide.');
-  await (await connect()).collection(COLLECTION_CLASS_SETTINGS).updateOne({ _id: classKey }, { $set: { filename: safe, updatedAt: new Date() } }, { upsert: true });
+  const allowedBases = [SHIP_CLASSES[classKey].id, SHIP_CLASSES[classKey].imageBaseName]
+    .filter(Boolean).map(value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (!new RegExp(`^(?:${allowedBases.join('|')})\\.(?:png|jpe?g|webp|gif)$`, 'i').test(safe)) throw new Error('Nom de fichier d’image invalide.');
+  const fields = { filename: safe, updatedAt: new Date() };
+  if (imageData !== null && imageData !== undefined) {
+    const buffer = Buffer.from(imageData);
+    if (!buffer.length || buffer.length > 4 * 1024 * 1024) throw new Error('L’image doit peser 4 Mo maximum.');
+    fields.imageData = buffer;
+    fields.imageSize = buffer.length;
+    fields.contentType = ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' })[safe.split('.').pop().toLowerCase()] || 'application/octet-stream';
+  }
+  await (await connect()).collection(COLLECTION_CLASS_SETTINGS).updateOne({ _id: classKey }, { $set: fields }, { upsert: true });
   return `/ship/${encodeURIComponent(safe)}`;
 }
 module.exports = {
-  repairShip, transferShip, assertShipNotInBattle, getShipRecord, listShipClassImages, setShipClassImage,
+  repairShip, transferShip, assertShipNotInBattle, getShipRecord, listShipClassImages, getShipClassImageBuffer, setShipClassImage,
   CREDITS_ITEM_ID, listFactionDefs, getFactionDef, getFactionState, setTroops, adjustTroops, setLeader, setReputation,
   setFactionItem, adjustFactionItem, listShips, getShip, createShip, updateShip, deleteShip, assignShip,
 };
