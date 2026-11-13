@@ -148,6 +148,7 @@ app.use(session({
     dbName: 'westerosorigin',
     collectionName: 'site_sessions',
     ttl: 7 * 24 * 60 * 60, // 7 jours, en secondes (aligné sur cookie.maxAge)
+    touchAfter: 24 * 3600, // ne réécrit la session en base qu'une fois par jour (au lieu de chaque requête)
   }),
   cookie: {
     httpOnly: true,

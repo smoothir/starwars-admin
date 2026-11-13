@@ -199,7 +199,7 @@ async function transferShip(shipId, newFactionKey) {
   return getShip(shipId);
 }
 async function listShipClassImages() {
-  const docs = await (await connect()).collection(COLLECTION_CLASS_SETTINGS).find({}).toArray();
+  const docs = await (await connect()).collection(COLLECTION_CLASS_SETTINGS).find({}, { projection: { filename: 1 } }).toArray();
   return Object.fromEntries(docs.filter(d => d.filename).map(d => [d._id, d.filename]));
 }
 function imageValueToBuffer(value) {
