@@ -2346,3 +2346,213 @@ html { font-size: 14px; }
     flex: 1 1 100%;
   }
 }
+
+
+/* =========================================================================
+   MISSIONS — gestion web et aperçu des missions liées aux forums Discord
+   ========================================================================= */
+.missions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
+  gap: 14px;
+  margin: 0 0 30px;
+}
+.mission-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  overflow-wrap: anywhere;
+}
+.mission-card-image {
+  display: block;
+  width: 100%;
+  max-height: 190px;
+  margin: -2px 0 14px;
+  border-radius: var(--radius);
+  object-fit: cover;
+  background: #080808;
+}
+.mission-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.mission-card-head h4 {
+  min-width: 0;
+  font-size: .9rem;
+  line-height: 1.45;
+}
+.mission-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  max-width: 48%;
+  padding: 5px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: #fff;
+  font-size: .64rem;
+  line-height: 1.3;
+  text-align: center;
+}
+.mission-card-description {
+  margin: 0 0 14px;
+  color: var(--text-secondary);
+  font-size: .74rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.mission-card-rewards {
+  display: grid;
+  gap: 5px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: .72rem;
+  line-height: 1.5;
+}
+.mission-card-rewards strong { color: #fff; }
+.mission-card-rewards span { color: var(--text-secondary); }
+.mission-card-claim,
+.mission-card-channel {
+  margin: 12px 0 0;
+  color: var(--text-secondary);
+  font-size: .7rem;
+  line-height: 1.5;
+}
+.mission-card-claim strong { color: #fff; }
+.mission-card-channel code {
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+.mission-card-actions,
+.mission-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.mission-discord-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+.mission-error {
+  margin: 12px 0 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  color: #fff;
+  font-size: .7rem;
+  line-height: 1.5;
+}
+.mission-editeur {
+  margin: 0 0 26px;
+  padding: 20px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  scroll-margin-top: 110px;
+}
+.mission-editeur[hidden] { display: none !important; }
+.mission-editor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.mission-editor-head h3 {
+  margin-top: 5px;
+  font-size: 1rem;
+}
+.mission-full { grid-column: 1 / -1; }
+.mission-rewards-editor {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-subtle);
+}
+.mission-rewards-editor > .production-section-heading {
+  align-items: flex-start;
+  gap: 12px;
+}
+.mission-reward-row {
+  margin-top: 12px;
+  padding: 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: #080808;
+}
+.mission-reward-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.mission-reward-top select { flex: 1; min-width: 0; }
+.mission-reward-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 10px;
+}
+.mission-reward-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: .68rem;
+}
+.mission-reward-field[hidden] { display: none !important; }
+.mission-reward-field input,
+.mission-reward-field select {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: #fff;
+  font: inherit;
+}
+.mission-editor-actions { justify-content: flex-end; margin-top: 20px; }
+.mission-editor-actions button { min-width: 150px; }
+.boutique-categories-liste {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 22px;
+}
+.boutique-categorie-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: .7rem;
+}
+.boutique-categorie-chip strong { overflow-wrap: anywhere; color: #fff; }
+.boutique-categorie-chip button {
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .mission-editeur { padding: 15px; }
+  .mission-card { padding: 13px; }
+  .mission-rewards-editor > .production-section-heading { flex-direction: column; }
+  .mission-reward-top { align-items: stretch; }
+  .mission-editor-actions { flex-direction: column; }
+  .mission-editor-actions button { width: 100%; }
+}

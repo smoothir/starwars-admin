@@ -16,7 +16,10 @@ const state = {
   productionActuelle: null,
   personnelTypeActuel: null,
   boutique: [],
+  boutiqueCategories: [],
   boutiqueActuelle: null,
+  missions: [],
+  missionActuelle: null,
   traits: [],
   traitActuel: null,
   traitActionsDraft: [],
@@ -207,6 +210,7 @@ function changerFiltrePage(collection, key, value) {
     production: renderProductionPage,
     personnel: renderPersonnelPage,
     boutique: renderBoutiquePage,
+    missions: renderMissionsPage,
   };
   renderers[collection]?.();
   filtrerListe();
@@ -238,13 +242,13 @@ async function chargerDashboardPage() {
     const cards = [
       ['profils', '👤', 'Personnages', 'profils'], ['objets', '📦', 'Objets', 'catalogue'],
       ['crafts', '🛠️', 'Recettes de craft', 'crafts'], ['productions', '🏭', 'Productions', 'production'],
-      ['personnel', '👷', 'Métiers', 'personnel'], ['boutique', '🛒', 'Articles boutique', 'boutique'],
+      ['personnel', '👷', 'Métiers', 'personnel'], ['boutique', '🛒', 'Articles boutique', 'boutique'], ['missions', '🚀', 'Missions', 'missions'],
     ];
     contenuDiv.innerHTML = `
       <section class="dashboard-welcome"><div><span class="dashboard-eyebrow">CENTRE DE CONTRÔLE</span><h3>Bienvenue dans Mirage Admin</h3><p>Vue d’ensemble du serveur et accès rapide aux outils de gestion.</p></div><button type="button" class="btn-secondaire" onclick="chargerDashboardPage()">↻ Actualiser</button></section>
       <section class="dashboard-stats">${cards.map(([key, icon, label, page]) => `<button type="button" class="dashboard-stat-card" onclick="chargerDonnees('${page}')"><span>${icon}</span><strong>${Number(data.counts?.[key]) || 0}</strong><small>${label}</small></button>`).join('')}</section>
       <section class="dashboard-shortcuts"><div class="section-titre">⚡ Accès rapides</div><div class="dashboard-shortcuts-grid">
-        <button class="dashboard-shortcut" onclick="chargerDonnees('profils')">👤 Gérer les profils</button><button class="dashboard-shortcut" onclick="chargerDonnees('inventaire')">🎒 Ouvrir les inventaires</button><button class="dashboard-shortcut" onclick="chargerDonnees('catalogue')">📦 Gérer les objets</button><button class="dashboard-shortcut" onclick="chargerDonnees('crafts')">🛠️ Configurer les crafts</button><button class="dashboard-shortcut" onclick="chargerDonnees('production')">🏭 Gérer les productions</button><button class="dashboard-shortcut" onclick="chargerDonnees('personnel')">👷 Gérer le personnel</button><button class="dashboard-shortcut" onclick="chargerDonnees('boutique')">🛒 Configurer la boutique</button>
+        <button class="dashboard-shortcut" onclick="chargerDonnees('profils')">👤 Gérer les profils</button><button class="dashboard-shortcut" onclick="chargerDonnees('inventaire')">🎒 Ouvrir les inventaires</button><button class="dashboard-shortcut" onclick="chargerDonnees('catalogue')">📦 Gérer les objets</button><button class="dashboard-shortcut" onclick="chargerDonnees('crafts')">🛠️ Configurer les crafts</button><button class="dashboard-shortcut" onclick="chargerDonnees('production')">🏭 Gérer les productions</button><button class="dashboard-shortcut" onclick="chargerDonnees('personnel')">👷 Gérer le personnel</button><button class="dashboard-shortcut" onclick="chargerDonnees('boutique')">🛒 Configurer la boutique</button><button class="dashboard-shortcut" onclick="chargerDonnees('missions')">🚀 Gérer les missions</button>
       </div></section>
       <section class="dashboard-recent"><div class="section-titre">🕘 Dernières modifications</div>${afficherListeRecenteDashboard(data.recent)}</section>`;
     setStatutConnexion(true);
@@ -320,8 +324,16 @@ async function chargerDonnees(collection) {
     rechercheInput.value = getPageFilter('boutique', 'q', '');
     rechercheInput.placeholder = 'Rechercher un objet ou un ID...';
     document.getElementById('titre-section').textContent = 'Boutique';
-    document.getElementById('sous-titre').textContent = 'Objets, prix et stock de la boutique Discord. Les achats et ventes se font sur le bot.';
+    document.getElementById('sous-titre').textContent = 'Une publication persistante par catégorie dans le forum Discord de la boutique.';
     await chargerBoutiquePage();
+  } else if (collection === 'missions') {
+    searchWrap.hidden = false;
+    const rechercheInput = document.getElementById('recherche');
+    rechercheInput.value = getPageFilter('missions', 'q', '');
+    rechercheInput.placeholder = 'Rechercher une mission...';
+    document.getElementById('titre-section').textContent = 'Missions';
+    document.getElementById('sous-titre').textContent = 'Crée les missions publiées dans Discord. Les joueurs les acceptent avec un de leurs personnages.';
+    await chargerMissionsPage();
   } else if (collection === 'traits') {
     searchWrap.hidden = false;
     const rechercheInput = document.getElementById('recherche');
@@ -947,7 +959,7 @@ function ligneInventaireHTML(profile, quantiteTotale, index) {
 function filtrerListe() {
   const recherche = document.getElementById('recherche');
   const q = (recherche?.value || '').trim().toLowerCase();
-  if (['profils', 'inventaire', 'catalogue', 'crafts', 'production', 'personnel', 'boutique'].includes(state.collectionActuelle)) {
+  if (['profils', 'inventaire', 'catalogue', 'crafts', 'production', 'personnel', 'boutique', 'missions'].includes(state.collectionActuelle)) {
     setPageFilter(state.collectionActuelle, 'q', q);
   }
   const aucun = document.getElementById('aucun-resultat');
@@ -1013,6 +1025,12 @@ function filtrerListe() {
       const sideOk = !side || card.dataset.side === side;
       const enabledOk = !enabled || card.dataset.enabled === enabled;
       const matches = queryOk && categoryOk && rarityOk && sideOk && enabledOk;
+      card.classList.toggle('masquee', !matches);
+      if (matches) visibles += 1;
+    });
+  } else if (state.collectionActuelle === 'missions') {
+    document.querySelectorAll('.mission-card').forEach(card => {
+      const matches = !q || (card.dataset.nom || '').includes(q);
       card.classList.toggle('masquee', !matches);
       if (matches) visibles += 1;
     });
@@ -2842,22 +2860,205 @@ function jsAttr(str) {
 }
 
 // -----------------------------------------------------------------------
+// MISSIONS : création sur le site, publication et suivi dans les forums Discord.
+// -----------------------------------------------------------------------
+async function chargerMissionsPage() {
+  const contenuDiv = document.getElementById('contenu');
+  contenuDiv.innerHTML = '<div class="squelette"></div><div class="squelette"></div>';
+  try {
+    const [missionsResponse, catalogueResponse] = await Promise.all([
+      apiFetch('/api/missions'),
+      apiFetch('/api/inventaire/catalogue/meta'),
+    ]);
+    for (const response of [missionsResponse, catalogueResponse]) if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.missions = await missionsResponse.json();
+    state.catalogue = catalogueValide(await catalogueResponse.json());
+    majCompteur('missions', state.missions.length);
+    renderMissionsPage();
+    setStatutConnexion(true);
+  } catch (error) {
+    contenuDiv.innerHTML = `<div class="etat-vide"><p>Impossible de charger les missions.</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
+  }
+}
+
+function statutMissionHTML(status) {
+  const labels = { available: 'Disponible', in_progress: 'En cours', validating: 'Attribution des gains', validation_error: 'Erreur de récompense', completed: 'Validée', cancelled: 'Annulée', failed: 'Échec' };
+  return `<span class="mission-status mission-status-${escapeAttr(status || 'available')}">${escapeHtml(labels[status] || status || 'Disponible')}</span>`;
+}
+
+function libelleRecompenseMission(reward) {
+  if (reward.type === 'credits') return `💰 ${Number(reward.amount || 0).toLocaleString('fr-FR')} crédits`;
+  if (reward.type === 'item') {
+    const item = state.catalogue.find(row => row.id === reward.itemId);
+    return `📦 ${Number(reward.quantity || 1)}× ${item?.name || reward.itemId}`;
+  }
+  if (reward.type === 'reputation') return `⭐ +${reward.amount} réputation`;
+  if (reward.type === 'stat') return `📊 +${reward.amount} ${reward.stat}`;
+  return 'Récompense inconnue';
+}
+
+function renderMissionsPage() {
+  const available = state.missions.filter(mission => mission.status === 'available');
+  const active = state.missions.filter(mission => mission.status === 'in_progress' || mission.status === 'validating' || mission.status === 'validation_error');
+  const closed = state.missions.filter(mission => ['completed', 'cancelled', 'failed'].includes(mission.status));
+  const card = mission => {
+    const rewards = (mission.rewards || []).map(libelleRecompenseMission).join(' · ') || 'Aucune récompense';
+    const searchable = `${mission.title || ''} ${mission.description || ''} ${mission.profileName || ''}`.toLowerCase();
+    const image = mission.image ? `<img class="mission-card-image" src="${escapeAttr(mission.image)}" alt="" loading="lazy" onerror="this.hidden=true">` : '';
+    const claim = mission.claimedByUserId ? `<p class="mission-card-claim">Joueur : <strong>${escapeHtml(mission.claimedByName || mission.claimedByUserId)}</strong> · Personnage : <strong>${escapeHtml(mission.profileName || '—')}</strong></p>` : '';
+    const actions = mission.status === 'available'
+      ? `<div class="mission-card-actions"><button class="btn-secondaire" onclick="ouvrirEditeurMission('${jsAttr(mission.id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="annulerMissionDepuisSite('${jsAttr(mission.id)}')">Retirer</button></div>`
+      : mission.acceptedThreadId && mission.guildId ? `<div class="mission-card-actions"><a class="btn-secondaire mission-discord-link" href="https://discord.com/channels/${escapeAttr(mission.guildId)}/${escapeAttr(mission.acceptedThreadId)}" target="_blank" rel="noopener">Ouvrir le suivi Discord ↗</a></div>` : mission.acceptedThreadId ? `<p class="mission-card-channel">Salon de suivi Discord : <code>${escapeHtml(mission.acceptedThreadId)}</code></p>` : '';
+    return `<article class="mission-card" data-nom="${escapeAttr(searchable)}">${image}<div class="mission-card-head"><h4>${escapeHtml(mission.title || 'Mission')}</h4>${statutMissionHTML(mission.status)}</div><p class="mission-card-description">${escapeHtml(mission.description || '')}</p><div class="mission-card-rewards"><strong>Récompenses :</strong><span>${escapeHtml(rewards)}</span></div>${claim}${mission.validationError ? `<p class="mission-error">${escapeHtml(mission.validationError)}</p>` : ''}${actions}</article>`;
+  };
+  document.getElementById('contenu').innerHTML = `
+    <div class="production-intro"><div class="production-intro-icon">🚀</div><div><strong>Gestion des missions</strong><p>Crée une mission ici. Le bot publie automatiquement son sujet dans le forum des missions. Quand un joueur l’accepte, un second sujet de suivi est créé avec son personnage.</p></div></div>
+    <div class="production-section-heading"><div><h3>À publier / disponibles</h3><p>${available.length} mission(s) disponible(s).</p></div><button class="btn-principal" onclick="ouvrirEditeurMission(null)">＋ Créer une mission</button></div>
+    <div class="missions-grid">${available.map(card).join('') || '<div class="etat-vide"><p>Aucune mission disponible.</p></div>'}</div>
+    <div class="production-section-heading"><div><h3>En cours</h3><p>${active.length} mission(s) acceptée(s) ou en cours de validation.</p></div></div>
+    <div class="missions-grid">${active.map(card).join('') || '<div class="etat-vide"><p>Aucune mission en cours.</p></div>'}</div>
+    <div class="production-section-heading"><div><h3>Historique</h3><p>${closed.length} mission(s) terminée(s), annulée(s) ou échouée(s).</p></div></div>
+    <div class="missions-grid">${closed.map(card).join('') || '<div class="etat-vide"><p>Aucune mission terminée.</p></div>'}</div>
+    <div id="mission-editeur" class="mission-editeur" hidden></div>
+    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucune mission ne correspond à cette recherche.</div>`;
+  filtrerListe();
+}
+
+function optionsObjetsMission(selected = '') {
+  return '<option value="">Choisir un objet…</option>' + catalogueTrie().map(item => `<option value="${escapeAttr(item.id)}" ${item.id === selected ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name} · ${item.id}`)}</option>`).join('');
+}
+
+function ligneRecompenseMissionHTML(reward = {}) {
+  const type = ['credits', 'item', 'reputation', 'stat'].includes(reward.type) ? reward.type : 'credits';
+  const amount = Number(reward.amount) || 1;
+  const stats = (state.listes.defaultStats || []).map(stat => `<option value="${escapeAttr(stat)}" ${stat === reward.stat ? 'selected' : ''}>${escapeHtml(stat)}</option>`).join('');
+  return `<div class="mission-reward-row" data-type="${type}">
+    <div class="mission-reward-top"><select class="mission-reward-type" onchange="changerTypeRecompenseMission(this)"><option value="credits" ${type === 'credits' ? 'selected' : ''}>💰 Argent</option><option value="item" ${type === 'item' ? 'selected' : ''}>📦 Item</option><option value="reputation" ${type === 'reputation' ? 'selected' : ''}>⭐ Points de réputation</option><option value="stat" ${type === 'stat' ? 'selected' : ''}>📊 Statistique</option></select><button type="button" class="btn-secondaire btn-danger" onclick="this.closest('.mission-reward-row').remove()">Retirer</button></div>
+    <div class="mission-reward-fields">
+      <label class="mission-reward-field" data-field="amount" ${type === 'item' ? 'hidden' : ''}><span>${type === 'credits' ? 'Crédits' : type === 'reputation' ? 'Points' : 'Points à ajouter'}</span><input class="mission-reward-amount" type="number" min="1" step="1" value="${amount}"></label>
+      <label class="mission-reward-field" data-field="item" ${type !== 'item' ? 'hidden' : ''}><span>Objet</span><select class="mission-reward-item">${optionsObjetsMission(reward.itemId || '')}</select></label>
+      <label class="mission-reward-field" data-field="quantity" ${type !== 'item' ? 'hidden' : ''}><span>Quantité</span><input class="mission-reward-quantity" type="number" min="1" step="1" value="${Math.max(1, Number(reward.quantity) || 1)}"></label>
+      <label class="mission-reward-field" data-field="stat" ${type !== 'stat' ? 'hidden' : ''}><span>Statistique</span><select class="mission-reward-stat">${stats}</select></label>
+    </div>
+  </div>`;
+}
+
+function ouvrirEditeurMission(id) {
+  const mission = id ? state.missions.find(row => String(row.id) === String(id)) : null;
+  if (id && !mission) return toast('Mission introuvable.', 'erreur');
+  if (mission && mission.status !== 'available') return toast('Une mission déjà acceptée se gère directement dans son salon Discord.', 'erreur');
+  state.missionActuelle = mission?.id || null;
+  const host = document.getElementById('mission-editeur');
+  if (!host) return;
+  host.hidden = false;
+  host.innerHTML = `<div class="mission-editor-head"><div><span class="panneau-eyebrow">${mission ? 'MODIFICATION' : 'NOUVELLE MISSION'}</span><h3>${mission ? 'Modifier la mission' : 'Créer une mission'}</h3></div><button class="btn-fermer" onclick="fermerEditeurMission()">✕</button></div>
+    <div class="grille-champs"><div class="champ mission-full"><label for="f-mission-title">Titre</label><input id="f-mission-title" type="text" maxlength="100" value="${escapeAttr(mission?.title || '')}" placeholder="Ex. Escorte d’un convoi médical"></div>
+    <div class="champ mission-full"><label for="f-mission-description">Description</label><textarea id="f-mission-description" maxlength="4000" rows="5" placeholder="Décris les objectifs, le contexte et les consignes de la mission.">${escapeHtml(mission?.description || '')}</textarea></div>
+    <div class="champ mission-full"><label for="f-mission-image">Image (facultatif, URL)</label><input id="f-mission-image" type="url" value="${escapeAttr(mission?.image || '')}" placeholder="https://..."></div></div>
+    <div class="mission-rewards-editor"><div class="production-section-heading"><div><h4>Récompenses</h4><p>Argent, objet du catalogue, réputation ou statistique.</p></div><button class="btn-secondaire" onclick="ajouterRecompenseMission()">＋ Ajouter une récompense</button></div><div id="mission-rewards-list">${(mission?.rewards || []).map(ligneRecompenseMissionHTML).join('')}</div></div>
+    <div class="mission-editor-actions"><button class="btn-principal" onclick="enregistrerMission()">${mission ? 'Enregistrer les modifications' : 'Publier la mission'}</button><button class="btn-secondaire" onclick="fermerEditeurMission()">Annuler</button></div>`;
+  host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function fermerEditeurMission() {
+  state.missionActuelle = null;
+  const host = document.getElementById('mission-editeur');
+  if (host) { host.hidden = true; host.innerHTML = ''; }
+}
+
+function ajouterRecompenseMission(reward = null) {
+  const host = document.getElementById('mission-rewards-list');
+  if (!host) return;
+  host.insertAdjacentHTML('beforeend', ligneRecompenseMissionHTML(reward || {}));
+}
+
+function changerTypeRecompenseMission(select) {
+  const row = select.closest('.mission-reward-row');
+  if (!row) return;
+  const type = select.value;
+  row.dataset.type = type;
+  row.querySelectorAll('.mission-reward-field').forEach(field => {
+    field.hidden = (type === 'item' && !['item', 'quantity'].includes(field.dataset.field))
+      || (type === 'stat' && field.dataset.field !== 'stat' && field.dataset.field !== 'amount')
+      || ((type === 'credits' || type === 'reputation') && field.dataset.field !== 'amount');
+  });
+  const label = row.querySelector('[data-field="amount"] span');
+  if (label) label.textContent = type === 'credits' ? 'Crédits' : type === 'reputation' ? 'Points de réputation' : 'Points à ajouter';
+}
+
+function lireRecompensesMission() {
+  const rewards = [];
+  document.querySelectorAll('#mission-rewards-list .mission-reward-row').forEach(row => {
+    const type = row.querySelector('.mission-reward-type')?.value;
+    if (type === 'item') {
+      rewards.push({ type, itemId: row.querySelector('.mission-reward-item')?.value, quantity: Number(row.querySelector('.mission-reward-quantity')?.value) });
+    } else if (type === 'stat') {
+      rewards.push({ type, stat: row.querySelector('.mission-reward-stat')?.value, amount: Number(row.querySelector('.mission-reward-amount')?.value) });
+    } else {
+      rewards.push({ type, amount: Number(row.querySelector('.mission-reward-amount')?.value) });
+    }
+  });
+  return rewards;
+}
+
+async function enregistrerMission() {
+  const button = document.querySelector('#mission-editeur .btn-principal');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const payload = {
+      title: val('f-mission-title'),
+      description: val('f-mission-description'),
+      image: val('f-mission-image'),
+      rewards: lireRecompensesMission(),
+    };
+    if (!payload.title.trim()) throw new Error('Le titre est obligatoire.');
+    if (!payload.description.trim()) throw new Error('La description est obligatoire.');
+    for (const reward of payload.rewards) {
+      if (reward.type === 'item' && !reward.itemId) throw new Error('Choisis un objet pour chaque récompense de type Item.');
+      if (reward.type === 'stat' && !reward.stat) throw new Error('Choisis une statistique pour chaque récompense concernée.');
+      if (reward.type !== 'item' && (!Number.isInteger(reward.amount) || reward.amount < 1)) throw new Error('Les montants des récompenses doivent être des nombres entiers positifs.');
+      if (reward.type === 'item' && (!Number.isInteger(reward.quantity) || reward.quantity < 1)) throw new Error('Les quantités d’objets doivent être des nombres entiers positifs.');
+    }
+    const id = state.missionActuelle;
+    await fetchJSON(id ? `/api/missions/${encodeURIComponent(id)}` : '/api/missions', payload, id ? 'PATCH' : 'POST');
+    toast(id ? 'Mission modifiée.' : 'Mission créée. Le bot la publiera dans Discord automatiquement.', 'succes');
+    fermerEditeurMission();
+    await chargerMissionsPage();
+  } catch (error) { toast(`Enregistrement impossible : ${error.message}`, 'erreur'); }
+  finally { button.disabled = false; }
+}
+
+async function annulerMissionDepuisSite(id) {
+  const mission = state.missions.find(row => String(row.id) === String(id));
+  const ok = await confirmerAction({ titre: 'Retirer la mission', message: `Retirer « ${mission?.title || id} » du forum des missions ? Le sujet Discord sera conservé et marqué comme annulé.`, texteValider: 'Retirer la mission' });
+  if (!ok) return;
+  try {
+    await fetchJSON(`/api/missions/${encodeURIComponent(id)}`, null, 'DELETE');
+    toast('Mission retirée du forum.', 'succes');
+    await chargerMissionsPage();
+  } catch (error) { toast(`Impossible de retirer la mission : ${error.message}`, 'erreur'); }
+}
+
+// -----------------------------------------------------------------------
 // BOUTIQUE : objets, prix et stock (affichage / achats / ventes sur Discord)
 // -----------------------------------------------------------------------
 async function chargerBoutiquePage() {
   const contenuDiv = document.getElementById('contenu');
   contenuDiv.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
   try {
-    const [boutiqueResponse, catalogueResponse] = await Promise.all([
+    const [boutiqueResponse, catalogueResponse, categoriesResponse] = await Promise.all([
       apiFetch('/api/boutique'),
       apiFetch('/api/inventaire/catalogue/meta'),
+      apiFetch('/api/boutique/categories'),
     ]);
-    for (const response of [boutiqueResponse, catalogueResponse]) {
+    for (const response of [boutiqueResponse, catalogueResponse, categoriesResponse]) {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
     }
     const items = await boutiqueResponse.json();
     state.boutique = Array.isArray(items) ? items : [];
     state.catalogue = catalogueValide(await catalogueResponse.json());
+    state.boutiqueCategories = await categoriesResponse.json();
     majCompteur('boutique', state.boutique.length);
     renderBoutiquePage();
     setStatutConnexion(true);
@@ -2894,8 +3095,10 @@ function boutiqueCardHTML(entry, side) {
   const stock = Math.max(0, Number(entry.stock) || 0);
   const etat = masque ? '🚫 Masqué' : stock > 0 ? `📦 ${stock}` : '❌ Rupture';
   const typeLabel = typeBoutique(entry);
-  const searchable = `${nom} ${entry.id} ${item?.category || ''} ${item?.rarity || ''} ${typeLabel}`.toLowerCase();
-  return `<button type="button" class="boutique-tuile${masque ? ' boutique-masque' : ''}" onclick="ouvrirEditeurBoutique('${jsAttr(entry.id)}', '${side}')" data-id="${escapeAttr(entry.id)}" data-nom="${escapeAttr(searchable)}" data-category="${escapeAttr(item?.category || 'Divers')}" data-rarity="${escapeAttr(item?.rarity || 'Commun')}" data-side="${side}" data-type="${typeLabel}" data-stock="${stock}" data-enabled="${masque ? '0' : '1'}" data-price="${Number(side === 'vendable' ? entry.rachatMinPrice : entry.minPrice) || 0}" title="${escapeAttr(nom)}">
+  const categoryId = entry.categoryId || 'autres';
+  const categoryName = state.boutiqueCategories?.find(row => row.id === categoryId)?.name || 'Autres';
+  const searchable = `${nom} ${entry.id} ${categoryName} ${item?.category || ''} ${item?.rarity || ''} ${typeLabel}`.toLowerCase();
+  return `<button type="button" class="boutique-tuile${masque ? ' boutique-masque' : ''}" onclick="ouvrirEditeurBoutique('${jsAttr(entry.id)}', '${side}')" data-id="${escapeAttr(entry.id)}" data-nom="${escapeAttr(searchable)}" data-category="${escapeAttr(categoryId)}" data-rarity="${escapeAttr(item?.rarity || 'Commun')}" data-side="${side}" data-type="${typeLabel}" data-stock="${stock}" data-enabled="${masque ? '0' : '1'}" data-price="${Number(side === 'vendable' ? entry.rachatMinPrice : entry.minPrice) || 0}" title="${escapeAttr(nom)}">
     <span class="boutique-tuile-icone">${escapeHtml(item?.emoji || '📦')}</span><span class="boutique-tuile-nom">${escapeHtml(nom)}</span><span class="boutique-tuile-stock">${etat}</span><span class="boutique-tuile-id">${escapeHtml(entry.id)} · ${escapeHtml(item?.rarity || 'Commun')}</span>
   </button>`;
 }
@@ -2913,17 +3116,51 @@ function renderBoutiquePage() {
   };
   const achetables = state.boutique.filter(estAchetable).sort((a, b) => compare(a, b, 'achetable'));
   const vendables = state.boutique.filter(estVendable).sort((a, b) => compare(a, b, 'vendable'));
-  const categories = [...new Set(state.boutique.map(entry => state.catalogue.find(item => item.id === entry.id)?.category || 'Divers'))].sort((a, b) => a.localeCompare(b, 'fr'));
   const rarities = ['Épique', 'Rare', 'Peu commun', 'Commun'];
-  const categoryOptions = [{ value: '', label: 'Toutes les catégories' }, ...categories.map(value => ({ value, label: value }))];
+  const categoryOptions = [{ value: '', label: 'Toutes les catégories' }, ...(state.boutiqueCategories || []).map(category => ({ value: category.id, label: category.name }))];
   const vide = text => `<div class="etat-vide boutique-vide"><p>${text}</p></div>`;
   document.getElementById('contenu').innerHTML = `
-    <div class="production-intro"><div class="production-intro-icon">🛒</div><div><strong>Boutique</strong><p>Configure les objets proposés, leur stock partagé et les fourchettes de prix qui sont utilisées par le marchand Discord.</p></div></div>
+    <div class="production-intro"><div class="production-intro-icon">🛒</div><div><strong>Boutique</strong><p>Configure les objets proposés, leur stock partagé et les fourchettes de prix qui sont utilisées par le marchand Discord. Chaque catégorie possède un sujet Forum persistant.</p></div></div>
+    <section class="boutique-categories-admin"><div class="production-section-heading"><div><h3>Catégories des sujets Discord</h3><p>Les catégories sont créées ici. Le bot crée le sujet Forum une seule fois puis le met à jour.</p></div><button class="btn-secondaire" onclick="ajouterCategorieBoutique()">＋ Catégorie</button></div><div class="boutique-categories-liste">${(state.boutiqueCategories || []).map(category => `<span class="boutique-categorie-chip"><strong>${escapeHtml(category.name)}</strong><button type="button" title="Renommer" onclick="renommerCategorieBoutique('${jsAttr(category.id)}')">✏️</button><button type="button" title="Supprimer" onclick="supprimerCategorieBoutique('${jsAttr(category.id)}')">✕</button></span>`).join('')}</div></section>
     ${toolbarFiltreHTML('boutique', [selectFiltreHTML('boutique', 'category', 'Catégorie', categoryOptions), selectFiltreHTML('boutique', 'rarity', 'Rareté', [{ value: '', label: 'Toutes les raretés' }, ...rarities.map(value => ({ value, label: value }))]), selectFiltreHTML('boutique', 'side', 'Type', [{ value: '', label: 'Achetable et vendable' }, { value: 'achetable', label: 'Achetable' }, { value: 'vendable', label: 'Vendable' }]), selectFiltreHTML('boutique', 'enabled', 'Visibilité', [{ value: '', label: 'Tous' }, { value: '1', label: 'Visibles' }, { value: '0', label: 'Masqués' }]), selectFiltreHTML('boutique', 'sort', 'Trier par', [{ value: 'price-asc', label: 'Prix croissant' }, { value: 'stock-desc', label: 'Stock décroissant' }, { value: 'stock-asc', label: 'Stock croissant' }, { value: 'name-asc', label: 'Nom A → Z' }, { value: 'name-desc', label: 'Nom Z → A' }], 'price-asc')])}
     <div class="production-section-heading"><div><h3>🛒 Achetable</h3></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'achetable')">＋ Ajouter</button></div><div class="boutique-grille">${achetables.map(entry => boutiqueCardHTML(entry, 'achetable')).join('') || vide('Aucun objet achetable.')}</div>
     <div class="production-section-heading"><div><h3>💰 Vendable</h3></div><button class="btn-principal" onclick="ouvrirEditeurBoutique(null, 'vendable')">＋ Ajouter</button></div><div class="boutique-grille">${vendables.map(entry => boutiqueCardHTML(entry, 'vendable')).join('') || vide('Aucun objet vendable.')}</div>
     <div class="aucun-resultat" id="aucun-resultat" hidden>Aucun objet ne correspond à cette recherche ou à ces filtres.</div>`;
   filtrerListe();
+}
+
+async function enregistrerCategoriesBoutique(categories) {
+  try {
+    state.boutiqueCategories = await fetchJSON('/api/boutique/categories', { categories }, 'PUT');
+    toast('Catégories de la boutique enregistrées.', 'succes');
+    await chargerBoutiquePage();
+  } catch (error) { toast(`Impossible d’enregistrer les catégories : ${error.message}`, 'erreur'); }
+}
+
+async function ajouterCategorieBoutique() {
+  const name = prompt('Nom de la nouvelle catégorie :');
+  if (!name?.trim()) return;
+  const base = slugTexte(name.trim()).replace(/_/g, '-').slice(0, 60) || `categorie-${Date.now()}`;
+  let id = base;
+  let suffix = 2;
+  while (state.boutiqueCategories.some(category => category.id === id)) id = `${base}-${suffix++}`;
+  await enregistrerCategoriesBoutique([...state.boutiqueCategories, { id, name: name.trim().slice(0, 80) }]);
+}
+
+async function renommerCategorieBoutique(id) {
+  const category = state.boutiqueCategories.find(row => row.id === id);
+  if (!category) return;
+  const name = prompt('Nouveau nom de la catégorie :', category.name);
+  if (!name?.trim()) return;
+  await enregistrerCategoriesBoutique(state.boutiqueCategories.map(row => row.id === id ? { ...row, name: name.trim().slice(0, 80) } : row));
+}
+
+async function supprimerCategorieBoutique(id) {
+  const category = state.boutiqueCategories.find(row => row.id === id);
+  if (!category) return;
+  const ok = await confirmerAction({ titre: 'Supprimer la catégorie', message: `Supprimer « ${category.name} » ? Les objets qui lui sont encore affectés empêcheront la suppression.`, texteValider: 'Supprimer' });
+  if (!ok) return;
+  await enregistrerCategoriesBoutique(state.boutiqueCategories.filter(row => row.id !== id));
 }
 
 function ouvrirEditeurBoutique(itemId, side = 'achetable') {
@@ -2952,10 +3189,12 @@ function ouvrirEditeurBoutique(itemId, side = 'achetable') {
   const champObjet = entry
     ? `<div class="champ"><label>Objet</label><input type="text" value="${escapeAttr(`${catItem?.emoji || '📦'} ${catItem?.name || entry.id}`)}" disabled></div>`
     : `<div class="champ"><label for="f-boutique-item">Objet du catalogue</label><select id="f-boutique-item" onchange="choisirObjetBoutique(this.value, '${side === 'vendable' ? 'vendable' : 'achetable'}')">${options}</select></div>`;
+  const categoryOptions = (state.boutiqueCategories || []).map(category => `<option value="${escapeAttr(category.id)}" ${(entry?.categoryId || 'autres') === category.id ? 'selected' : ''}>${escapeHtml(category.name)}</option>`).join('');
   const nb = (id, label, value) => `<div class="champ"><label for="${id}">${label}</label><input id="${id}" type="number" min="1" step="1" value="${Math.max(1, Number(value) || 1)}"></div>`;
   document.getElementById('panneau-catalogue-corps').innerHTML = `
     <div class="section-titre">${entry ? '✏️ Modifier l\'objet' : '➕ Ajouter un objet'}</div>
     ${champObjet}
+    <div class="champ"><label for="f-boutique-category">Catégorie du forum</label><select id="f-boutique-category">${categoryOptions}</select></div>
     <div class="grille-champs"><div class="champ"><label for="f-boutique-stock">Stock du marchand (achat et rachat)</label><input id="f-boutique-stock" type="number" min="0" max="1000000" step="1" value="${Math.max(0, Number(entry?.stock) || 0)}"></div><div class="champ"><label for="f-boutique-enabled">Visibilité</label><select id="f-boutique-enabled"><option value="1" ${entry?.enabled === false ? '' : 'selected'}>Visible dans la boutique</option><option value="0" ${entry?.enabled === false ? 'selected' : ''}>Masqué</option></select></div></div>
     <label class="boutique-case"><input type="checkbox" id="f-boutique-achetable" ${coche.achetable ? 'checked' : ''} onchange="basculerSideBoutique()"> 🛒 Achetable (le joueur achète au marchand)</label>
     <div id="bloc-boutique-achat" ${coche.achetable ? '' : 'hidden'}>
@@ -3000,7 +3239,7 @@ async function sauvegarderBoutiqueItem() {
     const vendable = document.getElementById('f-boutique-vendable').checked;
     if (!achetable && !vendable) throw new Error('Coche au moins « Achetable » ou « Vendable ».');
     const stock = Number(val('f-boutique-stock'));
-    const payload = { achetable, vendable, stock, enabled: val('f-boutique-enabled') !== '0' };
+    const payload = { achetable, vendable, stock, enabled: val('f-boutique-enabled') !== '0', categoryId: val('f-boutique-category') };
     if (achetable) { payload.minPrice = Number(val('f-boutique-min')); payload.maxPrice = Number(val('f-boutique-max')); }
     if (vendable) { payload.rachatMinPrice = Number(val('f-boutique-rachat-min')); payload.rachatMaxPrice = Number(val('f-boutique-rachat-max')); }
 

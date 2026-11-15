@@ -25,6 +25,8 @@ const COLLECTION_PRODUCTION_RECIPES = 'production_recipes';
 const COLLECTION_PERSONNEL_TYPES = 'personnel_types';
 const COLLECTION_BOUTIQUE_ITEMS = 'boutique_items';
 const COLLECTION_BOUTIQUE_STATE = 'boutique_state';
+const COLLECTION_MISSIONS = 'missions';
+const COLLECTION_MISSION_STATE = 'mission_state';
 
 let client = null;
 let db = null;
@@ -261,7 +263,7 @@ async function getBoutiqueItemsCollection() {
   return database.collection(COLLECTION_BOUTIQUE_ITEMS);
 }
 
-/** Collection "boutique_state" : { _id: 'meta', messageId, version }. */
+/** Collection "boutique_state" : catégories, IDs des sujets Forum et version de synchronisation. */
 async function getBoutiqueStateCollection() {
   const database = await connect();
   return database.collection(COLLECTION_BOUTIQUE_STATE);
@@ -282,6 +284,19 @@ async function getCharacterTraitsCollection() {
 async function getPersonnelTypesCollection() {
   const database = await connect();
   return database.collection(COLLECTION_PERSONNEL_TYPES);
+}
+
+
+/** Missions créées depuis le site et publiées/suivies par le bot Discord. */
+async function getMissionsCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_MISSIONS);
+}
+
+/** Version de synchronisation du système de missions site <-> bot. */
+async function getMissionStateCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_MISSION_STATE);
 }
 
 module.exports = {
@@ -308,6 +323,8 @@ module.exports = {
   getCraftRecipesCollection,
   getBoutiqueItemsCollection,
   getBoutiqueStateCollection,
+  getMissionsCollection,
+  getMissionStateCollection,
   getProductionRecipesCollection,
   getPersonnelTypesCollection,
   getCharacterTraitsCollection,

@@ -44,6 +44,7 @@ const {
   EQUIPMENT_SLOT_LABELS,
   ITEM_RARITIES,
   getCatalog,
+  getItem,
   getExistingCatalogIds,
   getCatalogMetadata,
   getCatalogImageData,
@@ -58,7 +59,7 @@ const {
   setItemQuantity,
 } = require('../Data/invStore.js');
 const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup, deleteBackup } = require('../Data/adminStore.js');
-const { connect, getItemCatalogCollection, getBoutiqueItemsCollection, getBoutiqueStateCollection, getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection, getCharacterTraitsCollection } = require('../Data/mongo.js');
+const { connect, getItemCatalogCollection, getBoutiqueItemsCollection, getBoutiqueStateCollection, getMissionsCollection, getMissionStateCollection, getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection, getCharacterTraitsCollection } = require('../Data/mongo.js');
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
@@ -221,17 +222,18 @@ app.use('/api', (req, res, next) => {
 app.get('/api/dashboard', async (req, res) => {
   try {
     const db = await connect();
-    const [profiles, objects, crafts, productions, personnel, boutique, recent] = await Promise.all([
+    const [profiles, objects, crafts, productions, personnel, boutique, missions, recent] = await Promise.all([
       db.collection('profils').countDocuments({}),
       db.collection('item_catalog').countDocuments({ _id: { $not: /^__/ } }),
       db.collection('craft_recipes').countDocuments({}),
       db.collection('production_recipes').countDocuments({}),
       db.collection('personnel_types').countDocuments({}),
       db.collection('boutique_items').countDocuments({}),
+      db.collection('missions').countDocuments({}),
       listLogs(10),
     ]);
     res.set('Cache-Control', 'no-store');
-    res.json({ counts: { profils: profiles, objets: objects, crafts, productions, personnel, boutique }, recent: recent.map(row => ({ username: row.username, action: row.action, details: row.details, timestamp: row.timestamp })) });
+    res.json({ counts: { profils: profiles, objets: objects, crafts, productions, personnel, boutique, missions }, recent: recent.map(row => ({ username: row.username, action: row.action, details: row.details, timestamp: row.timestamp })) });
   } catch (err) {
     console.error('Chargement du tableau de bord impossible :', err);
     res.status(500).json({ error: err.message });
@@ -321,7 +323,7 @@ function logFromReq(req, action, details) {
 
 
 const HISTORY_COLLECTION = 'site_change_history';
-const HISTORY_ALLOWED_COLLECTIONS = new Set(['profils', 'item_catalog', 'craft_recipes', 'production_recipes', 'personnel_types', 'boutique_items', 'inv', 'faction_ships']);
+const HISTORY_ALLOWED_COLLECTIONS = new Set(['profils', 'item_catalog', 'craft_recipes', 'production_recipes', 'personnel_types', 'boutique_items', 'missions', 'inv', 'faction_ships']);
 
 async function recordEntityHistory(req, { entityType, collectionName, beforeDocument, afterDocument, action, entityName }) {
   try {
@@ -465,7 +467,7 @@ async function repairCatalogItemReferences(itemId) {
   await (await getItemCatalogCollection()).updateMany({ 'useAction.itemId': id }, { $set: { useAction: null, updatedAt: now } });
   const shop = await getBoutiqueItemsCollection();
   const shopResult = await shop.deleteOne({ _id: id });
-  if (shopResult.deletedCount) await (await getBoutiqueStateCollection()).updateOne({ _id: 'meta' }, { $inc: { version: 1 }, $setOnInsert: { messageId: null } }, { upsert: true });
+  if (shopResult.deletedCount) await (await getBoutiqueStateCollection()).updateOne({ _id: 'meta' }, { $inc: { version: 1 }, $setOnInsert: { categoryThreads: {} } }, { upsert: true });
 }
 
 
@@ -1571,9 +1573,29 @@ const PORT = process.env.PORT || process.env.WEB_PORT || 3000;
 // BOUTIQUE — objets, prix et stock gérés ici ; le bot Discord affiche la
 // boutique et gère les achats / ventes / échanges (il met à jour le stock).
 // Chaque modification incrémente "version" : le bot la détecte (≈30 s) et
-// réactualise le message de la boutique dans Discord.
+// réactualise les sujets persistants de chaque catégorie dans le forum Discord.
 // ---------------------------------------------------------------------------
 const BOUTIQUE_CURRENCY_ITEM_ID = 'credits_de_la_nouvelle_republique';
+const DEFAULT_BOUTIQUE_CATEGORIES = [
+  { id: 'nourriture', name: 'Nourriture' },
+  { id: 'armes-equipements-outils', name: 'Armes & équipements & outils' },
+  { id: 'ressources', name: 'Ressources' },
+  { id: 'soins', name: 'Soins' },
+  { id: 'vaisseaux-transport', name: 'Vaisseaux et transport' },
+  { id: 'autres', name: 'Autres' },
+];
+
+function slugCategorieBoutique(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+}
+
+async function lireCategoriesBoutique() {
+  const col = await getBoutiqueStateCollection();
+  await col.updateOne({ _id: 'categories' }, { $setOnInsert: { items: DEFAULT_BOUTIQUE_CATEGORIES, updatedAt: new Date() } }, { upsert: true });
+  const doc = await col.findOne({ _id: 'categories' });
+  return Array.isArray(doc?.items) ? doc.items : DEFAULT_BOUTIQUE_CATEGORIES;
+}
 
 function entierBoutique(value, label, { min = 0, max = 100000000 } = {}) {
   const n = Math.floor(Number(value));
@@ -1591,13 +1613,16 @@ async function normaliserBoutiqueItem(itemId, body) {
   if (!known.has(id)) throw new Error(`L'objet « ${id} » n'existe pas dans le catalogue.`);
 
   const b = body || {};
+  const categories = await lireCategoriesBoutique();
+  const categoryId = String(b.categoryId || 'autres').trim();
+  if (!categories.some(category => category.id === categoryId)) throw new Error('Choisis une catégorie définie dans la boutique.');
   // Un objet peut être achetable, vendable (rachat) ou les deux. Le stock est
   // UNIQUE : il est partagé entre l'achat et la revente.
   const achetable = b.achetable === true;
   const vendable = b.vendable === true;
   if (!achetable && !vendable) throw new Error('Coche au moins « Achetable » ou « Vendable ».');
   const type = achetable && vendable ? 'mixte' : achetable ? 'achetable' : 'vendable';
-  const data = { type, stock: entierBoutique(b.stock, 'Le stock', { min: 0, max: 1000000 }), enabled: b.enabled !== false, updatedAt: new Date() };
+  const data = { type, categoryId, stock: entierBoutique(b.stock, 'Le stock', { min: 0, max: 1000000 }), enabled: b.enabled !== false, updatedAt: new Date() };
   const unset = {};
 
   if (achetable) {
@@ -1625,9 +1650,44 @@ async function normaliserBoutiqueItem(itemId, body) {
 
 async function signalerChangementBoutique() {
   await (await getBoutiqueStateCollection()).updateOne(
-    { _id: 'meta' }, { $inc: { version: 1 }, $setOnInsert: { messageId: null } }, { upsert: true },
+    { _id: 'meta' }, { $inc: { version: 1 }, $setOnInsert: { categoryThreads: {} } }, { upsert: true },
   );
 }
+
+app.get('/api/boutique/categories', async (req, res) => {
+  try { res.json(await lireCategoriesBoutique()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/boutique/categories', async (req, res) => {
+  try {
+    const source = Array.isArray(req.body?.categories) ? req.body.categories : [];
+    if (!source.length || source.length > 30) throw new Error('Il faut définir entre 1 et 30 catégories.');
+    const categories = [];
+    const ids = new Set();
+    for (const row of source) {
+      const name = String(row?.name || '').trim().slice(0, 80);
+      const id = slugCategorieBoutique(row?.id || name);
+      if (!name || !id) throw new Error('Chaque catégorie doit avoir un nom valide.');
+      if (ids.has(id)) throw new Error(`La catégorie « ${name} » est en double.`);
+      ids.add(id);
+      categories.push({ id, name });
+    }
+    const itemCategoryFilter = ids.has('autres')
+      ? { categoryId: { $exists: true, $nin: [...ids] } }
+      : { $or: [{ categoryId: { $exists: false } }, { categoryId: { $nin: [...ids] } }] };
+    const shopItems = await (await getBoutiqueItemsCollection()).find(itemCategoryFilter, { projection: { _id: 1, categoryId: 1 } }).limit(1).toArray();
+    if (shopItems.length) {
+      if (!shopItems[0].categoryId && !ids.has('autres')) throw new Error('Des objets existants sans catégorie enregistrée sont encore rangés dans « Autres ». Affecte-les à une autre catégorie avant de supprimer « Autres ».');
+      throw new Error(`La catégorie utilisée par « ${shopItems[0]._id} » ne peut pas être supprimée avant de réaffecter cet objet.`);
+    }
+    const col = await getBoutiqueStateCollection();
+    await col.updateOne({ _id: 'categories' }, { $set: { items: categories, updatedAt: new Date() } }, { upsert: true });
+    await signalerChangementBoutique();
+    logFromReq(req, 'boutique_categories_modifiees', 'A modifié les catégories de la boutique.');
+    res.json(categories);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
 
 app.get('/api/boutique', async (req, res) => {
   try {
@@ -1672,6 +1732,149 @@ app.delete('/api/boutique/:itemId', async (req, res) => {
   }
 });
 
+
+
+// ---------------------------------------------------------------------------
+// MISSIONS — le site crée les missions dans MongoDB ; le bot les publie dans
+// les forums Discord et gère leur prise, leur suivi et l'attribution des gains.
+// ---------------------------------------------------------------------------
+function nettoyerTexteMission(value, maxLength) {
+  return String(value || '').trim().slice(0, maxLength);
+}
+
+function validerImageMission(value) {
+  const image = nettoyerTexteMission(value, 2000);
+  if (!image) return null;
+  let url;
+  try { url = new URL(image); } catch { throw new Error('L’image doit être une URL HTTP(S) valide.'); }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('L’image doit être une URL HTTP(S) valide.');
+  return url.toString();
+}
+
+async function normaliserRecompensesMission(rewards) {
+  if (!Array.isArray(rewards) || rewards.length > 25) throw new Error('Une mission peut avoir jusqu’à 25 récompenses.');
+  const normalized = [];
+  for (const row of rewards) {
+    const type = String(row?.type || '');
+    const id = ObjectId.isValid(String(row?.id || '')) ? String(row.id) : new ObjectId().toString();
+    if (type === 'credits' || type === 'reputation') {
+      const amount = Math.floor(Number(row.amount));
+      const max = type === 'credits' ? 100000000 : 200;
+      if (!Number.isInteger(amount) || amount < 1 || amount > max) throw new Error(type === 'credits' ? 'Le montant de crédits doit être compris entre 1 et 100 000 000.' : 'Les points de réputation doivent être compris entre 1 et 200.');
+      normalized.push({ id, type, amount });
+      continue;
+    }
+    if (type === 'item') {
+      const itemId = String(row.itemId || '').trim();
+      const item = itemId ? await getItem(itemId) : null;
+      if (!item) throw new Error(`L’objet « ${itemId || 'inconnu'} » n’existe pas dans le catalogue.`);
+      const quantity = Math.floor(Number(row.quantity));
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100000) throw new Error('La quantité d’objet doit être comprise entre 1 et 100 000.');
+      normalized.push({ id, type, itemId, itemName: item.name, quantity });
+      continue;
+    }
+    if (type === 'stat') {
+      const stat = String(row.stat || '').trim();
+      if (!DEFAULT_STATS.includes(stat)) throw new Error(`Statistique inconnue : ${stat || 'vide'}.`);
+      const amount = Math.floor(Number(row.amount));
+      if (!Number.isInteger(amount) || amount < 1 || amount > STAT_MAX) throw new Error(`Les points de statistique doivent être compris entre 1 et ${STAT_MAX}.`);
+      normalized.push({ id, type, stat, amount });
+      continue;
+    }
+    throw new Error('Type de récompense inconnu.');
+  }
+  return normalized;
+}
+
+async function signalerChangementMissions() {
+  await (await getMissionStateCollection()).updateOne(
+    { _id: 'meta' },
+    { $inc: { version: 1 }, $setOnInsert: { createdAt: new Date() } },
+    { upsert: true },
+  );
+}
+
+app.get('/api/missions', async (req, res) => {
+  try {
+    const docs = await (await getMissionsCollection()).find({}).sort({ createdAt: -1 }).toArray();
+    res.set('Cache-Control', 'no-store');
+    res.json(docs.map(({ _id, ...mission }) => ({ id: String(_id), ...mission })));
+  } catch (err) {
+    console.error('Chargement des missions impossible :', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/missions', async (req, res) => {
+  try {
+    const title = nettoyerTexteMission(req.body?.title, 100);
+    const description = nettoyerTexteMission(req.body?.description, 4000);
+    if (!title) throw new Error('Le titre de la mission est obligatoire.');
+    if (!description) throw new Error('La description de la mission est obligatoire.');
+    const document = {
+      _id: new ObjectId(),
+      title,
+      description,
+      image: validerImageMission(req.body?.image),
+      rewards: await normaliserRecompensesMission(req.body?.rewards || []),
+      status: 'available',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      createdBy: req.session.user?.id || null,
+      createdByName: req.session.user?.username || req.session.user?.global_name || null,
+      publicThreadId: null,
+      acceptedThreadId: null,
+    };
+    await (await getMissionsCollection()).insertOne(document);
+    await signalerChangementMissions();
+    await recordEntityHistory(req, { entityType: 'mission', collectionName: 'missions', beforeDocument: null, afterDocument: document, action: 'cree', entityName: title });
+    logFromReq(req, 'mission_creee', `A créé la mission « ${title} ».`);
+    const { _id, ...data } = document;
+    res.status(201).json({ id: String(_id), ...data });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.patch('/api/missions/:id', async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: 'Identifiant de mission invalide.' });
+    const col = await getMissionsCollection();
+    const filter = { _id: new ObjectId(req.params.id) };
+    const before = await col.findOne(filter);
+    if (!before) return res.status(404).json({ error: 'Mission introuvable.' });
+    if (before.status !== 'available') return res.status(409).json({ error: 'Une mission déjà acceptée ne peut plus être modifiée depuis le site. Modifie ses récompenses dans son salon Discord.' });
+    const title = req.body?.title !== undefined ? nettoyerTexteMission(req.body.title, 100) : before.title;
+    const description = req.body?.description !== undefined ? nettoyerTexteMission(req.body.description, 4000) : before.description;
+    if (!title) throw new Error('Le titre de la mission est obligatoire.');
+    if (!description) throw new Error('La description de la mission est obligatoire.');
+    const fields = { title, description, updatedAt: new Date() };
+    if (req.body?.image !== undefined) fields.image = validerImageMission(req.body.image);
+    if (req.body?.rewards !== undefined) fields.rewards = await normaliserRecompensesMission(req.body.rewards);
+    await col.updateOne({ ...filter, status: 'available' }, { $set: fields });
+    const after = await col.findOne(filter);
+    await signalerChangementMissions();
+    await recordEntityHistory(req, { entityType: 'mission', collectionName: 'missions', beforeDocument: before, afterDocument: after, action: 'modifiee', entityName: after.title });
+    logFromReq(req, 'mission_modifiee', `A modifié la mission « ${after.title} ».`);
+    const { _id, ...data } = after;
+    res.json({ id: String(_id), ...data });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.delete('/api/missions/:id', async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: 'Identifiant de mission invalide.' });
+    const col = await getMissionsCollection();
+    const filter = { _id: new ObjectId(req.params.id) };
+    const before = await col.findOne(filter);
+    if (!before) return res.status(404).json({ error: 'Mission introuvable.' });
+    if (before.status !== 'available') return res.status(409).json({ error: 'Seules les missions encore disponibles peuvent être retirées depuis le site.' });
+    await col.updateOne({ ...filter, status: 'available' }, { $set: { status: 'cancelled', closedAt: new Date(), updatedAt: new Date() } });
+    const after = await col.findOne(filter);
+    await signalerChangementMissions();
+    await recordEntityHistory(req, { entityType: 'mission', collectionName: 'missions', beforeDocument: before, afterDocument: after, action: 'annulee', entityName: before.title });
+    logFromReq(req, 'mission_annulee', `A retiré la mission « ${before.title} » des missions disponibles.`);
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
 
 // Catégorie « Factions » (troupes, chef, vaisseaux, inventaire) — protégée par le middleware /api ci-dessus.
 require('./factionRoutes.js').register(app, { logFromReq, recordEntityHistory });
