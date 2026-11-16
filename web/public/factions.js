@@ -2,6 +2,7 @@
 // Utilise les fonctions globales de app.js : apiFetch, escapeHtml, jsAttr, toast, confirmerAction.
 
 const facState = { meta: null, list: [], key: null, data: null, players: { ready: false, loading: false, players: [] }, catalogue: [], catalogueLoaded: false };
+const FAC_POSSESSION_KINDS = [['batiment','Bâtiment'],['zone_planetaire','Zone planétaire'],['planete','Planète'],['cantina','Cantina'],['autre','Autre']];
 let facCataloguePromise = null;
 
 async function facApi(url, method = 'GET', body) {
@@ -153,6 +154,17 @@ function facRender() {
   const creditItem = meta.creditsItemId;
   const otherItems = Object.entries(state.items).filter(([id]) => id !== creditItem);
   document.getElementById('contenu').innerHTML = `
+    <div class="fac-admin-tools">
+      <div><h3>Gestion des factions</h3><p>Ajoute une faction et ses rôles Discord. Une faction ne peut être supprimée que si elle ne possède plus de personnages, de vaisseaux, de possessions ou de bataille en cours.</p></div>
+      <div class="fac-form fac-create-faction">
+        <label><span class="fac-label">Clé</span><input id="fac-new-key" class="fac-input" maxlength="48" placeholder="EX: RESISTANCE"></label>
+        <label><span class="fac-label">Nom affiché</span><input id="fac-new-label" class="fac-input" maxlength="80" placeholder="Résistance"></label>
+        <label><span class="fac-label">ID rôle catégorie Discord</span><input id="fac-new-role" class="fac-input" inputmode="numeric" placeholder="ID du rôle Discord"></label>
+        <label class="full"><span class="fac-label">Grades (un par ligne : Nom|ID du rôle Discord)</span><textarea id="fac-new-grades" class="fac-input" rows="3" placeholder="Recrue|123456789012345678
+Capitaine|123456789012345679"></textarea></label>
+      </div>
+      <div class="fac-admin-actions"><button class="btn-principal" onclick="facCreerFaction()">＋ Ajouter la faction</button><button class="btn-secondaire btn-danger" onclick="facSupprimerFaction()">Supprimer cette faction</button></div>
+    </div>
     <div class="fac-tabs">${tabs}</div>
 
     <div class="fac-summary">
@@ -160,6 +172,11 @@ function facRender() {
       <div class="fac-card"><h4>🪖 Troupes</h4><div class="fac-row"><input id="fac-troops" class="fac-input" type="number" min="0" value="${state.troops}" placeholder="Nombre de soldats"><button class="btn-secondaire fac-btn" onclick="facEnregistrerTroupes()">Enregistrer</button></div><div class="fac-hint">Effectif total de la faction (utilisé par le recrutement et le massacre).</div></div>
       <div class="fac-card"><h4>💰 Crédits</h4><div class="fac-row"><input id="fac-credits" class="fac-input" type="number" min="0" value="${state.credits}" placeholder="Montant en crédits"><button class="btn-secondaire fac-btn" onclick="facEnregistrerCredits()">Enregistrer</button></div><div class="fac-hint">Trésorerie de la faction (pillée en cas de défaite).</div></div>
       <div class="fac-card"><h4>⭐ Réputation</h4><div class="fac-row"><input id="fac-reputation" class="fac-input" type="number" min="0" max="100" value="${state.reputation ?? 50}" placeholder="0 à 100"><button class="btn-secondaire fac-btn" onclick="facEnregistrerReputation()">Enregistrer</button></div><div class="fac-hint">Réputation diplomatique de la faction, de 0 (détestée) à 100 (prestigieuse).</div></div>
+    </div>
+
+    <div class="fac-section">
+      <div class="fac-section-head"><div><h3>🏛️ Possessions (${(data.possessions || []).length})</h3><p>Bâtiments, zones planétaires, planètes, cantinas et autres propriétés. Les productions et recrutements peuvent exiger une possession.</p></div><button class="btn-principal" onclick="facOuvrirPossession(null)">＋ Nouvelle possession</button></div>
+      ${(data.possessions || []).length ? `<div class="fac-possession-grid">${data.possessions.map(p => facPossessionCardHTML(p)).join('')}</div>` : '<div class="fac-note">Cette faction ne possède encore aucun lieu ou bâtiment.</div>'}
     </div>
 
     <div class="fac-section">
@@ -197,7 +214,7 @@ function facShipHTML(s) {
       <div><span>Points de vie</span>${facNum(s.hp)} / ${facNum(s.hpMax)}</div><div><span>Bouclier</span>${facNum(s.shield)} / ${facNum(s.shieldMax)}</div>
       <div><span>Équipage</span>${facNum(s.crew)} / ${facNum(s.crewMax)}</div><div><span>Portée</span>${s.range} cases</div>
       <div><span>Tir de barrage</span>${facNum(s.barrage)}</div><div><span>Tir ciblé</span>${facNum(s.focus)}</div>
-      <div><span>Escadrons</span>${facNum(s.squadrons)}</div><div><span>Grade requis</span>${escapeHtml(cls?.requirement || '—')}</div>
+      <div><span>Grade requis</span>${escapeHtml(cls?.requirement || '—')}</div>
     </div>
     <div class="fac-ship-pilot" id="fac-ship-pilot-${jsAttr(s.id)}">${facPilotControlHTML(s, players)}</div>
     <div class="fac-ship-actions">
@@ -215,6 +232,94 @@ function facPlayersHTML(ships) {
     return `<tr><td>${p.avatar ? `<img class="fac-avatar" src="${escapeAttr(p.avatar)}" alt="">` : ''}${escapeHtml(p.name)}${p.isLeader ? ' 👑' : ''}</td><td>${p.rankName ? `<span class="fac-badge">${escapeHtml(p.rankName)}</span>` : '<span style="opacity:.5">—</span>'}</td><td>${mine.join(', ') || '<span style="opacity:.5">—</span>'}</td></tr>`;
   }).join('');
   return `<div class="fac-table-wrap"><table class="fac-table"><thead><tr><th>Joueur</th><th>Grade</th><th>Vaisseau(x)</th></tr></thead><tbody>${rows || '<tr><td colspan="3" style="opacity:.6">Aucun joueur trouvé.</td></tr>'}</tbody></table></div>`;
+}
+
+// ------------------------------------------------------------------ gestion dynamique des factions et des possessions
+async function facCreerFaction() {
+  const grades = (document.getElementById('fac-new-grades')?.value || '').split(/\r?\n/).map(line => {
+    const [name, id] = line.split('|'); return { name: String(name || '').trim(), id: String(id || '').trim() };
+  }).filter(g => g.name || g.id);
+  try {
+    const result = await facApi('/api/factions/definitions', 'POST', {
+      key: document.getElementById('fac-new-key')?.value || '',
+      label: document.getElementById('fac-new-label')?.value || '',
+      categoryRoleId: document.getElementById('fac-new-role')?.value || '', grades,
+    });
+    toast(`Faction « ${result.label} » créée.`, 'succes');
+    facState.key = result.key;
+    facState.catalogueLoaded = false; facState.catalogue = [];
+    await chargerFactionsPage();
+    facState.key = result.key; await facChargerFaction();
+  } catch (err) { toast(err.message, 'erreur'); }
+}
+
+async function facSupprimerFaction() {
+  const def = facState.data?.def;
+  if (!def) return toast('Faction introuvable.', 'erreur');
+  const ok = await confirmerAction({ titre: 'Supprimer la faction', message: `Supprimer « ${def.label} » ? Les factions qui possèdent encore des personnages, vaisseaux, possessions ou batailles en cours ne peuvent pas être supprimées.`, texteValider: 'Supprimer' });
+  if (!ok) return;
+  try {
+    await facApi(`/api/factions/definitions/${encodeURIComponent(def.key)}`, 'DELETE');
+    facState.key = null; toast('Faction supprimée.', 'succes'); await chargerFactionsPage();
+  } catch (err) { toast(err.message, 'erreur'); }
+}
+
+function facPossessionCardHTML(p) {
+  const kind = FAC_POSSESSION_KINDS.find(([key]) => key === p.kind)?.[1] || 'Autre';
+  const generation = p.generation?.enabled
+    ? `${p.generation.type === 'credits' ? 'Crédits' : facItemInfo(p.generation.itemId).name} · ${facNum(p.generation.quantity)} toutes les ${facNum(p.generation.intervalMinutes)} min`
+    : 'Aucune génération automatique';
+  return `<article class="fac-possession-card"><div><strong>${escapeHtml(p.name)}</strong><span>${escapeHtml(kind)} · ${escapeHtml(generation)}</span><small>${escapeHtml(p.description || 'Aucune description.')}</small><small class="fac-possession-id">ID : ${escapeHtml(p._id)}</small></div><div class="fac-possession-actions"><button class="btn-secondaire" onclick="facOuvrirPossession('${jsAttr(p._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="facSupprimerPossession('${jsAttr(p._id)}')">Supprimer</button></div></article>`;
+}
+
+async function facOuvrirPossession(possessionId = null) {
+  const possession = possessionId ? (facState.data?.possessions || []).find(p => p._id === possessionId) : null;
+  if (possessionId && !possession) return toast('Possession introuvable.', 'erreur');
+  try { await facChargerCatalogue(); } catch (err) { return toast(err.message, 'erreur'); }
+  facFermerModale();
+  const overlay = document.createElement('div'); overlay.id = 'fac-overlay'; overlay.className = 'fac-overlay';
+  overlay.onclick = e => { if (e.target === overlay) facFermerModale(); };
+  const itemOptions = facState.catalogue.map(item => {
+    const itemId = String(item.id ?? item._id);
+    return `<option value="${escapeAttr(itemId)}" ${itemId === String(possession?.generation?.itemId || '') ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name || itemId}`)}</option>`;
+  }).join('');
+  overlay.innerHTML = `<div class="fac-modal fac-possession-modal"><h3>${possession ? 'Modifier la possession' : 'Nouvelle possession de faction'}</h3><div class="fac-form">
+    <label class="full"><span class="fac-label">Nom</span><input id="fp-name" class="fac-input" maxlength="100" value="${escapeAttr(possession?.name || '')}" placeholder="Ex. Chantier naval de Corellia"></label>
+    <label><span class="fac-label">Type</span><select id="fp-kind" class="fac-select">${FAC_POSSESSION_KINDS.map(([key,label]) => `<option value="${key}" ${possession?.kind === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+    <label class="full"><span class="fac-label">Description</span><textarea id="fp-description" class="fac-input" rows="2">${escapeHtml(possession?.description || '')}</textarea></label>
+    <label class="full fac-possession-toggle"><input id="fp-generation-enabled" type="checkbox" ${possession?.generation?.enabled ? 'checked' : ''} onchange="document.getElementById('fp-generation-fields').hidden = !this.checked"><span>Activer la génération automatique</span></label>
+    <div id="fp-generation-fields" class="fac-form full" ${possession?.generation?.enabled ? '' : 'hidden'}>
+      <label><span class="fac-label">Ressource générée</span><select id="fp-generation-type" class="fac-select" onchange="document.getElementById('fp-item-row').hidden = this.value !== 'item'"><option value="credits" ${possession?.generation?.type !== 'item' ? 'selected' : ''}>Crédits</option><option value="item" ${possession?.generation?.type === 'item' ? 'selected' : ''}>Objet</option></select></label>
+      <label id="fp-item-row" ${possession?.generation?.type === 'item' ? '' : 'hidden'}><span class="fac-label">Objet</span><select id="fp-item" class="fac-select">${itemOptions}</select></label>
+      <label><span class="fac-label">Quantité par versement</span><input id="fp-quantity" class="fac-input" type="number" min="1" value="${Math.max(1, Number(possession?.generation?.quantity) || 1)}"></label>
+      <label><span class="fac-label">Intervalle (minutes)</span><input id="fp-interval" class="fac-input" type="number" min="1" max="525600" value="${Math.max(1, Number(possession?.generation?.intervalMinutes) || 1440)}"></label>
+    </div>
+  </div><p class="fac-hint">Une possession de faction peut être utilisée pour la production ou le recrutement uniquement par le chef de faction. Il peut aussi y affecter du personnel.</p><div class="fac-modal-actions"><button class="btn-secondaire" onclick="facFermerModale()">Annuler</button><button class="btn-principal" onclick="facSauverPossession(${possession ? `'${jsAttr(possession._id)}'` : 'null'})">${possession ? 'Enregistrer' : 'Créer'}</button></div></div>`;
+  document.body.appendChild(overlay);
+}
+
+async function facSauverPossession(possessionId = null) {
+  const type = document.getElementById('fp-generation-type')?.value || 'credits';
+  const enabled = !!document.getElementById('fp-generation-enabled')?.checked;
+  const payload = {
+    name: document.getElementById('fp-name')?.value || '',
+    kind: document.getElementById('fp-kind')?.value || 'autre',
+    description: document.getElementById('fp-description')?.value || '',
+    generation: { enabled, type, itemId: type === 'item' ? document.getElementById('fp-item')?.value : null,
+      quantity: Number(document.getElementById('fp-quantity')?.value) || 1,
+      intervalMinutes: Number(document.getElementById('fp-interval')?.value) || 1440 },
+  };
+  try {
+    await facApi(facUrl(`/possessions${possessionId ? `/${encodeURIComponent(possessionId)}` : ''}`), possessionId ? 'PATCH' : 'POST', payload);
+    facFermerModale(); toast(possessionId ? 'Possession modifiée.' : 'Possession créée.', 'succes'); await facChargerFaction();
+  } catch (err) { toast(err.message, 'erreur'); }
+}
+
+async function facSupprimerPossession(possessionId) {
+  const possession = facState.data?.possessions?.find(p => p._id === possessionId);
+  const ok = await confirmerAction({ titre: 'Supprimer la possession', message: `Supprimer « ${possession?.name || possessionId} » ?`, texteValider: 'Supprimer' });
+  if (!ok) return;
+  return facAction(() => facApi(facUrl(`/possessions/${encodeURIComponent(possessionId)}`), 'DELETE'), 'Possession supprimée.');
 }
 
 // ------------------------------------------------------------------ actions
@@ -264,9 +369,9 @@ function facFermerModale() { document.getElementById('fac-overlay')?.remove(); }
 function facOuvrirVaisseau(shipId) {
   const ship = shipId ? facState.data.ships.find(s => s.id === shipId) : null;
   const classes = facState.meta.classes;
-  const base = ship || { classKey: classes[0].key, ...Object.fromEntries(Object.entries(classes[0].defaults).map(([k, v]) => [k, v])), squadrons: classes[0].squadrons };
-  const v = ship ? { name: ship.name, classKey: ship.classKey, hpMax: ship.hpMax, shieldMax: ship.shieldMax, range: ship.range, crewMax: ship.crewMax, squadrons: ship.squadrons, barrage: ship.barrage, focus: ship.focus }
-    : { name: '', classKey: base.classKey, hpMax: base.hp, shieldMax: base.shield, range: base.range, crewMax: base.crew, squadrons: base.squadrons, barrage: base.barrage, focus: base.focus };
+  const base = ship || { classKey: classes[0].key, ...Object.fromEntries(Object.entries(classes[0].defaults).map(([k, v]) => [k, v])), mapWidth: classes[0].defaults.mapWidth, mapLength: classes[0].defaults.mapLength };
+  const v = ship ? { name: ship.name, classKey: ship.classKey, hpMax: ship.hpMax, shieldMax: ship.shieldMax, range: ship.range, crewMax: ship.crewMax, mapWidth: ship.mapWidth, mapLength: ship.mapLength, barrage: ship.barrage, focus: ship.focus }
+    : { name: '', classKey: base.classKey, hpMax: base.hp, shieldMax: base.shield, range: base.range, crewMax: base.crew, mapWidth: base.mapWidth, mapLength: base.mapLength, barrage: base.barrage, focus: base.focus };
   facFermerModale();
   const overlay = document.createElement('div');
   overlay.id = 'fac-overlay';
@@ -283,9 +388,9 @@ function facOuvrirVaisseau(shipId) {
       ${field('fv-hp', 'PV max', v.hpMax, 'min="1"')}${field('fv-shield', 'Bouclier max', v.shieldMax)}
       ${field('fv-crew', 'Équipage max', v.crewMax)}${field('fv-range', 'Portée (cases)', v.range, 'min="1"')}
       ${field('fv-barrage', 'Dégâts tir de barrage', v.barrage)}${field('fv-focus', 'Dégâts tir ciblé', v.focus)}
-      ${field('fv-squadrons', 'Escadrons de chasseurs', v.squadrons)}
+      ${field('fv-map-width', 'Cases en largeur (X)', v.mapWidth, 'min="1" max="10"')}${field('fv-map-length', 'Cases en longueur (Y)', v.mapLength, 'min="1" max="10"')}
     </div>
-    ${ship ? '<p class="fac-hint" style="margin-top:14px">Les PV, boucliers et l’équipage actuels sont conservés. Utilise « Réparer » pour les restaurer.</p>' : '<p class="fac-hint" style="margin-top:14px">Le gabarit est défini par la classe et ne se modifie pas vaisseau par vaisseau.</p>'}
+    ${ship ? '<p class="fac-hint" style="margin-top:14px">Les PV, boucliers et l’équipage actuels sont conservés. Utilise « Réparer » pour les restaurer.</p>' : '<p class="fac-hint" style="margin-top:14px">Le gabarit reprend la taille par défaut de la classe, mais peut être ajusté pour ce vaisseau.</p>'}
     <div class="fac-modal-actions"><button class="btn-secondaire" onclick="facFermerModale()">Annuler</button><button class="btn-principal" onclick="facSauverVaisseau(${ship ? `'${jsAttr(ship.id)}'` : 'null'})">${ship ? 'Enregistrer' : 'Créer'}</button></div>
   </div>`;
   document.body.appendChild(overlay);
@@ -332,7 +437,6 @@ function facAppliquerClasse() {
   const set = (id, value) => { document.getElementById(id).value = value; };
   set('fv-hp', cls.defaults.hp); set('fv-shield', cls.defaults.shield); set('fv-crew', cls.defaults.crew);
   set('fv-range', cls.defaults.range); set('fv-barrage', cls.defaults.barrage); set('fv-focus', cls.defaults.focus);
-  set('fv-squadrons', cls.squadrons);
   facMettreAJourApercuClasse();
 }
 
@@ -342,7 +446,7 @@ async function facSauverVaisseau(shipId) {
     name: val('fv-name'), classKey: val('fv-class'),
     hpMax: Number(val('fv-hp')), shieldMax: Number(val('fv-shield')), crewMax: Number(val('fv-crew')),
     range: Number(val('fv-range')), barrage: Number(val('fv-barrage')), focus: Number(val('fv-focus')),
-    squadrons: Number(val('fv-squadrons')),
+    mapWidth: Number(val('fv-map-width')), mapLength: Number(val('fv-map-length')),
   };
   try {
     if (shipId) await facApi(facUrl(`/vaisseaux/${encodeURIComponent(shipId)}`), 'PUT', body);

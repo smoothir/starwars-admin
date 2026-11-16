@@ -20,8 +20,8 @@ const COLLECTION_CHARACTER_TRAITS = 'character_traits';
 const COLLECTION_SITE_CONNEXIONS = 'site_connexions';
 const COLLECTION_SITE_LOGS = 'site_logs';
 const COLLECTION_SITE_BACKUPS = 'site_backups';
-const COLLECTION_CRAFT_RECIPES = 'craft_recipes';
 const COLLECTION_PRODUCTION_RECIPES = 'production_recipes';
+const COLLECTION_POSSESSIONS = 'possessions';
 const COLLECTION_PERSONNEL_TYPES = 'personnel_types';
 const COLLECTION_BOUTIQUE_ITEMS = 'boutique_items';
 const COLLECTION_BOUTIQUE_STATE = 'boutique_state';
@@ -246,12 +246,6 @@ async function getSiteBackupsCollection() {
   return database.collection(COLLECTION_SITE_BACKUPS);
 }
 
-/** Recettes de craft configurées depuis le site et consommées par le bot. */
-async function getCraftRecipesCollection() {
-  const database = await connect();
-  return database.collection(COLLECTION_CRAFT_RECIPES);
-}
-
 /** Recettes de production (30 min par unité), partagées avec le bot. */
 /**
  * Collection "boutique_items" : réglages de la boutique (_id = itemId, stock,
@@ -267,6 +261,11 @@ async function getBoutiqueItemsCollection() {
 async function getBoutiqueStateCollection() {
   const database = await connect();
   return database.collection(COLLECTION_BOUTIQUE_STATE);
+}
+
+async function getPossessionsCollection() {
+  const database = await connect();
+  return database.collection(COLLECTION_POSSESSIONS);
 }
 
 async function getProductionRecipesCollection() {
@@ -320,11 +319,11 @@ module.exports = {
   getSiteConnexionsCollection,
   getSiteLogsCollection,
   getSiteBackupsCollection,
-  getCraftRecipesCollection,
   getBoutiqueItemsCollection,
   getBoutiqueStateCollection,
   getMissionsCollection,
   getMissionStateCollection,
+  getPossessionsCollection,
   getProductionRecipesCollection,
   getPersonnelTypesCollection,
   getCharacterTraitsCollection,

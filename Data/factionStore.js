@@ -10,8 +10,80 @@ const CREDITS_ITEM_ID = 'credits_de_la_nouvelle_republique';
 async function factionsCol() { return (await connect()).collection(COLLECTION_FACTIONS); }
 async function shipsCol() { return (await connect()).collection(COLLECTION_SHIPS); }
 async function catalogCol() { return (await connect()).collection('item_catalog'); }
-function listFactionDefs() { return Object.entries(config.FACTIONS).map(([key, f]) => ({ key, label: f.label, categoryRoleId: f.categoryRoleId })); }
-function getFactionDef(key) { const f = config.FACTIONS[key]; return f ? { key, label: f.label, categoryRoleId: f.categoryRoleId } : null; }
+
+let dynamicFactionDefs = new Map();
+let deletedFactionKeys = new Set();
+let factionDefsLoadedAt = 0;
+const FACTION_DEFS_TTL_MS = 15_000;
+async function loadFactionDefs(force = false) {
+  if (!force && Date.now() - factionDefsLoadedAt < FACTION_DEFS_TTL_MS) return listFactionDefs();
+  const docs = await (await connect()).collection('faction_definitions').find({}).toArray();
+  deletedFactionKeys = new Set(docs.filter(doc => doc.deleted === true).map(doc => String(doc._id)));
+  dynamicFactionDefs = new Map(docs.filter(doc => doc.deleted !== true).map(doc => [String(doc._id), {
+    key: String(doc._id), label: String(doc.label || doc._id), categoryRoleId: String(doc.categoryRoleId || ''),
+    grades: Array.isArray(doc.grades) ? doc.grades.map(g => ({ name: String(g.name || ''), id: String(g.id || '') })) : [],
+    dynamic: true,
+  }]));
+  factionDefsLoadedAt = Date.now();
+  return listFactionDefs();
+}
+function listFactionDefs() {
+  const fixed = Object.entries(config.FACTIONS).filter(([key]) => !deletedFactionKeys.has(key)).map(([key, f]) => ({ key, label: f.label, categoryRoleId: f.categoryRoleId, grades: f.grades || [], dynamic: false }));
+  return [...fixed, ...dynamicFactionDefs.values()];
+}
+function getFactionDef(key) {
+  key = String(key || '');
+  if (deletedFactionKeys.has(key)) return null;
+  const f = config.FACTIONS[key];
+  if (f) return { key, label: f.label, categoryRoleId: f.categoryRoleId, grades: f.grades || [], dynamic: false };
+  return dynamicFactionDefs.get(String(key)) || null;
+}
+async function createFactionDef(body = {}) {
+  const key = String(body.key || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '_').slice(0, 48);
+  const label = String(body.label || '').trim().slice(0, 80);
+  const categoryRoleId = String(body.categoryRoleId || '').trim();
+  const grades = Array.isArray(body.grades) ? body.grades.map(g => ({ name: String(g?.name || '').trim().slice(0, 80), id: String(g?.id || '').trim() })).filter(g => g.name && /^\d{15,22}$/.test(g.id)) : [];
+  if (!key || !label || !/^\d{15,22}$/.test(categoryRoleId)) throw new Error('Clé, nom et ID du rôle catégorie Discord valides sont obligatoires.');
+  if (config.FACTIONS[key] || dynamicFactionDefs.has(key)) throw new Error('Cette clé de faction existe déjà.');
+  if (new Set(grades.map(g => g.id)).size !== grades.length) throw new Error('Deux grades ne peuvent pas utiliser le même ID de rôle.');
+  if (!grades.length && Array.isArray(body.grades) && body.grades.length) throw new Error('Chaque grade doit avoir un nom et un ID de rôle Discord valide.');
+  const doc = { _id: key, label, categoryRoleId, grades, createdAt: new Date(), updatedAt: new Date() };
+  await (await connect()).collection('faction_definitions').insertOne(doc);
+  await loadFactionDefs(true);
+  return getFactionDef(key);
+}
+async function deleteFactionDef(key) {
+  key = String(key || '').trim();
+  const definition = getFactionDef(key);
+  if (!definition) throw new Error('Faction inconnue.');
+  const db = await connect();
+  const [ships, battle, possession, profiles] = await Promise.all([
+    db.collection('faction_ships').countDocuments({ factionKey: key }),
+    db.collection('battles').findOne({ status: { $in: ['preparation', 'active'] }, $or: [{ 'sides.A.factionKey': key }, { 'sides.B.factionKey': key }] }),
+    db.collection('possessions').findOne({ ownerType: 'faction', ownerId: key }),
+    db.collection('profils').countDocuments({ categoryId: definition.categoryRoleId }),
+  ]);
+  if (ships) throw new Error('Supprime ou transfère les vaisseaux de cette faction avant de la supprimer.');
+  if (battle) throw new Error('Cette faction participe à une bataille en cours.');
+  if (possession) throw new Error('Retire d’abord les possessions de cette faction.');
+  if (profiles) throw new Error('Cette faction possède encore des personnages. Déplace-les dans une autre faction avant de la supprimer.');
+
+  if (config.FACTIONS[key]) {
+    // Les factions intégrées sont masquées par un tombstone MongoDB pour éviter
+    // qu'elles réapparaissent au prochain redémarrage du bot.
+    await db.collection('faction_definitions').updateOne(
+      { _id: key },
+      { $set: { deleted: true, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
+      { upsert: true },
+    );
+  } else {
+    await db.collection('faction_definitions').deleteOne({ _id: key });
+  }
+  await db.collection('factions').deleteOne({ _id: key });
+  await loadFactionDefs(true);
+  return true;
+}
+
 function toInt(value, { min = 0, max = 1_000_000_000, fallback = 0 } = {}) {
   const n = Math.floor(Number(value));
   if (!Number.isFinite(n)) return fallback;
@@ -86,8 +158,8 @@ function normalizeShipFields(body, { partial = false, resetClassDefaults = false
   }
   const cls = SHIP_CLASSES[out.classKey || b.classKey];
   const d = cls?.defaults || {};
-  const fallback = { hpMax: d.hp, shieldMax: d.shield, crewMax: d.crew, range: d.range, barrage: d.barrage, focus: d.focus, squadrons: cls?.squadrons };
-  const limits = { hpMax: { min: 1, max: 1_000_000 }, shieldMax: { max: 1_000_000 }, crewMax: { max: 1_000_000 }, range: { min: 1, max: 50 }, barrage: { max: 100_000 }, focus: { max: 100_000 }, squadrons: { max: 1000 } };
+  const fallback = { hpMax: d.hp, shieldMax: d.shield, crewMax: d.crew, range: d.range, barrage: d.barrage, focus: d.focus, mapWidth: d.mapWidth || 1, mapLength: d.mapLength || 1 };
+  const limits = { hpMax: { min: 1, max: 1_000_000 }, shieldMax: { max: 1_000_000 }, crewMax: { max: 1_000_000 }, range: { min: 1, max: 50 }, barrage: { max: 100_000 }, focus: { max: 100_000 }, mapWidth: { min: 1, max: 10 }, mapLength: { min: 1, max: 10 } };
   for (const field of Object.keys(fallback)) {
     if (partial && !resetClassDefaults && b[field] === undefined) continue;
     const raw = b[field] === undefined || b[field] === null || b[field] === '' ? fallback[field] : b[field];
@@ -104,9 +176,8 @@ function shipFromDoc(doc) {
     hpMax: toInt(doc.hpMax), hp: toInt(doc.hp ?? doc.hpMax),
     shieldMax: toInt(doc.shieldMax), shield: toInt(doc.shield ?? doc.shieldMax),
     crewMax: toInt(doc.crewMax), crew: toInt(doc.crew ?? doc.crewMax),
-    squadrons: toInt(doc.squadrons),
-    mapWidth: toInt(cls?.defaults?.mapWidth, { min: 1, max: 6, fallback: 1 }),
-    mapLength: toInt(cls?.defaults?.mapLength, { min: 1, max: 10, fallback: 1 }),
+    mapWidth: toInt(doc.mapWidth ?? cls?.defaults?.mapWidth, { min: 1, max: 10, fallback: 1 }),
+    mapLength: toInt(doc.mapLength ?? cls?.defaults?.mapLength, { min: 1, max: 10, fallback: 1 }),
     range: toInt(doc.range, { min: 1, max: 50, fallback: 1 }), barrage: toInt(doc.barrage), focus: toInt(doc.focus),
     assignedUserId: doc.assignedUserId || null,
   };
@@ -157,8 +228,7 @@ async function updateShip(shipId, body) {
   if (fields.hpMax !== undefined) set.hp = Math.min(toInt(before.hp ?? before.hpMax), fields.hpMax);
   if (fields.shieldMax !== undefined) set.shield = Math.min(toInt(before.shield ?? before.shieldMax), fields.shieldMax);
   if (fields.crewMax !== undefined) set.crew = Math.min(toInt(before.crew ?? before.crewMax), fields.crewMax);
-  // Les anciens mapWidth/mapLength restent ignorés : l'empreinte vient de SHIP_CLASSES.
-  await col.updateOne({ _id: String(shipId) }, { $set: set, $unset: { mapWidth: '', mapLength: '' } });
+  await col.updateOne({ _id: String(shipId) }, { $set: set });
   return getShip(shipId);
 }
 async function deleteShip(shipId) {

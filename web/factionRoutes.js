@@ -4,6 +4,7 @@
 const fs = require('fs/promises');
 const path = require('path');
 const store = require('../Data/factionStore.js');
+const possessionStore = require('../Data/possessionStore.js');
 const { RANKS, SHIP_CLASSES, getRankIndex } = require('../Data/shipClasses.js');
 
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -76,6 +77,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   };
 
   app.get('/api/factions/meta', wrap(async (req, res) => {
+    await store.loadFactionDefs();
     res.set('Cache-Control', 'private, max-age=60');
     let meta = classMetaCache.value;
     if (!meta || Date.now() - classMetaCache.at > CLASS_META_TTL_MS) {
@@ -90,7 +92,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
             ranks: RANKS.map(r => ({ key: r.key, name: r.name })),
             classes: Object.entries(SHIP_CLASSES).map(([key, c]) => ({
               key, id: c.id, image: images[key] ? `/ship/${encodeURIComponent(images[key])}` : null,
-              label: c.label, size: c.size, squadrons: c.squadrons, defaults: c.defaults,
+              label: c.label, size: c.size, defaults: c.defaults,
               requirement: c.leaderOnly ? 'Chef de faction' : RANKS[c.minRank].name,
             })),
             creditsItemId: store.CREDITS_ITEM_ID,
@@ -107,8 +109,29 @@ function register(app, { logFromReq, recordEntityHistory }) {
     res.json({ ...meta, discordReady: discordReady() });
   }));
 
+
+  app.post('/api/factions/definitions', wrap(async (req, res) => {
+    await store.loadFactionDefs();
+    const definition = await store.createFactionDef(req.body || {});
+    classMetaCache = { at: 0, value: null };
+    if (logFromReq) logFromReq(req, 'faction_creee', `A créé la faction « ${definition.label} ».`);
+    res.status(201).json(definition);
+  }));
+
+  app.delete('/api/factions/definitions/:key', wrap(async (req, res) => {
+    await store.loadFactionDefs();
+    const definition = store.getFactionDef(req.params.key);
+    if (!definition) return res.status(404).json({ error: 'Faction inconnue.' });
+    await store.deleteFactionDef(req.params.key);
+    classMetaCache = { at: 0, value: null };
+    if (logFromReq) logFromReq(req, 'faction_supprimee', `A supprimé la faction « ${definition.label} ».`);
+    res.json({ ok: true });
+  }));
+
   app.get('/api/factions', wrap(async (req, res) => {
+    await store.loadFactionDefs();
     res.set('Cache-Control', 'private, max-age=15, stale-while-revalidate=30');
+    await store.loadFactionDefs();
     const out = await store.listFactionSummaries();
     res.json(out);
   }));
@@ -116,8 +139,32 @@ function register(app, { logFromReq, recordEntityHistory }) {
   app.get('/api/factions/:key', wrap(async (req, res) => {
     const def = needFaction(req, res); if (!def) return;
     res.set('Cache-Control', 'no-store');
-    const [state, ships] = await Promise.all([store.getFactionState(def.key), store.listShips(def.key)]);
-    res.json({ def, state, ships });
+    const [state, ships, possessions] = await Promise.all([store.getFactionState(def.key), store.listShips(def.key), possessionStore.listPossessions('faction', def.key)]);
+    res.json({ def, state, ships, possessions });
+  }));
+
+
+  app.post('/api/factions/:key/possessions', wrap(async (req, res) => {
+    const def = needFaction(req, res); if (!def) return;
+    const doc = await possessionStore.createPossession('faction', def.key, req.body || {});
+    if (logFromReq) logFromReq(req, 'possession_faction_creee', `${def.label} : possession « ${doc.name} » créée.`);
+    res.status(201).json(doc);
+  }));
+
+  app.patch('/api/factions/:key/possessions/:id', wrap(async (req, res) => {
+    const def = needFaction(req, res); if (!def) return;
+    const before = await possessionStore.getPossession(req.params.id);
+    if (!before || before.ownerType !== 'faction' || before.ownerId !== def.key) throw new Error('Possession de faction introuvable.');
+    const doc = await possessionStore.updatePossession(req.params.id, req.body || {});
+    res.json(doc);
+  }));
+
+  app.delete('/api/factions/:key/possessions/:id', wrap(async (req, res) => {
+    const def = needFaction(req, res); if (!def) return;
+    const before = await possessionStore.getPossession(req.params.id);
+    if (!before || before.ownerType !== 'faction' || before.ownerId !== def.key) throw new Error('Possession de faction introuvable.');
+    await possessionStore.deletePossession(req.params.id);
+    res.json({ ok: true });
   }));
 
   app.get('/api/factions/:key/joueurs', wrap(async (req, res) => {

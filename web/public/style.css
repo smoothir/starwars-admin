@@ -1269,100 +1269,6 @@ input[type="number"] {
 }
 .case-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: #ffffff; cursor: pointer; }
 .case-label input[type="checkbox"]:disabled { cursor: not-allowed; opacity: 0.6; }
-/* =========================================================================
-   Gestion des recettes de craft - Atelier Discord
-   ========================================================================= */
-.crafts-intro {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 20px;
-  margin-bottom: 18px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-}
-.crafts-intro-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 54px;
-  height: 54px;
-  flex: 0 0 54px;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  font-size: 1.65rem;
-}
-.crafts-intro > div:nth-child(2) { flex: 1; min-width: 0; }
-.crafts-intro strong { display: block; color: #fff; font-size: .95rem; }
-.crafts-intro p { margin: 5px 0 0; color: var(--text-secondary); font-size: .78rem; line-height: 1.5; }
-.crafts-intro .btn-principal { flex: 0 0 auto; padding: 12px 16px; }
-.crafts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.craft-card {
-  min-width: 0;
-  padding: 18px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  transition: border-color var(--dur) var(--ease), transform var(--dur) var(--ease), background var(--dur) var(--ease);
-}
-.craft-card:hover { border-color: var(--border-soft); background: var(--bg-card-hover); transform: translateY(-2px); }
-.craft-card.masquee { display: none; }
-.craft-card-head { display: flex; align-items: flex-start; gap: 12px; }
-.craft-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  flex: 0 0 44px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  background: #050505;
-  font-size: 1.35rem;
-}
-.craft-card-title { flex: 1; min-width: 0; }
-.craft-card-title h3 { color: #fff; font-size: .96rem; overflow-wrap: anywhere; }
-.craft-card-title p { margin: 6px 0 0; color: var(--text-secondary); font-size: .74rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.craft-duration { flex: 0 0 auto; padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-primary); font-size: .69rem; white-space: nowrap; }
-.craft-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 17px; }
-.craft-items-preview { min-width: 0; padding: 12px; background: rgba(255,255,255,.025); border: 1px solid var(--border-subtle); border-radius: 9px; }
-.craft-items-preview > strong { color: var(--text-secondary); font-size: .67rem; line-height: 1.5; text-transform: uppercase; letter-spacing: .04em; }
-.craft-items-preview ul { display: flex; flex-direction: column; gap: 7px; list-style: none; padding: 0; margin: 11px 0 0; }
-.craft-items-preview li { display: flex; gap: 6px; align-items: flex-start; color: var(--text-primary); font-size: .76rem; line-height: 1.4; overflow-wrap: anywhere; }
-.craft-items-preview li span { margin-left: auto; color: var(--text-secondary); font-weight: 700; white-space: nowrap; }
-.craft-card-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.craft-item-list { display: flex; flex-direction: column; gap: 8px; }
-.craft-item-row { display: grid; grid-template-columns: minmax(0, 1fr) 82px 40px; align-items: center; gap: 8px; }
-.craft-item-row select, .craft-item-row input {
-  width: 100%;
-  min-width: 0;
-  padding: 10px 10px;
-  color: var(--text-primary);
-  background: var(--bg-input);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  font: inherit;
-  font-size: .78rem;
-}
-.craft-item-row select:focus, .craft-item-row input:focus { outline: none; border-color: var(--border-soft); }
-.craft-item-row .btn-secondaire { min-height: 36px; padding: 0; }
-.craft-add-row { width: 100%; min-height: 38px; margin-top: 9px; border-style: dashed; }
-.craft-duration-fields { margin-bottom: 20px; }
-#panneau-catalogue:has(#craft-requirements) { width: min(760px, 96vw); }
-#panneau-catalogue:has(#craft-requirements) .panneau-corps { padding-bottom: 48px; }
-@media (max-width: 920px) {
-  .crafts-grid { grid-template-columns: 1fr; }
-}
-@media (max-width: 700px) {
-  .crafts-intro { flex-wrap: wrap; align-items: flex-start; }
-  .crafts-intro .btn-principal { width: 100%; }
-  .craft-columns { grid-template-columns: 1fr; }
-  .craft-duration { white-space: normal; }
-  .craft-item-row { grid-template-columns: minmax(0, 1fr) 64px 36px; gap: 5px; }
-  .craft-item-row select, .craft-item-row input { padding: 9px 6px; font-size: .72rem; }
-}
-
 /* =====================================================================
    Catalogue d'objets - navigation, filtres et cartes
    ===================================================================== */
@@ -1896,7 +1802,7 @@ html { font-size: 14px; }
   font-family: var(--font-text); font-size: 0.88rem;
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.production-item-row .select-recherche-bouton, .craft-item-row .select-recherche-bouton { padding: 9px 10px; font-size: .77rem; }
+.production-item-row .select-recherche-bouton { padding: 9px 10px; font-size: .77rem; }
 .select-recherche-bouton:hover:not(:disabled), .select-recherche-bouton:focus-visible, .select-recherche-bouton[aria-expanded="true"] {
   outline: none; border-color: var(--border-gold); box-shadow: 0 0 0 3px rgba(255,255,255,0.14);
 }

@@ -86,8 +86,8 @@ function normalizeShipFields(body, { partial = false, resetClassDefaults = false
   }
   const cls = SHIP_CLASSES[out.classKey || b.classKey];
   const d = cls?.defaults || {};
-  const fallback = { hpMax: d.hp, shieldMax: d.shield, crewMax: d.crew, range: d.range, barrage: d.barrage, focus: d.focus, squadrons: cls?.squadrons };
-  const limits = { hpMax: { min: 1, max: 1_000_000 }, shieldMax: { max: 1_000_000 }, crewMax: { max: 1_000_000 }, range: { min: 1, max: 50 }, barrage: { max: 100_000 }, focus: { max: 100_000 }, squadrons: { max: 1000 } };
+  const fallback = { hpMax: d.hp, shieldMax: d.shield, crewMax: d.crew, range: d.range, barrage: d.barrage, focus: d.focus };
+  const limits = { hpMax: { min: 1, max: 1_000_000 }, shieldMax: { max: 1_000_000 }, crewMax: { max: 1_000_000 }, range: { min: 1, max: 50 }, barrage: { max: 100_000 }, focus: { max: 100_000 } };
   for (const field of Object.keys(fallback)) {
     if (partial && !resetClassDefaults && b[field] === undefined) continue;
     const raw = b[field] === undefined || b[field] === null || b[field] === '' ? fallback[field] : b[field];
@@ -104,7 +104,6 @@ function shipFromDoc(doc) {
     hpMax: toInt(doc.hpMax), hp: toInt(doc.hp ?? doc.hpMax),
     shieldMax: toInt(doc.shieldMax), shield: toInt(doc.shield ?? doc.shieldMax),
     crewMax: toInt(doc.crewMax), crew: toInt(doc.crew ?? doc.crewMax),
-    squadrons: toInt(doc.squadrons),
     mapWidth: toInt(cls?.defaults?.mapWidth, { min: 1, max: 6, fallback: 1 }),
     mapLength: toInt(cls?.defaults?.mapLength, { min: 1, max: 10, fallback: 1 }),
     range: toInt(doc.range, { min: 1, max: 50, fallback: 1 }), barrage: toInt(doc.barrage), focus: toInt(doc.focus),

@@ -38,6 +38,7 @@ const DEFAULT_CHARACTER_TRAITS = [
   { _id: 'diplomate-celebre', name: 'Diplomate Célèbre', description: 'La Nouvelle République OU l’Ordre Jedi passe à 3 (Favorable) ; +5 Éloquence & Commerce.', points: -2, enabled: true, effects: { stats: [{ stat: 'Éloquence & Commerce', amount: 5 }], relationChoice: { prompt: 'Choisis la faction qui commence à une relation de 3 (Favorable).', options: [{ factionKey: 'NOUVELLE_REPUBLIQUE', label: 'La Nouvelle République', level: 3 }, { factionKey: 'ORDRE_JEDI', label: 'L’Ordre Jedi', level: 3 }] } } },
 ];
 const { getFactions, findGradeByRoleId } = require('../Data/factionHelper.js');
+const factionStore = require('../Data/factionStore.js');
 const { findAvatar, upsertAvatarImage } = require('../Data/avatarStore.js');
 const {
   EQUIPMENT_SLOTS,
@@ -59,7 +60,8 @@ const {
   setItemQuantity,
 } = require('../Data/invStore.js');
 const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup, deleteBackup } = require('../Data/adminStore.js');
-const { connect, getItemCatalogCollection, getBoutiqueItemsCollection, getBoutiqueStateCollection, getMissionsCollection, getMissionStateCollection, getCraftRecipesCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection, getCharacterTraitsCollection } = require('../Data/mongo.js');
+const { connect, getItemCatalogCollection, getBoutiqueItemsCollection, getBoutiqueStateCollection, getMissionsCollection, getMissionStateCollection, getPossessionsCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection, getCharacterTraitsCollection } = require('../Data/mongo.js');
+const possessionStore = require('../Data/possessionStore.js');
 
 const app = express();
 // Limite relevée (défaut Express : 100kb) pour accepter l'upload d'un portrait
@@ -222,10 +224,9 @@ app.use('/api', (req, res, next) => {
 app.get('/api/dashboard', async (req, res) => {
   try {
     const db = await connect();
-    const [profiles, objects, crafts, productions, personnel, boutique, missions, recent] = await Promise.all([
+    const [profiles, objects, productions, personnel, boutique, missions, recent] = await Promise.all([
       db.collection('profils').countDocuments({}),
       db.collection('item_catalog').countDocuments({ _id: { $not: /^__/ } }),
-      db.collection('craft_recipes').countDocuments({}),
       db.collection('production_recipes').countDocuments({}),
       db.collection('personnel_types').countDocuments({}),
       db.collection('boutique_items').countDocuments({}),
@@ -233,7 +234,7 @@ app.get('/api/dashboard', async (req, res) => {
       listLogs(10),
     ]);
     res.set('Cache-Control', 'no-store');
-    res.json({ counts: { profils: profiles, objets: objects, crafts, productions, personnel, boutique, missions }, recent: recent.map(row => ({ username: row.username, action: row.action, details: row.details, timestamp: row.timestamp })) });
+    res.json({ counts: { profils: profiles, objets: objects, productions, personnel, boutique, missions }, recent: recent.map(row => ({ username: row.username, action: row.action, details: row.details, timestamp: row.timestamp })) });
   } catch (err) {
     console.error('Chargement du tableau de bord impossible :', err);
     res.status(500).json({ error: err.message });
@@ -323,7 +324,7 @@ function logFromReq(req, action, details) {
 
 
 const HISTORY_COLLECTION = 'site_change_history';
-const HISTORY_ALLOWED_COLLECTIONS = new Set(['profils', 'item_catalog', 'craft_recipes', 'production_recipes', 'personnel_types', 'boutique_items', 'missions', 'inv', 'faction_ships']);
+const HISTORY_ALLOWED_COLLECTIONS = new Set(['profils', 'item_catalog', 'production_recipes', 'personnel_types', 'boutique_items', 'missions', 'inv', 'faction_ships']);
 
 async function recordEntityHistory(req, { entityType, collectionName, beforeDocument, afterDocument, action, entityName }) {
   try {
@@ -389,13 +390,12 @@ function snapshotCatalogPayload(document) {
 
 async function usageOfCatalogItems(itemIds) {
   const ids = [...new Set((itemIds || []).map(value => String(value || '')).filter(Boolean))];
-  const result = new Map(ids.map(id => [id, { inventories: [], crafts: [], productions: [], boutique: null, itemUseActions: [], total: 0 }]));
+  const result = new Map(ids.map(id => [id, { inventories: [], productions: [], boutique: null, itemUseActions: [], total: 0 }]));
   if (!ids.length) return result;
   const idSet = new Set(ids);
-  const [inventories, profiles, crafts, productions, shopDocs, itemUseActions] = await Promise.all([
+  const [inventories, profiles, productions, shopDocs, itemUseActions] = await Promise.all([
     (await getInvCollection()).find({}, { projection: { _id: 1, items: 1, equipement: 1 } }).toArray(),
     listAllProfiles(),
-    (await getCraftRecipesCollection()).find({ $or: [{ requirements: { $elemMatch: { itemId: { $in: ids } } } }, { outputs: { $elemMatch: { itemId: { $in: ids } } } }] }, { projection: { _id: 1, name: 1, requirements: 1, outputs: 1, enabled: 1 } }).toArray(),
     (await getProductionRecipesCollection()).find({ $or: [{ requirements: { $elemMatch: { itemId: { $in: ids } } } }, { outputs: { $elemMatch: { itemId: { $in: ids } } } }] }, { projection: { _id: 1, name: 1, requirements: 1, outputs: 1, enabled: 1 } }).toArray(),
     (await getBoutiqueItemsCollection()).find({ _id: { $in: ids } }, { projection: { _id: 1, enabled: 1, type: 1, stock: 1 } }).toArray(),
     (await getItemCatalogCollection()).find({ 'useAction.itemId': { $in: ids } }, { projection: { _id: 1, name: 1, 'useAction.itemId': 1 } }).toArray(),
@@ -428,20 +428,19 @@ async function usageOfCatalogItems(itemIds) {
       for (const id of referenced) result.get(id)[targetKey].push({ id: String(row._id), name: row.name || String(row._id), enabled: row.enabled !== false });
     }
   };
-  appendRecipeUsage(crafts, 'crafts');
   appendRecipeUsage(productions, 'productions');
   for (const doc of shopDocs) result.get(String(doc._id)).boutique = { id: String(doc._id), stock: Number(doc.stock) || 0, enabled: doc.enabled !== false };
   for (const doc of itemUseActions) {
     const id = String(doc.useAction?.itemId || '');
     if (result.has(id)) result.get(id).itemUseActions.push({ id: String(doc._id), name: doc.name || String(doc._id) });
   }
-  for (const usage of result.values()) usage.total = usage.inventories.length + usage.crafts.length + usage.productions.length + (usage.boutique ? 1 : 0) + usage.itemUseActions.length;
+  for (const usage of result.values()) usage.total = usage.inventories.length + usage.productions.length + (usage.boutique ? 1 : 0) + usage.itemUseActions.length;
   return result;
 }
 
 async function usageOfCatalogItem(itemId) {
   const result = await usageOfCatalogItems([String(itemId || '')]);
-  return result.get(String(itemId || '')) || { inventories: [], crafts: [], productions: [], boutique: null, itemUseActions: [], total: 0 };
+  return result.get(String(itemId || '')) || { inventories: [], productions: [], boutique: null, itemUseActions: [], total: 0 };
 }
 
 async function repairCatalogItemReferences(itemId) {
@@ -453,7 +452,7 @@ async function repairCatalogItemReferences(itemId) {
     await invCol.updateMany({ [`equipement.${slot}`]: id }, { $unset: { [`equipement.${slot}`]: '' }, $set: { updatedAt: now } });
   }
 
-  const recipeCollections = [await getCraftRecipesCollection(), await getProductionRecipesCollection()];
+  const recipeCollections = [await getProductionRecipesCollection()];
   for (const col of recipeCollections) {
     const docs = await col.find({ $or: [{ requirements: { $elemMatch: { itemId: id } } }, { outputs: { $elemMatch: { itemId: id } } }] }).toArray();
     for (const doc of docs) {
@@ -565,7 +564,7 @@ app.delete('/api/admin/backups/:backupId', async (req, res) => {
 // autorisées : aucune collection système/session/log/backups n'est exposée.
 // ---------------------------------------------------------------------------
 const DATA_MANAGER_TYPES = new Set([
-  'reservations', 'profils', 'personnel', 'productions', 'crafts', 'tickets', 'rumeurs',
+  'reservations', 'profils', 'personnel', 'productions', 'tickets', 'rumeurs',
 ]);
 
 const DATA_MANAGER_LABELS = {
@@ -573,7 +572,6 @@ const DATA_MANAGER_LABELS = {
   profils: 'Profils RP',
   personnel: 'Personnel acheté',
   productions: 'Productions en cours',
-  crafts: 'Crafts en cours',
   tickets: 'Autres tickets',
   rumeurs: 'Rumeurs',
 };
@@ -669,6 +667,65 @@ app.post('/auth/logout', (req, res) => {
 // ---------------------------------------------------------------------------
 // PROFILS
 // ---------------------------------------------------------------------------
+
+
+app.get('/api/possessions/all', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store'); res.json(await possessionStore.listPossessions()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/possessions', async (req, res) => {
+  try {
+    const ownerType = String(req.query.ownerType || '');
+    const ownerId = String(req.query.ownerId || '');
+    if (!['profile', 'faction'].includes(ownerType) || !ownerId) return res.status(400).json({ error: 'Propriétaire requis.' });
+    if (ownerType === 'profile' && !await getProfile(ownerId)) return res.status(404).json({ error: 'Profil introuvable.' });
+    res.json(await possessionStore.listPossessions(ownerType, ownerId));
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.post('/api/possessions', async (req, res) => {
+  try {
+    const doc = await possessionStore.createPossession(req.body?.ownerType, req.body?.ownerId, req.body || {});
+    logFromReq(req, 'possession_creee', `A créé la possession « ${doc.name} » (${doc.ownerType}).`);
+    res.status(201).json(doc);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.patch('/api/possessions/:id', async (req, res) => {
+  try {
+    const doc = await possessionStore.updatePossession(req.params.id, req.body || {});
+    logFromReq(req, 'possession_modifiee', `A modifié la possession « ${doc.name} ».`);
+    res.json(doc);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.delete('/api/possessions/:id', async (req, res) => {
+  try {
+    const before = await possessionStore.getPossession(req.params.id);
+    if (!before) return res.status(404).json({ error: 'Possession introuvable.' });
+    await possessionStore.deletePossession(req.params.id);
+    logFromReq(req, 'possession_supprimee', `A supprimé la possession « ${before.name} ».`);
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.get('/api/profils/:id/possessions', async (req, res) => {
+  try {
+    const profile = await getProfile(req.params.id);
+    if (!profile) return res.status(404).json({ error: 'Profil introuvable.' });
+    res.json(await possessionStore.listPossessions('profile', String(profile._id)));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/profils/:id/possessions', async (req, res) => {
+  try {
+    const profile = await getProfile(req.params.id);
+    if (!profile) return res.status(404).json({ error: 'Profil introuvable.' });
+    const doc = await possessionStore.createPossession('profile', String(profile._id), req.body || {});
+    res.status(201).json(doc);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
 
 app.get('/api/profils', async (req, res) => {
   try {
@@ -795,10 +852,12 @@ app.get('/api/statuts', (req, res) => res.json(STATUTS));
 // Données de référence (factions/rôles/relations/stats) pour construire le
 // panneau d'édition d'un profil côté site  copiées depuis Data/config.js et
 // Data/profileStore.js pour rester exactement alignées avec le bot.
-app.get('/api/lists', (req, res) => {
+app.get('/api/lists', async (req, res) => {
+  await factionStore.loadFactionDefs();
+  const dynamicRelations = factionStore.listFactionDefs().map(f => ({ key: f.key, label: f.label }));
   res.json({
     factions: getFactions(),
-    relationFactions: config.RELATION_FACTIONS,
+    relationFactions: dynamicRelations,
     relationLevels: config.RELATION_LEVELS,
     defaultStats: DEFAULT_STATS,
     statMax: STAT_MAX,
@@ -939,112 +998,6 @@ app.delete('/api/traits/:id', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// CRAFTS — recettes configurables depuis le site, partagées avec le bot.
-// ---------------------------------------------------------------------------
-function normaliserListeCraft(values, fieldName) {
-  if (!Array.isArray(values)) throw new Error(`${fieldName} doit être une liste d'objets.`);
-  const merged = new Map();
-  for (const entry of values) {
-    const itemId = String(entry?.itemId || '').trim();
-    const quantity = Math.floor(Number(entry?.quantity));
-    if (!itemId || !/^[A-Za-z0-9_-]+$/.test(itemId)) throw new Error(`Identifiant d'objet invalide dans « ${fieldName} ».`);
-    if (!Number.isFinite(quantity) || quantity < 1) throw new Error(`Chaque quantité de « ${fieldName} » doit être au moins égale à 1.`);
-    merged.set(itemId, (merged.get(itemId) || 0) + quantity);
-  }
-  return [...merged.entries()].map(([itemId, quantity]) => ({ itemId, quantity }));
-}
-
-async function normaliserRecetteCraft(body) {
-  const b = body || {};
-  const name = String(b.name || '').trim();
-  if (!name) throw new Error('Le nom de la recette est obligatoire.');
-  const requirements = normaliserListeCraft(b.requirements, 'Objets nécessaires');
-  const outputs = normaliserListeCraft(b.outputs, 'Objets produits');
-  if (!requirements.length) throw new Error('Ajoute au moins un ingrédient nécessaire.');
-  if (!outputs.length) throw new Error('Ajoute au moins un objet produit.');
-
-  const durationMinutes = Math.floor(Number(b.durationMinutes));
-  if (!Number.isFinite(durationMinutes) || durationMinutes < 1 || durationMinutes > 5256000) {
-    throw new Error('La durée doit être comprise entre 1 minute et 10 ans.');
-  }
-  const known = await getExistingCatalogIds([...requirements, ...outputs].map(row => row.itemId));
-  for (const row of [...requirements, ...outputs]) {
-    if (!known.has(row.itemId)) throw new Error(`L'objet « ${row.itemId} » n'existe pas dans le catalogue.`);
-  }
-
-  return {
-    name: name.slice(0, 100),
-    emoji: String(b.emoji || '⚙️').trim().slice(0, 8) || '⚙️',
-    description: String(b.description || '').trim().slice(0, 1500),
-    requirements,
-    outputs,
-    durationMinutes,
-    enabled: b.enabled !== false,
-    updatedAt: new Date(),
-  };
-}
-
-app.get('/api/crafts', async (req, res) => {
-  try {
-    const col = await getCraftRecipesCollection();
-    const recipes = await col.find({}).sort({ name: 1 }).toArray();
-    res.json(recipes);
-  } catch (err) {
-    console.error('Chargement des crafts impossible :', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/crafts', async (req, res) => {
-  try {
-    const col = await getCraftRecipesCollection();
-    const recipe = await normaliserRecetteCraft(req.body);
-    const id = `craft_${crypto.randomBytes(10).toString('hex')}`;
-    const document = { _id: id, ...recipe, createdAt: new Date() };
-    await col.insertOne(document);
-    await recordEntityHistory(req, { entityType: 'craft', collectionName: 'craft_recipes', beforeDocument: null, afterDocument: document, action: 'cree', entityName: document.name });
-    logFromReq(req, 'craft_cree', `A créé la recette de craft « ${document.name} ».`)
-    res.status(201).json(document);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.patch('/api/crafts/:id', async (req, res) => {
-  try {
-    const col = await getCraftRecipesCollection();
-    const before = await col.findOne({ _id: req.params.id });
-    if (!before) return res.status(404).json({ error: 'Recette introuvable.' });
-    const recipe = await normaliserRecetteCraft(req.body);
-    const result = await col.findOneAndUpdate(
-      { _id: req.params.id },
-      { $set: recipe },
-      { returnDocument: 'after' },
-    );
-    if (!result) return res.status(404).json({ error: 'Recette introuvable.' });
-    await recordEntityHistory(req, { entityType: 'craft', collectionName: 'craft_recipes', beforeDocument: before, afterDocument: result, action: 'modifie', entityName: result.name });
-    logFromReq(req, 'craft_modifie', `A modifié la recette de craft « ${result.name} ».`)
-    res.json(result);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.delete('/api/crafts/:id', async (req, res) => {
-  try {
-    const col = await getCraftRecipesCollection();
-    const recipe = await col.findOne({ _id: req.params.id });
-    if (!recipe) return res.status(404).json({ error: 'Recette introuvable.' });
-    await col.deleteOne({ _id: req.params.id });
-    await recordEntityHistory(req, { entityType: 'craft', collectionName: 'craft_recipes', beforeDocument: recipe, afterDocument: null, action: 'supprime', entityName: recipe.name });
-    logFromReq(req, 'craft_supprime', `A supprimé la recette de craft « ${recipe.name} ».`)
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ---------------------------------------------------------------------------
 // PRODUCTION & PERSONNEL — définitions partagées avec le bot Discord.
 // Chaque recette et chaque métier possède une durée configurable. Le personnel
 // a un coût de recrutement, des consommables journaliers et une activité facultative.
@@ -1093,7 +1046,9 @@ async function normaliserProduction(body) {
   const requirements = await normaliserListeProduction(body?.requirements, 'Objets nécessaires');
   const outputs = await normaliserListeProduction(body?.outputs, 'Objets produits');
   const minutesPerUnit = normaliserDuree(body?.minutesPerUnit, 'La durée par unité');
-  return { ...base, requirements, outputs, minutesPerUnit };
+  const requiredPossessionId = String(body?.requiredPossessionId || '').trim() || null;
+  if (requiredPossessionId && !await possessionStore.getPossession(requiredPossessionId)) throw new Error('La possession requise est introuvable.');
+  return { ...base, requirements, outputs, minutesPerUnit, requiredPossessionId };
 }
 
 async function normaliserPersonnelType(body) {
@@ -1104,6 +1059,8 @@ async function normaliserPersonnelType(body) {
   const dailyUpkeep = await normaliserListeProduction(body?.dailyUpkeep, 'Consommation quotidienne');
   const minutesPerCycle = normaliserDuree(body?.minutesPerCycle, 'La durée du cycle');
   const productionRecipeId = String(body?.productionRecipeId || '').trim() || null;
+  const requiredPossessionId = String(body?.requiredPossessionId || '').trim() || null;
+  if (requiredPossessionId && !await possessionStore.getPossession(requiredPossessionId)) throw new Error('La possession requise est introuvable.');
   if (productionRecipeId) {
     const production = await (await getProductionRecipesCollection()).findOne({ _id: productionRecipeId });
     if (!production || production.enabled === false) {
@@ -1114,7 +1071,7 @@ async function normaliserPersonnelType(body) {
     // Les activités peuvent produire sans consommable de cycle ; les besoins
     // quotidiens restent configurés séparément dans dailyUpkeep.
   }
-  return { ...base, purchaseCost, requirements, outputs, dailyUpkeep, minutesPerCycle, productionRecipeId };
+  return { ...base, purchaseCost, requirements, outputs, dailyUpkeep, minutesPerCycle, productionRecipeId, requiredPossessionId };
 }
 
 app.get('/api/productions', async (req, res) => {

@@ -9,10 +9,9 @@ const state = {
   catalogue: [],
   catalogueCategorieActive: 'Tout',
   catalogueCategories: [],
-  crafts: [],
-  craftActuel: null,
   productions: [],
   personnelTypes: [],
+  possessions: [],
   productionActuelle: null,
   personnelTypeActuel: null,
   boutique: [],
@@ -206,7 +205,6 @@ function changerFiltrePage(collection, key, value) {
   const renderers = {
     profils: () => renderListeProfils(state.cache.profils || []),
     catalogue: renderCataloguePage,
-    crafts: renderCraftsPage,
     production: renderProductionPage,
     personnel: renderPersonnelPage,
     boutique: renderBoutiquePage,
@@ -241,14 +239,14 @@ async function chargerDashboardPage() {
     const data = await response.json();
     const cards = [
       ['profils', '👤', 'Personnages', 'profils'], ['objets', '📦', 'Objets', 'catalogue'],
-      ['crafts', '🛠️', 'Recettes de craft', 'crafts'], ['productions', '🏭', 'Productions', 'production'],
+['productions', '🏭', 'Productions', 'production'],
       ['personnel', '👷', 'Métiers', 'personnel'], ['boutique', '🛒', 'Articles boutique', 'boutique'], ['missions', '🚀', 'Missions', 'missions'],
     ];
     contenuDiv.innerHTML = `
       <section class="dashboard-welcome"><div><span class="dashboard-eyebrow">CENTRE DE CONTRÔLE</span><h3>Bienvenue dans Mirage Admin</h3><p>Vue d’ensemble du serveur et accès rapide aux outils de gestion.</p></div><button type="button" class="btn-secondaire" onclick="chargerDashboardPage()">↻ Actualiser</button></section>
       <section class="dashboard-stats">${cards.map(([key, icon, label, page]) => `<button type="button" class="dashboard-stat-card" onclick="chargerDonnees('${page}')"><span>${icon}</span><strong>${Number(data.counts?.[key]) || 0}</strong><small>${label}</small></button>`).join('')}</section>
       <section class="dashboard-shortcuts"><div class="section-titre">⚡ Accès rapides</div><div class="dashboard-shortcuts-grid">
-        <button class="dashboard-shortcut" onclick="chargerDonnees('profils')">👤 Gérer les profils</button><button class="dashboard-shortcut" onclick="chargerDonnees('inventaire')">🎒 Ouvrir les inventaires</button><button class="dashboard-shortcut" onclick="chargerDonnees('catalogue')">📦 Gérer les objets</button><button class="dashboard-shortcut" onclick="chargerDonnees('crafts')">🛠️ Configurer les crafts</button><button class="dashboard-shortcut" onclick="chargerDonnees('production')">🏭 Gérer les productions</button><button class="dashboard-shortcut" onclick="chargerDonnees('personnel')">👷 Gérer le personnel</button><button class="dashboard-shortcut" onclick="chargerDonnees('boutique')">🛒 Configurer la boutique</button><button class="dashboard-shortcut" onclick="chargerDonnees('missions')">🚀 Gérer les missions</button>
+        <button class="dashboard-shortcut" onclick="chargerDonnees('profils')">👤 Gérer les profils</button><button class="dashboard-shortcut" onclick="chargerDonnees('inventaire')">🎒 Ouvrir les inventaires</button><button class="dashboard-shortcut" onclick="chargerDonnees('catalogue')">📦 Gérer les objets</button><button class="dashboard-shortcut" onclick="chargerDonnees('production')">🏭 Gérer les productions</button><button class="dashboard-shortcut" onclick="chargerDonnees('personnel')">👷 Gérer le personnel</button><button class="dashboard-shortcut" onclick="chargerDonnees('boutique')">🛒 Configurer la boutique</button><button class="dashboard-shortcut" onclick="chargerDonnees('missions')">🚀 Gérer les missions</button>
       </div></section>
       <section class="dashboard-recent"><div class="section-titre">🕘 Dernières modifications</div>${afficherListeRecenteDashboard(data.recent)}</section>`;
     setStatutConnexion(true);
@@ -294,14 +292,6 @@ async function chargerDonnees(collection) {
     document.getElementById('titre-section').textContent = "Catalogue d'objets";
     document.getElementById('sous-titre').textContent = 'Tous les objets du serveur, organisés par catégorie et rareté.';
     await chargerCataloguePage();
-  } else if (collection === 'crafts') {
-    searchWrap.hidden = false;
-    const rechercheInput = document.getElementById('recherche');
-    rechercheInput.value = getPageFilter('crafts', 'q', '');
-    rechercheInput.placeholder = 'Rechercher une recette ou un ID...';
-    document.getElementById('titre-section').textContent = 'Atelier & crafts';
-    document.getElementById('sous-titre').textContent = 'Configure les recettes disponibles dans le salon Discord Atelier.';
-    await chargerCraftsPage();
   } else if (collection === 'production') {
     searchWrap.hidden = false;
     const rechercheInput = document.getElementById('recherche');
@@ -437,8 +427,104 @@ function ligneHTML(item, index) {
           ${missing.length ? `<span class="badge badge-incomplet" title="À compléter : ${escapeAttr(missing.join(', '))}">⚠ Fiche incomplète (${missing.length})</span>` : '<span class="badge badge-complet">✓ Fiche complète</span>'}
         </div>
       </div>
-      <div class="ligne-actions-profil"><button class="btn-secondaire" onclick="ouvrirHistorique('profil','${jsAttr(profileId)}','${jsAttr(item.nomPrenom || profileId)}')">Historique</button><button class="btn-modifier" onclick="ouvrirEditeur('${jsAttr(profileId)}')">Modifier</button></div>
+      <div class="ligne-actions-profil"><button class="btn-secondaire" onclick="ouvrirPossessionsProfil('${jsAttr(profileId)}','${jsAttr(item.nomPrenom || profileId)}')">Possessions</button><button class="btn-secondaire" onclick="ouvrirHistorique('profil','${jsAttr(profileId)}','${jsAttr(item.nomPrenom || profileId)}')">Historique</button><button class="btn-modifier" onclick="ouvrirEditeur('${jsAttr(profileId)}')">Modifier</button></div>
     </div>`;
+}
+
+// -----------------------------------------------------------------------
+// Possessions associées à un personnage
+// -----------------------------------------------------------------------
+let profilPossessionsActuel = null;
+const POSSESSION_KINDS = [
+  ['batiment', 'Bâtiment'], ['zone_planetaire', 'Zone planétaire'], ['planete', 'Planète'],
+  ['cantina', 'Cantina'], ['autre', 'Autre'],
+];
+
+async function ouvrirPossessionsProfil(profileId, profileName = profileId) {
+  try {
+    const response = await apiFetch(`/api/profils/${encodeURIComponent(profileId)}/possessions`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const [possessions, catalogueResponse] = await Promise.all([
+      response.json(), apiFetch('/api/inventaire/catalogue/meta'),
+    ]);
+    if (!catalogueResponse.ok) throw new Error(`Catalogue : HTTP ${catalogueResponse.status}`);
+    const catalogue = await catalogueResponse.json();
+    state.catalogue = catalogueValide(catalogue);
+    profilPossessionsActuel = { id: String(profileId), name: String(profileName), items: Array.isArray(possessions) ? possessions : [] };
+    rendreModalePossessionsProfil();
+  } catch (err) { toast(`Impossible de charger les possessions : ${err.message}`, 'erreur'); }
+}
+
+function rendreModalePossessionsProfil(editId = null) {
+  if (!profilPossessionsActuel) return;
+  let overlay = document.getElementById('profil-possessions-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div'); overlay.id = 'profil-possessions-overlay'; overlay.className = 'fac-overlay';
+    overlay.onclick = e => { if (e.target === overlay) fermerModalePossessionsProfil(); };
+    document.body.appendChild(overlay);
+  }
+  const edit = editId ? profilPossessionsActuel.items.find(p => p._id === editId) : null;
+  const itemOptions = state.catalogue.map(item => `<option value="${escapeAttr(item.id)}" ${String(edit?.generation?.itemId || '') === String(item.id) ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name || item.id}`)}</option>`).join('');
+  const list = profilPossessionsActuel.items.map(p => {
+    const gen = p.generation?.enabled ? (p.generation.type === 'credits' ? `${p.generation.quantity} crédits` : `${p.generation.quantity} × ${state.catalogue.find(i => i.id === p.generation.itemId)?.name || p.generation.itemId}`) + ` toutes les ${p.generation.intervalMinutes} min` : 'Aucune génération';
+    const kind = POSSESSION_KINDS.find(([k]) => k === p.kind)?.[1] || 'Autre';
+    return `<article class="fac-possession-card"><div><strong>${escapeHtml(p.name)}</strong><span>${escapeHtml(kind)} · ${escapeHtml(gen)}</span><small>${escapeHtml(p.description || 'Aucune description.')}</small></div><div class="fac-possession-actions"><button class="btn-secondaire" onclick="rendreModalePossessionsProfil('${jsAttr(p._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerPossessionProfil('${jsAttr(p._id)}')">Supprimer</button></div></article>`;
+  }).join('') || '<div class="fac-note">Ce personnage ne possède encore aucun bâtiment, zone, planète ou établissement.</div>';
+  overlay.innerHTML = `<div class="fac-modal fac-possession-modal">
+    <div class="fac-modal-title-row"><div><h3>Possessions — ${escapeHtml(profilPossessionsActuel.name)}</h3><p class="fac-hint">Les possessions peuvent générer automatiquement des crédits ou des objets.</p></div><button class="btn-secondaire" onclick="fermerModalePossessionsProfil()">Fermer</button></div>
+    <div class="fac-possession-list">${list}</div>
+    <h4>${edit ? 'Modifier la possession' : 'Ajouter une possession'}</h4>
+    <div class="fac-form">
+      <label class="full"><span class="fac-label">Nom</span><input id="pp-name" class="fac-input" maxlength="100" value="${escapeAttr(edit?.name || '')}" placeholder="Ex. Cantina de Mos Eisley"></label>
+      <label><span class="fac-label">Type</span><select id="pp-kind" class="fac-select">${POSSESSION_KINDS.map(([k, label]) => `<option value="${k}" ${edit?.kind === k ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      <label class="full"><span class="fac-label">Description</span><textarea id="pp-description" class="fac-input" rows="2">${escapeHtml(edit?.description || '')}</textarea></label>
+      <label class="full fac-possession-toggle"><input id="pp-generation-enabled" type="checkbox" ${edit?.generation?.enabled ? 'checked' : ''} onchange="document.getElementById('pp-generation-fields').hidden = !this.checked"><span>Activer une génération automatique</span></label>
+      <div id="pp-generation-fields" class="fac-form full" ${edit?.generation?.enabled ? '' : 'hidden'}>
+        <label><span class="fac-label">Ressource générée</span><select id="pp-generation-type" class="fac-select" onchange="document.getElementById('pp-item-row').hidden = this.value !== 'item'"><option value="credits" ${edit?.generation?.type !== 'item' ? 'selected' : ''}>Crédits</option><option value="item" ${edit?.generation?.type === 'item' ? 'selected' : ''}>Objet</option></select></label>
+        <label id="pp-item-row" ${edit?.generation?.type === 'item' ? '' : 'hidden'}><span class="fac-label">Objet</span><select id="pp-item" class="fac-select">${itemOptions}</select></label>
+        <label><span class="fac-label">Quantité</span><input id="pp-quantity" class="fac-input" type="number" min="1" value="${Math.max(1, Number(edit?.generation?.quantity) || 1)}"></label>
+        <label><span class="fac-label">Intervalle (minutes)</span><input id="pp-interval" class="fac-input" type="number" min="1" max="525600" value="${Math.max(1, Number(edit?.generation?.intervalMinutes) || 1440)}"></label>
+      </div>
+    </div>
+    <div class="fac-modal-actions"><button class="btn-secondaire" onclick="rendreModalePossessionsProfil()">Réinitialiser</button><button class="btn-principal" onclick="enregistrerPossessionProfil('${jsAttr(edit?._id || '')}')">${edit ? 'Enregistrer' : 'Créer la possession'}</button></div>
+  </div>`;
+}
+
+function fermerModalePossessionsProfil() { document.getElementById('profil-possessions-overlay')?.remove(); profilPossessionsActuel = null; }
+
+async function enregistrerPossessionProfil(editId = '') {
+  if (!profilPossessionsActuel) return;
+  const generationEnabled = !!document.getElementById('pp-generation-enabled')?.checked;
+  const type = document.getElementById('pp-generation-type')?.value || 'credits';
+  const payload = {
+    name: document.getElementById('pp-name')?.value || '',
+    kind: document.getElementById('pp-kind')?.value || 'autre',
+    description: document.getElementById('pp-description')?.value || '',
+    generation: { enabled: generationEnabled, type, itemId: type === 'item' ? document.getElementById('pp-item')?.value : null,
+      quantity: Number(document.getElementById('pp-quantity')?.value) || 1,
+      intervalMinutes: Number(document.getElementById('pp-interval')?.value) || 1440 },
+  };
+  try {
+    const url = editId ? `/api/possessions/${encodeURIComponent(editId)}` : `/api/profils/${encodeURIComponent(profilPossessionsActuel.id)}/possessions`;
+    const response = await apiFetch(url, { method: editId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    toast(editId ? 'Possession modifiée.' : 'Possession créée.', 'succes');
+    await ouvrirPossessionsProfil(profilPossessionsActuel.id, profilPossessionsActuel.name);
+  } catch (err) { toast(err.message, 'erreur'); }
+}
+
+async function supprimerPossessionProfil(id) {
+  const possession = profilPossessionsActuel?.items.find(p => p._id === id);
+  const ok = await confirmerAction({ titre: 'Supprimer la possession', message: `Supprimer « ${possession?.name || id} » ?`, texteValider: 'Supprimer' });
+  if (!ok) return;
+  try {
+    const response = await apiFetch(`/api/possessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    toast('Possession supprimée.', 'succes');
+    await ouvrirPossessionsProfil(profilPossessionsActuel.id, profilPossessionsActuel.name);
+  } catch (err) { toast(err.message, 'erreur'); }
 }
 
 function toggleCompareProfil(id, checked) {
@@ -698,8 +784,8 @@ async function supprimerSelectionCatalogue() {
     const usageById = new Map((usageData.items || []).map(item => [String(item.id), item]));
     const usages = ids.map(id => ({ id, ...(usageById.get(String(id)) || { total: 0 }) }));
     const used = usages.filter(item => Number(item.total) > 0);
-    const detail = used.slice(0, 8).map(item => `${item.id}: ${item.inventories?.length || 0} inventaire(s), ${item.crafts?.length || 0} craft(s), ${item.productions?.length || 0} production(s), ${item.boutique ? 'boutique' : 'pas de boutique'}`).join('\n');
-    const message = `Supprimer ${ids.length} objet(s) ?${used.length ? `\n\n${used.length} objet(s) sont utilisés. Les références dans les inventaires, crafts, productions, effets d'objets et boutique seront nettoyées. Les recettes devenues invalides seront désactivées.\n\n${detail}${used.length > 8 ? '\n…' : ''}` : ''}`;
+    const detail = used.slice(0, 8).map(item => `${item.id}: ${item.inventories?.length || 0} inventaire(s), ${item.productions?.length || 0} production(s), ${item.boutique ? 'boutique' : 'pas de boutique'}`).join('\n');
+    const message = `Supprimer ${ids.length} objet(s) ?${used.length ? `\n\n${used.length} objet(s) sont utilisés. Les références dans les inventaires, productions, effets d’objets et boutique seront nettoyées. Les recettes devenues invalides seront désactivées.\n\n${detail}${used.length > 8 ? '\n…' : ''}` : ''}`;
     if (!await confirmerAction({ titre: 'Supprimer la sélection', message, texteValider: used.length ? 'Nettoyer et supprimer' : 'Supprimer' })) return;
     const result = await fetchJSON('/api/inventaire/catalogue/bulk', { ids, repairReferences: used.length > 0 }, 'DELETE');
     toast(`${result.deleted} objet(s) supprimé(s).`, 'succes');
@@ -709,154 +795,6 @@ async function supprimerSelectionCatalogue() {
 }
 
 // -----------------------------------------------------------------------
-// Recettes de craft - administration du panneau Atelier Discord.
-// -----------------------------------------------------------------------
-async function chargerCraftsPage() {
-  const contenuDiv = document.getElementById('contenu');
-  contenuDiv.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
-  try {
-    const [craftResponse, catalogueResponse] = await Promise.all([apiFetch('/api/crafts'), apiFetch('/api/inventaire/catalogue/meta')]);
-    if (!craftResponse.ok) throw new Error(`HTTP ${craftResponse.status}`);
-    if (!catalogueResponse.ok) throw new Error(`HTTP ${catalogueResponse.status}`);
-    state.crafts = await craftResponse.json();
-    state.crafts = Array.isArray(state.crafts) ? state.crafts : [];
-    state.catalogue = catalogueValide(await catalogueResponse.json());
-    majCompteur('crafts', state.crafts.length);
-    renderCraftsPage();
-    setStatutConnexion(true);
-  } catch (error) {
-    contenuDiv.innerHTML = `<div class="etat-vide"><div class="etat-vide-icone">⚠️</div><p>Erreur de chargement des crafts</p><span class="etat-vide-sub">${escapeHtml(error.message)}</span></div>`;
-    setStatutConnexion(false);
-    console.error('Erreur crafts:', error);
-  }
-}
-
-function dureeCraftTexte(value) {
-  let minutes = Math.max(0, Math.floor(Number(value) || 0));
-  const jours = Math.floor(minutes / 1440); minutes %= 1440;
-  const heures = Math.floor(minutes / 60); minutes %= 60;
-  const parts = [];
-  if (jours) parts.push(`${jours} j`);
-  if (heures) parts.push(`${heures} h`);
-  if (minutes || !parts.length) parts.push(`${minutes} min`);
-  return parts.join(' ');
-}
-
-function craftObjetsTexte(rows) {
-  return (Array.isArray(rows) ? rows : []).map(row => {
-    const item = state.catalogue.find(it => it.id === row.itemId);
-    return `<li>${escapeHtml(item?.emoji || '📦')} ${escapeHtml(item?.name || row.itemId)} <span>×${Number(row.quantity) || 1}</span></li>`;
-  }).join('');
-}
-
-function renderCraftsPage() {
-  const sort = getPageFilter('crafts', 'sort', 'name-asc');
-  const recipes = state.crafts.slice().sort((a, b) => {
-    if (sort === 'duration-asc') return (Number(a.durationMinutes) || 0) - (Number(b.durationMinutes) || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
-    if (sort === 'duration-desc') return (Number(b.durationMinutes) || 0) - (Number(a.durationMinutes) || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'fr');
-    if (sort === 'name-desc') return String(b.name || '').localeCompare(String(a.name || ''), 'fr');
-    return String(a.name || '').localeCompare(String(b.name || ''), 'fr');
-  });
-  const cards = recipes.map(craftCardHTML).join('');
-  document.getElementById('contenu').innerHTML = `
-    <div class="crafts-intro"><div class="crafts-intro-icon">🛠️</div><div><strong>Atelier de fabrication</strong><p>Configure les ingrédients, les objets produits et la durée réelle de chaque recette.</p></div><button class="btn-principal" onclick="ouvrirEditeurCraft(null)">＋ Nouvelle recette</button></div>
-    ${toolbarFiltreHTML('crafts', [selectFiltreHTML('crafts', 'enabled', 'Statut', [{ value: '', label: 'Tous les statuts' }, { value: '1', label: 'Actives' }, { value: '0', label: 'Désactivées' }]), selectFiltreHTML('crafts', 'sort', 'Trier par', [{ value: 'name-asc', label: 'Nom A → Z' }, { value: 'name-desc', label: 'Nom Z → A' }, { value: 'duration-asc', label: 'Durée croissante' }, { value: 'duration-desc', label: 'Durée décroissante' }], 'name-asc')])}
-    <div class="crafts-grid">${cards || '<div class="etat-vide"><div class="etat-vide-icone">⚙️</div><p>Aucune recette configurée.</p><span class="etat-vide-sub">Crée une recette pour la publier dans le salon Atelier.</span></div>'}</div>
-    <div class="aucun-resultat" id="aucun-resultat" hidden>Aucune recette ne correspond à cette recherche ou à ces filtres.</div>`;
-  filtrerListe();
-}
-
-function craftCardHTML(recipe) {
-  const name = recipe.name || 'Recette sans nom';
-  const searchable = `${name} ${recipe._id || ''} ${recipe.description || ''}`.toLowerCase();
-  return `<article class="craft-card" data-id="${escapeAttr(recipe._id)}" data-nom="${escapeAttr(searchable)}" data-duration="${Number(recipe.durationMinutes) || 0}" data-enabled="${recipe.enabled === false ? '0' : '1'}">
-    <div class="craft-card-head"><span class="craft-icon">${escapeHtml(recipe.emoji || '⚙️')}</span><div class="craft-card-title"><h3>${escapeHtml(name)}</h3><p>${escapeHtml(recipe.description || 'Aucune description.')}</p></div><span class="craft-duration">⏱ ${escapeHtml(dureeCraftTexte(recipe.durationMinutes))}</span></div>
-    <div class="craft-columns"><div class="craft-items-preview"><strong>📥 Ingrédients nécessaires</strong><ul>${craftObjetsTexte(recipe.requirements) || '<li>-</li>'}</ul></div><div class="craft-items-preview craft-output-preview"><strong>📦 Objets produits</strong><ul>${craftObjetsTexte(recipe.outputs) || '<li>-</li>'}</ul></div></div>
-    <div class="craft-card-actions"><button class="btn-secondaire" onclick="ouvrirHistorique('craft','${jsAttr(recipe._id)}','${jsAttr(name)}')">Historique</button><button class="btn-secondaire" onclick="ouvrirEditeurCraft('${jsAttr(recipe._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerCraft('${jsAttr(recipe._id)}')">Supprimer</button></div></article>`;
-}
-
-function optionsCatalogueCraft(selectedId) {
-  return '<option value="">Choisir un objet…</option>' + catalogueTrie().map(item =>
-    `<option value="${escapeAttr(item.id)}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(`${item.emoji || '📦'} ${item.name} - ${item.id}`)}</option>`
-  ).join('');
-}
-
-function ligneObjetCraftHTML(kind, row = {}) {
-  return `<div class="craft-item-row" data-kind="${kind}"><select class="craft-item-select" aria-label="Objet">${optionsCatalogueCraft(row.itemId || '')}</select><input class="craft-item-quantity" type="number" min="1" step="1" value="${Math.max(1, Number(row.quantity) || 1)}" aria-label="Quantité"><button type="button" class="btn-secondaire btn-danger" onclick="supprimerLigneCraft(this)" title="Retirer cet objet">✕</button></div>`;
-}
-
-function ouvrirEditeurCraft(recipeId) {
-  const recipe = recipeId ? state.crafts.find(item => item._id === recipeId) : null;
-  if (recipeId && !recipe) { toast('Recette introuvable.', 'erreur'); return; }
-  state.craftActuel = recipe?._id || null;
-  document.getElementById('overlay-catalogue').classList.add('visible');
-  document.getElementById('panneau-catalogue').classList.add('ouvert');
-  document.getElementById('panneau-catalogue-titre').textContent = recipe ? `Modifier - ${recipe.name}` : 'Nouvelle recette de craft';
-  const duration = Math.max(1, Number(recipe?.durationMinutes) || 60);
-  const requirements = recipe?.requirements?.length ? recipe.requirements : [{ itemId: '', quantity: 1 }];
-  const outputs = recipe?.outputs?.length ? recipe.outputs : [{ itemId: '', quantity: 1 }];
-  document.getElementById('panneau-catalogue-corps').innerHTML = `
-    <div class="section-titre">${recipe ? '✏️ Modifier la recette' : '➕ Créer une recette'}</div>
-    <div class="grille-champs"><div class="champ"><label for="f-craft-name">Nom de la recette</label><input id="f-craft-name" type="text" maxlength="100" value="${escapeAttr(recipe?.name || '')}" placeholder="Ex. Fabriquer un blaster"></div><div class="champ"><label for="f-craft-emoji">Emoji</label><input id="f-craft-emoji" type="text" maxlength="8" value="${escapeAttr(recipe?.emoji || '⚙️')}"></div></div>
-    <div class="champ"><label for="f-craft-description">Description</label><textarea id="f-craft-description" maxlength="1500" placeholder="Décris le résultat ou le processus.">${escapeHtml(recipe?.description || '')}</textarea></div>
-    <div class="section-titre">⏱️ Durée de fabrication réelle</div><p class="section-note">Le compte à rebours utilise le temps réel. Les horaires et la notification utilisent l'heure de France métropolitaine, y compris aux changements d'heure.</p>
-    <div class="grille-champs craft-duration-fields"><div class="champ"><label for="f-craft-hours">Heures</label><input id="f-craft-hours" type="number" min="0" max="87600" step="1" value="${Math.floor(duration / 60)}"></div><div class="champ"><label for="f-craft-minutes">Minutes</label><input id="f-craft-minutes" type="number" min="0" max="59" step="1" value="${duration % 60}"></div></div>
-    <div class="section-titre">📥 Objets nécessaires</div><p class="section-note">Les ingrédients sont retirés de l'inventaire au démarrage. Ajoute autant de lignes que nécessaire.</p>
-    <div id="craft-requirements" class="craft-item-list">${requirements.map(row => ligneObjetCraftHTML('requirements', row)).join('')}</div><button type="button" class="btn-secondaire craft-add-row" onclick="ajouterLigneCraft('requirements')">＋ Ajouter un ingrédient</button>
-    <div class="section-titre">📦 Objets donnés à la fin</div><p class="section-note">Tous les objets produits seront ajoutés à l'inventaire du personnage lorsque le délai sera écoulé.</p>
-    <div id="craft-outputs" class="craft-item-list">${outputs.map(row => ligneObjetCraftHTML('outputs', row)).join('')}</div><button type="button" class="btn-secondaire craft-add-row" onclick="ajouterLigneCraft('outputs')">＋ Ajouter un objet produit</button>
-    <div class="actions-panneau"><button class="btn-principal" id="btn-enregistrer-craft" onclick="sauvegarderCraft()">${recipe ? 'Enregistrer les modifications' : 'Créer la recette'}</button></div>`;
-}
-
-function ajouterLigneCraft(kind) {
-  if (!['requirements', 'outputs'].includes(kind)) return;
-  const target = document.getElementById(kind === 'requirements' ? 'craft-requirements' : 'craft-outputs');
-  target?.insertAdjacentHTML('beforeend', ligneObjetCraftHTML(kind, { itemId: '', quantity: 1 }));
-}
-
-function supprimerLigneCraft(button) { button.closest('.craft-item-row')?.remove(); }
-
-function collecterObjetsCraft(containerId) {
-  return Array.from(document.querySelectorAll(`#${containerId} .craft-item-row`)).map(row => ({
-    itemId: row.querySelector('.craft-item-select')?.value || '',
-    quantity: Number(row.querySelector('.craft-item-quantity')?.value) || 0,
-  })).filter(row => row.itemId && row.quantity > 0);
-}
-
-async function sauvegarderCraft() {
-  const button = document.getElementById('btn-enregistrer-craft');
-  if (!button) return;
-  const originalText = button.textContent;
-  button.disabled = true; button.textContent = 'Enregistrement…';
-  try {
-    const durationMinutes = (Number(val('f-craft-hours')) || 0) * 60 + (Number(val('f-craft-minutes')) || 0);
-    const payload = { name: val('f-craft-name'), emoji: val('f-craft-emoji'), description: val('f-craft-description'), durationMinutes, requirements: collecterObjetsCraft('craft-requirements'), outputs: collecterObjetsCraft('craft-outputs') };
-    if (!payload.name?.trim()) throw new Error('Le nom de la recette est obligatoire.');
-    if (durationMinutes < 1) throw new Error('La durée minimale est de 1 minute.');
-    if (!payload.requirements.length) throw new Error('Ajoute au moins un ingrédient nécessaire.');
-    if (!payload.outputs.length) throw new Error('Ajoute au moins un objet produit.');
-    const id = state.craftActuel;
-    await fetchJSON(id ? `/api/crafts/${encodeURIComponent(id)}` : '/api/crafts', payload, id ? 'PATCH' : 'POST');
-    toast(id ? 'Recette modifiée.' : 'Recette créée.', 'succes');
-    fermerCataloguePanel();
-    await chargerCraftsPage();
-  } catch (error) {
-    toast(`Échec de la sauvegarde : ${error.message}`, 'erreur');
-    console.error(error);
-  } finally { button.disabled = false; button.textContent = originalText; }
-}
-
-async function supprimerCraft(recipeId) {
-  const recipe = state.crafts.find(item => item._id === recipeId);
-  const ok = await confirmerAction({ titre: 'Supprimer la recette', message: `Supprimer « ${recipe?.name || recipeId} » ? Les crafts déjà lancés continueront jusqu'à la fin.`, texteValider: 'Supprimer' });
-  if (!ok) return;
-  try {
-    await fetchJSON(`/api/crafts/${encodeURIComponent(recipeId)}`, null, 'DELETE');
-    toast('Recette supprimée.', 'succes');
-    await chargerCraftsPage();
-  } catch (error) { toast(`Échec de la suppression : ${error.message}`, 'erreur'); }
-}
-
 function slugTexte(value) {
   return String(value || '')
     .toLowerCase()
@@ -869,7 +807,6 @@ function slugTexte(value) {
 function fermerCataloguePanel() {
   document.getElementById('overlay-catalogue').classList.remove('visible');
   document.getElementById('panneau-catalogue').classList.remove('ouvert');
-  state.craftActuel = null;
   state.productionActuelle = null;
   state.personnelTypeActuel = null;
   state.traitActuel = null;
@@ -959,7 +896,7 @@ function ligneInventaireHTML(profile, quantiteTotale, index) {
 function filtrerListe() {
   const recherche = document.getElementById('recherche');
   const q = (recherche?.value || '').trim().toLowerCase();
-  if (['profils', 'inventaire', 'catalogue', 'crafts', 'production', 'personnel', 'boutique', 'missions'].includes(state.collectionActuelle)) {
+  if (['profils', 'inventaire', 'catalogue', 'production', 'personnel', 'boutique', 'missions'].includes(state.collectionActuelle)) {
     setPageFilter(state.collectionActuelle, 'q', q);
   }
   const aucun = document.getElementById('aucun-resultat');
@@ -1003,8 +940,8 @@ function filtrerListe() {
       card.classList.toggle('masquee', !matches);
       if (matches) visibles += 1;
     });
-  } else if (state.collectionActuelle === 'crafts' || state.collectionActuelle === 'production') {
-    const selector = state.collectionActuelle === 'crafts' ? '.craft-card' : '.production-card';
+  } else if (state.collectionActuelle === 'production') {
+    const selector = '.production-card';
     const enabled = prefs.enabled || '';
     document.querySelectorAll(selector).forEach(card => {
       const queryOk = !q || (card.dataset.nom || '').includes(q);
@@ -1645,9 +1582,6 @@ const LOG_ICONES = {
   backup_created: '💾',
   backup_restored: '↩️',
   backup_deleted: '🗑️',
-  craft_cree: '🛠️',
-  craft_modifie: '✏️',
-  craft_supprime: '🗑️',
   production_creee: '🏭',
   production_modifiee: '✏️',
   production_supprimee: '🗑️',
@@ -1787,8 +1721,6 @@ async function restaurerHistorique(historyId, entityType, entityId) {
       if (state.cache.profils.some(profile => String(profile._id) === String(entityId))) ouvrirInventairePersonnage(String(entityId));
     } else if (entityType === 'profil') {
       await chargerProfils();
-    } else if (entityType === 'craft') {
-      await chargerCraftsPage();
     } else if (entityType === 'production') {
       await chargerProductionPage();
     } else if (entityType === 'personnel') {
@@ -2255,7 +2187,6 @@ function texteReferencesObjet(usage) {
   if (!usage || !Number(usage.total)) return 'Aucune référence détectée.';
   const lines = [];
   if (usage.inventories?.length) lines.push(`Inventaires (${usage.inventories.length}) : ${usage.inventories.slice(0, 5).map(row => `${row.profileName} ×${row.quantity || 0}${row.equipmentSlots?.length ? ` [équipé : ${row.equipmentSlots.join(', ')}]` : ''}`).join(', ')}${usage.inventories.length > 5 ? ', …' : ''}`);
-  if (usage.crafts?.length) lines.push(`Crafts (${usage.crafts.length}) : ${usage.crafts.slice(0, 5).map(row => row.name).join(', ')}${usage.crafts.length > 5 ? ', …' : ''}`);
   if (usage.productions?.length) lines.push(`Productions (${usage.productions.length}) : ${usage.productions.slice(0, 5).map(row => row.name).join(', ')}${usage.productions.length > 5 ? ', …' : ''}`);
   if (usage.boutique) lines.push(`Boutique : stock ${usage.boutique.stock || 0}`);
   if (usage.itemUseActions?.length) lines.push(`Effets d’objets (${usage.itemUseActions.length}) : ${usage.itemUseActions.slice(0, 5).map(row => row.name).join(', ')}`);
@@ -2535,17 +2466,20 @@ async function chargerDefinitionsProduction(section) {
   const contenuDiv = document.getElementById('contenu');
   contenuDiv.innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
   try {
-    const [productionResponse, personnelResponse, catalogueResponse] = await Promise.all([
+    const [productionResponse, personnelResponse, catalogueResponse, possessionsResponse] = await Promise.all([
       apiFetch('/api/productions'),
       apiFetch('/api/personnel-types'),
       apiFetch('/api/inventaire/catalogue/meta'),
+      apiFetch('/api/possessions/all'),
     ]);
-    for (const response of [productionResponse, personnelResponse, catalogueResponse]) {
+    for (const response of [productionResponse, personnelResponse, catalogueResponse, possessionsResponse]) {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
     }
     state.productions = await productionResponse.json();
     state.personnelTypes = await personnelResponse.json();
     state.catalogue = catalogueValide(await catalogueResponse.json());
+    state.possessions = await possessionsResponse.json();
+    state.possessions = Array.isArray(state.possessions) ? state.possessions : [];
     state.productions = Array.isArray(state.productions) ? state.productions : [];
     state.personnelTypes = Array.isArray(state.personnelTypes) ? state.personnelTypes : [];
     majCompteur('production', state.productions.length);
@@ -2587,7 +2521,7 @@ function productionCardHTML(recipe) {
   const searchable = `${recipe.name || ''} ${recipe._id || ''} ${recipe.description || ''}`.toLowerCase();
   return `<article class="production-card" data-id="${escapeAttr(recipe._id)}" data-nom="${escapeAttr(searchable)}" data-duration="${Number(recipe.minutesPerUnit) || 30}" data-enabled="${recipe.enabled === false ? '0' : '1'}">
     <div class="production-card-head"><span class="production-icon">${escapeHtml(recipe.emoji || '🏭')}</span><div class="production-card-title"><h3>${escapeHtml(recipe.name || 'Production sans nom')}</h3><p>${escapeHtml(recipe.description || 'Aucune description.')}</p></div><span class="production-time">⏱ ${escapeHtml(duration)} / unité</span></div>
-    <div class="production-columns"><div class="production-preview"><strong>📥 Nécessaire par unité</strong><ul>${objetsProductionHTML(recipe.requirements)}</ul></div><div class="production-preview"><strong>📦 Produit par unité</strong><ul>${objetsProductionHTML(recipe.outputs)}</ul></div></div>
+    <div class="production-columns"><div class="production-preview"><strong>🏛️ Possession exigée</strong><p>${escapeHtml(state.possessions.find(p => p._id === recipe.requiredPossessionId)?.name || 'Aucune')}</p></div><div class="production-preview"><strong>📥 Nécessaire par unité</strong><ul>${objetsProductionHTML(recipe.requirements)}</ul></div><div class="production-preview"><strong>📦 Produit par unité</strong><ul>${objetsProductionHTML(recipe.outputs)}</ul></div></div>
     <div class="production-actions"><button class="btn-secondaire" onclick="ouvrirHistorique('production','${jsAttr(recipe._id)}','${jsAttr(recipe.name || 'Production')}')">Historique</button><button class="btn-secondaire" onclick="ouvrirEditeurProduction('${jsAttr(recipe._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerProduction('${jsAttr(recipe._id)}')">Supprimer</button></div>
   </article>`;
 }
@@ -2597,7 +2531,7 @@ function personnelTypeCardHTML(type) {
   const affectation = production
     ? `<strong>${escapeHtml(production.emoji || '🏭')} ${escapeHtml(production.name)}</strong><p class="personnel-role-general">Ce métier travaillera automatiquement sur cette production.</p>`
     : '<strong>Aucune production automatique</strong><p class="personnel-role-general">Métier général : il peut être recruté sans lancer de cycle de production.</p>';
-  const cols = `<div class="production-preview"><strong>🪙 Coût de recrutement</strong><ul>${type.purchaseCost?.length ? objetsProductionHTML(type.purchaseCost) : '<li>Gratuit</li>'}</ul></div><div class="production-preview"><strong>🌙 Entretien quotidien à 00 h (Paris)</strong><ul>${objetsProductionHTML(type.dailyUpkeep)}</ul></div><div class="production-preview"><strong>🏭 Production associée par le staff</strong>${affectation}</div>`;
+  const cols = `<div class="production-preview"><strong>🪙 Coût de recrutement</strong><ul>${type.purchaseCost?.length ? objetsProductionHTML(type.purchaseCost) : '<li>Gratuit</li>'}</ul></div><div class="production-preview"><strong>🌙 Entretien quotidien à 00 h (Paris)</strong><ul>${objetsProductionHTML(type.dailyUpkeep)}</ul></div><div class="production-preview"><strong>🏭 Production associée par le staff</strong>${affectation}</div><div class="production-preview"><strong>🏛️ Possession requise</strong><p>${escapeHtml(state.possessions.find(p => p._id === type.requiredPossessionId)?.name || 'Aucune')}</p></div>`;
   const searchable = `${type.name || ''} ${type._id || ''} ${type.description || ''} ${production?.name || ''}`.toLowerCase();
   return `<article class="personnel-type-card" data-id="${escapeAttr(type._id)}" data-nom="${escapeAttr(searchable)}" data-production="${escapeAttr(type.productionRecipeId || '')}" data-has-production="${production ? '1' : '0'}" data-enabled="${type.enabled === false ? '0' : '1'}" data-cost="${(type.purchaseCost || []).reduce((sum, row) => sum + (Number(row.quantity) || 0), 0)}">
     <div class="production-card-head"><span class="production-icon">${escapeHtml(type.emoji || '👷')}</span><div class="production-card-title"><h3>${escapeHtml(type.name || 'Personnel')}</h3><p>${escapeHtml(type.description || 'Aucune description.')}</p></div><span class="production-time">${production ? `🏭 ${escapeHtml(production.name)}` : 'Métier général'}</span></div>
@@ -2670,6 +2604,13 @@ function ajouterLigneProduction(kind) {
 
 function supprimerLigneProduction(button) { button.closest('.production-item-row')?.remove(); }
 
+function optionsPossessionsProduction(selectedId) {
+  const rows = Array.isArray(state.possessions) ? state.possessions : [];
+  return '<option value="">Aucune possession requise</option>' + rows
+    .slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'fr'))
+    .map(p => `<option value="${escapeAttr(p._id)}" ${String(p._id) === String(selectedId || '') ? 'selected' : ''}>${escapeHtml(`${p.name} — ${p.ownerType === 'faction' ? 'Faction' : 'Personnage'} · ${p.kind || 'autre'}`)}</option>`).join('');
+}
+
 function ouvrirEditeurProduction(recipeId) {
   const recipe = recipeId ? state.productions.find(item => item._id === recipeId) : null;
   if (recipeId && !recipe) return toast('Production introuvable.', 'erreur');
@@ -2685,6 +2626,7 @@ function ouvrirEditeurProduction(recipeId) {
     <div class="grille-champs"><div class="champ"><label for="f-production-name">Nom</label><input id="f-production-name" type="text" maxlength="100" value="${escapeAttr(recipe?.name || '')}" placeholder="Ex. Raffiner du minerai"></div><div class="champ"><label for="f-production-emoji">Emoji</label><input id="f-production-emoji" type="text" maxlength="8" value="${escapeAttr(recipe?.emoji || '🏭')}"></div></div>
     <div class="champ"><label for="f-production-description">Description</label><textarea id="f-production-description" maxlength="1500">${escapeHtml(recipe?.description || '')}</textarea></div>
     <div class="section-titre">⏱️ Durée de production</div><div class="champ"><label for="f-production-duration">Durée par unité (minutes)</label><input id="f-production-duration" type="number" min="1" max="525600" step="1" value="${Math.max(1, Number(recipe?.minutesPerUnit) || 30)}"></div><p class="section-note">La durée totale est multipliée par la quantité choisie par le joueur.</p>
+    <div class="section-titre">🏛️ Possession nécessaire</div><div class="champ"><label for="f-production-possession">Possession exigée pour lancer cette production</label><select id="f-production-possession">${optionsPossessionsProduction(recipe?.requiredPossessionId)}</select></div><p class="section-note">Le personnage doit posséder cette possession. Pour une possession de faction, seul le chef de faction peut l’utiliser.</p>
     <div class="section-titre">📥 Ingrédients nécessaires par unité</div><div id="production-requirements" class="production-item-list">${requirements.map(row => ligneObjetProductionHTML('requirements', row)).join('')}</div><button type="button" class="btn-secondaire production-add-row" onclick="ajouterLigneProduction('requirements')">＋ Ajouter un ingrédient</button>
     <div class="section-titre">📦 Objets produits par unité</div><div id="production-outputs" class="production-item-list">${outputs.map(row => ligneObjetProductionHTML('outputs', row)).join('')}</div><button type="button" class="btn-secondaire production-add-row" onclick="ajouterLigneProduction('outputs')">＋ Ajouter un objet produit</button>
     <div class="actions-panneau"><button class="btn-principal" id="btn-enregistrer-production" onclick="sauvegarderProduction()">${recipe ? 'Enregistrer les modifications' : 'Créer la production'}</button></div>`;
@@ -2710,6 +2652,7 @@ function ouvrirEditeurPersonnelType(typeId) {
     <div id="personnel-purchase-cost" class="production-item-list">${purchaseCost.map(row => ligneObjetProductionHTML('purchaseCost', row)).join('')}</div><button type="button" class="btn-secondaire production-add-row" onclick="ajouterLigneProduction('purchaseCost')">＋ Ajouter un objet au coût d’achat</button>
     <div class="section-titre">🌙 Entretien quotidien</div><p class="section-note">Ces objets sont consommés une fois par jour à 00 h, heure de Paris. S’ils manquent, le personnel est mis en pause jusqu’au ravitaillement.</p>
     <div id="personnel-daily-upkeep" class="production-item-list">${dailyUpkeep.map(row => ligneObjetProductionHTML('dailyUpkeep', row)).join('')}</div><button type="button" class="btn-secondaire production-add-row" onclick="ajouterLigneProduction('dailyUpkeep')">＋ Ajouter un consommable quotidien</button>
+    <div class="section-titre">🏛️ Possession nécessaire au recrutement</div><div class="champ"><label for="f-personnel-possession">Possession exigée pour recruter ce métier</label><select id="f-personnel-possession">${optionsPossessionsProduction(type?.requiredPossessionId)}</select></div><p class="section-note">Le joueur doit avoir accès à cette possession. Pour une possession de faction, seul son chef peut recruter/affecter le personnel.</p>
     <div class="section-titre">🏭 Production associée (configurée par le staff)</div>
     <div class="champ"><label for="f-personnel-production">Production sur laquelle ce métier travaille</label><select id="f-personnel-production"><option value="">Aucune - métier général sans production automatique</option>${productionOptions}</select></div>
     <p class="section-note">Exemple : associe « Mineur » à « Kessel ». Tous les mineurs recrutés travailleront automatiquement sur Kessel, avec ses ingrédients, ses résultats et sa durée configurés dans l’onglet Production. Laisse « Aucune » pour un métier général sans production automatique.</p>
@@ -2726,6 +2669,7 @@ async function sauvegarderProduction() {
       name: val('f-production-name'), emoji: val('f-production-emoji'), description: val('f-production-description'),
       minutesPerUnit: Number(val('f-production-duration')) || 30,
       requirements: collecterLignesProduction('production-requirements'), outputs: collecterLignesProduction('production-outputs'),
+      requiredPossessionId: val('f-production-possession') || null,
     };
     if (!payload.name?.trim()) throw new Error('Le nom de la production est obligatoire.');
     if (!payload.requirements.length) throw new Error('Ajoute au moins un ingrédient.');
@@ -2752,6 +2696,7 @@ async function sauvegarderPersonnelType() {
       purchaseCost: collecterLignesProduction('personnel-purchase-cost'),
       dailyUpkeep: collecterLignesProduction('personnel-daily-upkeep'),
       productionRecipeId: val('f-personnel-production') || null,
+      requiredPossessionId: val('f-personnel-possession') || null,
       // Conservé uniquement pour compatibilité avec les anciennes définitions.
       requirements: ancienneDefinition?.requirements || [],
       outputs: ancienneDefinition?.outputs || [],
