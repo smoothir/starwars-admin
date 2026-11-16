@@ -359,7 +359,11 @@ async function chargerProfils() {
 
   try {
     const response = await apiFetch('/api/profils');
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      let detail = '';
+      try { detail = String((await response.clone().json())?.error || '').trim(); } catch { /* réponse 503 de l'hébergeur, pas forcément JSON */ }
+      throw new Error(detail ? `HTTP ${response.status} — ${detail}` : `HTTP ${response.status}`);
+    }
     const data = await response.json();
     state.cache.profils = data;
     majCompteur('profils', data.length);

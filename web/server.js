@@ -214,6 +214,19 @@ app.get('/api/me', (req, res) => {
   res.json({ authenticated: false });
 });
 
+// Sondes de santé : /healthz confirme que Node/Express répond ; /readyz vérifie aussi MongoDB.
+// Elles ne révèlent aucune donnée métier et restent accessibles sans session Discord.
+app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'starwars-admin' }));
+app.get('/readyz', async (_req, res) => {
+  try {
+    await connect();
+    return res.json({ ok: true, service: 'starwars-admin', database: 'connected' });
+  } catch (err) {
+    console.error('Vérification MongoDB (/readyz) impossible :', err);
+    return res.status(503).json({ ok: false, service: 'starwars-admin', database: 'unavailable' });
+  }
+});
+
 // Seule une session Discord valide (rôle Staff vérifié à la connexion) donne accès.
 app.use('/api', (req, res, next) => {
   if (req.session.user) return next();
@@ -727,12 +740,24 @@ app.post('/api/profils/:id/possessions', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+function estIndisponibiliteMongo(err) {
+  const name = String(err?.name || '');
+  const code = String(err?.code || '');
+  return /Mongo(ServerSelection|Network|NotConnected|TopologyClosed|PoolCleared)/i.test(name)
+    || ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND'].includes(code);
+}
+
 app.get('/api/profils', async (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store');
     res.json(await listAllProfiles());
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error('Chargement des profils impossible :', err);
+    res.status(estIndisponibiliteMongo(err) ? 503 : 500).json({
+      error: estIndisponibiliteMongo(err)
+        ? 'La base MongoDB est temporairement indisponible. Vérifie la connexion MONGO_URI et les journaux du serveur.'
+        : (err.message || 'Erreur lors du chargement des profils.'),
+    });
   }
 });
 
@@ -853,17 +878,30 @@ app.get('/api/statuts', (req, res) => res.json(STATUTS));
 // panneau d'édition d'un profil côté site  copiées depuis Data/config.js et
 // Data/profileStore.js pour rester exactement alignées avec le bot.
 app.get('/api/lists', async (req, res) => {
-  await factionStore.loadFactionDefs();
-  const dynamicRelations = factionStore.listFactionDefs().map(f => ({ key: f.key, label: f.label }));
-  res.json({
-    factions: getFactions(),
-    relationFactions: dynamicRelations,
-    relationLevels: config.RELATION_LEVELS,
-    defaultStats: DEFAULT_STATS,
-    statMax: STAT_MAX,
-    equipmentSlots: EQUIPMENT_SLOTS.map(id => ({ id, label: EQUIPMENT_SLOT_LABELS[id] || id })),
-    itemRarities: ITEM_RARITIES,
-  });
+  try {
+    await factionStore.loadFactionDefs();
+    const dynamicRelations = factionStore.listFactionDefs().map(f => ({ key: f.key, label: f.label }));
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      factions: getFactions(),
+      relationFactions: dynamicRelations,
+      relationLevels: config.RELATION_LEVELS,
+      defaultStats: DEFAULT_STATS,
+      statMax: STAT_MAX,
+      equipmentSlots: EQUIPMENT_SLOTS.map(id => ({ id, label: EQUIPMENT_SLOT_LABELS[id] || id })),
+      itemRarities: ITEM_RARITIES,
+    });
+  } catch (err) {
+    // Express 4 ne récupère pas automatiquement les rejets des routes async.
+    // Sans ce try/catch, une panne MongoDB sur /api/lists peut faire tomber tout Node.
+    console.error('Chargement des listes de référence impossible :', err);
+    const indisponible = estIndisponibiliteMongo(err);
+    res.status(indisponible ? 503 : 500).json({
+      error: indisponible
+        ? 'La base MongoDB est temporairement indisponible. Vérifie MONGO_URI et les journaux du serveur.'
+        : (err.message || 'Erreur lors du chargement des listes.'),
+    });
+  }
 });
 
 // Portrait (faceclaim) d'un personnage, servi à la volée depuis Mongo (avatars
