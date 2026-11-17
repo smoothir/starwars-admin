@@ -5,13 +5,14 @@ const fs = require('fs/promises');
 const path = require('path');
 const store = require('../Data/factionStore.js');
 const possessionStore = require('../Data/possessionStore.js');
-const { RANKS, SHIP_CLASSES, getRankIndex } = require('../Data/shipClasses.js');
+const { RANKS, SHIP_CLASSES } = require('../Data/shipClasses.js');
+const { connect } = require('../Data/mongo.js');
 
 const DISCORD_API = 'https://discord.com/api/v10';
-const MEMBERS_TTL_MS = 60 * 1000;
+const ROLES_TTL_MS = 5 * 60 * 1000;
 const CLASS_META_TTL_MS = 5 * 60 * 1000;
-let membersCache = { at: 0, list: null };
-let membersPromise = null;
+let rolesCache = { at: 0, list: null };
+let rolesPromise = null;
 let classMetaCache = { at: 0, value: null };
 let classMetaPromise = null;
 
@@ -24,41 +25,45 @@ async function discordGet(path) {
   return res.json();
 }
 
-/** Tous les membres du serveur (pagination par 1000), mis en cache 60 s. */
-async function fetchGuildMembers(force = false) {
+/** Rôles du serveur : petite réponse Discord, mise en cache 5 minutes. */
+async function fetchGuildRoles(force = false) {
   if (!discordReady()) return [];
-  if (!force && membersCache.list && Date.now() - membersCache.at < MEMBERS_TTL_MS) return membersCache.list;
-  if (membersPromise) return membersPromise;
-  membersPromise = (async () => {
-    const all = [];
-    let after = '0';
-    for (let page = 0; page < 10; page++) {
-      const batch = await discordGet(`/guilds/${process.env.GUILD_ID}/members?limit=1000&after=${after}`);
-      all.push(...batch);
-      if (batch.length < 1000) break;
-      after = batch[batch.length - 1].user.id;
-    }
-    membersCache = { at: Date.now(), list: all };
-    return all;
+  if (!force && rolesCache.list && Date.now() - rolesCache.at < ROLES_TTL_MS) return rolesCache.list;
+  if (rolesPromise) return rolesPromise;
+  rolesPromise = (async () => {
+    const roles = await discordGet(`/guilds/${process.env.GUILD_ID}/roles`);
+    const list = roles
+      .filter(role => role && !role.managed && role.name !== '@everyone')
+      .map(role => ({ id: role.id, name: role.name, color: role.color || 0, position: role.position || 0 }))
+      .sort((a, b) => b.position - a.position || a.name.localeCompare(b.name, 'fr'));
+    rolesCache = { at: Date.now(), list };
+    return list;
   })();
-  try { return await membersPromise; }
-  finally { membersPromise = null; }
+  try { return await rolesPromise; }
+  finally { rolesPromise = null; }
 }
 
-function memberView(m) {
-  const user = m.user || {};
-  return {
-    id: user.id,
-    name: m.nick || user.global_name || user.username || user.id,
-    avatar: user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64` : null,
-    roles: m.roles || [],
-  };
-}
-
-async function getFactionMembers(factionKey) {
+/** Les membres d'une faction sont les PROFILS dont categoryId correspond au rôle de faction. */
+async function getFactionProfiles(factionKey) {
   const def = store.getFactionDef(factionKey);
-  const members = (await fetchGuildMembers()).filter(m => !m.user?.bot && (m.roles || []).includes(def.categoryRoleId));
-  return members.map(memberView);
+  if (!def) return { profiles: [], players: [] };
+  const db = await connect();
+  const profiles = await db.collection('profils').find(
+    { categoryId: String(def.categoryRoleId), _id: { $not: /^__/ } },
+    { projection: { _id: 1, userId: 1, nomPrenom: 1, surnom: 1, roleId: 1, roleName: 1 } },
+  ).sort({ nomPrenom: 1, _id: 1 }).toArray();
+  const rankById = new Map((def.grades || []).map((grade, index) => [String(grade.id), { name: grade.name, index }]));
+  const playersById = new Map();
+  for (const profile of profiles) {
+    const userId = String(profile.userId || '');
+    if (!userId) continue;
+    const rank = rankById.get(String(profile.roleId || ''));
+    const player = playersById.get(userId) || { id: userId, name: `<@${userId}>`, rankName: null, rankIndex: -1, profiles: [] };
+    player.profiles.push({ id: String(profile._id), name: String(profile.nomPrenom || profile._id), nickname: String(profile.surnom || ''), roleName: String(profile.roleName || rank?.name || '') });
+    if (rank && rank.index > player.rankIndex) { player.rankIndex = rank.index; player.rankName = rank.name; }
+    playersById.set(userId, player);
+  }
+  return { profiles: profiles.map(profile => ({ id: String(profile._id), name: String(profile.nomPrenom || profile._id), nickname: String(profile.surnom || ''), userId: profile.userId ? String(profile.userId) : null, roleName: String(profile.roleName || rankById.get(String(profile.roleId || ''))?.name || '—') })), players: [...playersById.values()] };
 }
 
 function register(app, { logFromReq, recordEntityHistory }) {
@@ -110,6 +115,12 @@ function register(app, { logFromReq, recordEntityHistory }) {
   }));
 
 
+  app.get('/api/factions/discord-roles', wrap(async (req, res) => {
+    if (!discordReady()) return res.json({ ready: false, roles: [] });
+    res.set('Cache-Control', 'private, max-age=300');
+    res.json({ ready: true, roles: await fetchGuildRoles() });
+  }));
+
   app.post('/api/factions/definitions', wrap(async (req, res) => {
     await store.loadFactionDefs();
     const definition = await store.createFactionDef(req.body || {});
@@ -130,8 +141,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
 
   app.get('/api/factions', wrap(async (req, res) => {
     await store.loadFactionDefs();
-    res.set('Cache-Control', 'private, max-age=15, stale-while-revalidate=30');
-    await store.loadFactionDefs();
+    res.set('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
     const out = await store.listFactionSummaries();
     res.json(out);
   }));
@@ -170,13 +180,10 @@ function register(app, { logFromReq, recordEntityHistory }) {
   app.get('/api/factions/:key/joueurs', wrap(async (req, res) => {
     const def = needFaction(req, res); if (!def) return;
     res.set('Cache-Control', 'no-store');
-    if (!discordReady()) return res.json({ ready: false, players: [] });
-    const [members, state] = await Promise.all([getFactionMembers(def.key), store.getFactionState(def.key)]);
-    const players = members.map(m => {
-      const rank = getRankIndex(m.roles);
-      return { id: m.id, name: m.name, avatar: m.avatar, rankIndex: rank, rankName: rank >= 0 ? RANKS[rank].name : null, isLeader: state.leaderUserId === m.id };
-    }).sort((a, b) => b.rankIndex - a.rankIndex || a.name.localeCompare(b.name, 'fr'));
-    res.json({ ready: true, players });
+    const [{ profiles, players }, state] = await Promise.all([getFactionProfiles(def.key), store.getFactionState(def.key)]);
+    const enriched = players.map(player => ({ ...player, isLeader: state.leaderUserId === player.id }))
+      .sort((a, b) => b.rankIndex - a.rankIndex || a.name.localeCompare(b.name, 'fr'));
+    res.json({ ready: true, profiles, players: enriched });
   }));
 
   app.put('/api/factions/:key', wrap(async (req, res) => {
@@ -189,8 +196,8 @@ function register(app, { logFromReq, recordEntityHistory }) {
     if (body.leaderUserId !== undefined) {
       const leaderId = body.leaderUserId ? String(body.leaderUserId) : null;
       if (leaderId && discordReady()) {
-        const members = await getFactionMembers(def.key);
-        if (!members.some(m => m.id === leaderId)) throw new Error('Ce joueur ne fait pas partie de la faction.');
+        const { players } = await getFactionProfiles(def.key);
+        if (!players.some(player => player.id === leaderId)) throw new Error('Aucun profil de cette faction n’est associé à ce joueur.');
       }
       await store.setLeader(def.key, leaderId);
       logFromReq(req, 'faction_chef', `${def.label} : chef = ${leaderId || 'aucun'}`);
@@ -293,11 +300,10 @@ function register(app, { logFromReq, recordEntityHistory }) {
     const userId = req.body?.userId ? String(req.body.userId) : null;
     let member = {};
     if (userId) {
-      if (!discordReady()) throw new Error('Ajoute DISCORD_BOT_TOKEN au .env du site pour attribuer un vaisseau depuis le site (ou utilise /faction attribuer sur Discord).');
-      const members = await getFactionMembers(ctx.def.key);
-      const target = members.find(m => m.id === userId);
+      const { players } = await getFactionProfiles(ctx.def.key);
+      const target = players.find(player => player.id === userId);
       const state = await store.getFactionState(ctx.def.key);
-      member = { inFaction: Boolean(target), rankIndex: target ? getRankIndex(target.roles) : -1, isLeader: state.leaderUserId === userId };
+      member = { inFaction: Boolean(target), rankIndex: target ? target.rankIndex : -1, isLeader: state.leaderUserId === userId };
     }
     const beforeDocument = await store.getShipRecord(ctx.ship.id);
     const updated = await store.assignShip(ctx.ship.id, userId, member);

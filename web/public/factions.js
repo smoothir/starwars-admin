@@ -1,7 +1,7 @@
 // Page « Factions » : troupes, chef, vaisseaux, joueurs, inventaire de faction.
 // Utilise les fonctions globales de app.js : apiFetch, escapeHtml, jsAttr, toast, confirmerAction.
 
-const facState = { meta: null, list: [], key: null, data: null, players: { ready: false, loading: false, players: [] }, catalogue: [], catalogueLoaded: false };
+const facState = { meta: null, list: [], key: null, data: null, players: { ready: false, loading: false, players: [], profiles: [] }, roles: [], rolesReady: false, catalogue: [], catalogueLoaded: false };
 const FAC_POSSESSION_KINDS = [['batiment','Bâtiment'],['zone_planetaire','Zone planétaire'],['planete','Planète'],['cantina','Cantina'],['autre','Autre']];
 let facCataloguePromise = null;
 
@@ -30,9 +30,43 @@ async function chargerFactionsPage() {
     facState.meta = meta;
     facState.list = list;
     if (!facState.key || !list.some(f => f.key === facState.key)) facState.key = list[0]?.key || null;
+
+    // Ne pas attendre l'API Discord pour afficher la faction : les rôles sont
+    // récupérés en parallèle et les sélecteurs sont complétés dès leur arrivée.
+    void facChargerRoles();
     await facChargerFaction();
   } catch (err) {
     contenu.innerHTML = `<div class="etat-vide"><p>Impossible de charger les factions.</p><span class="etat-vide-sub">${escapeHtml(err.message)}</span></div>`;
+  }
+}
+
+async function facChargerRoles() {
+  try {
+    const roleData = await facApi('/api/factions/discord-roles');
+    facState.roles = roleData.roles || [];
+    facState.rolesReady = Boolean(roleData.ready);
+  } catch (err) {
+    facState.roles = [];
+    facState.rolesReady = false;
+  }
+
+  // Met à jour les menus sans reconstruire toute la page ni effacer une saisie.
+  const category = document.getElementById('fac-new-role');
+  if (category) {
+    const selected = category.value;
+    category.innerHTML = `<option value="">${facState.rolesReady ? 'Choisir le rôle de faction…' : 'Rôles Discord indisponibles'}</option>${facRoleOptionsHTML(selected)}`;
+    category.value = selected;
+  }
+  document.querySelectorAll('[data-grade-role]').forEach(select => {
+    const selected = select.value;
+    select.innerHTML = `<option value="">Choisir le rôle…</option>${facRoleOptionsHTML(selected)}`;
+    select.value = selected;
+  });
+
+  const summary = document.querySelector('.fac-role-summary');
+  if (summary && facState.data) {
+    const def = facState.data.def;
+    summary.innerHTML = `<div><span class="fac-label">Rôle de faction</span><strong>${escapeHtml(facRoleName(def.categoryRoleId))}</strong></div><div class="fac-grade-summary"><span class="fac-label">Grades et rôles associés</span>${(def.grades || []).length ? `<ul>${def.grades.map(g => `<li><strong>${escapeHtml(g.name)}</strong><span>${escapeHtml(facRoleName(g.id))}</span></li>`).join('')}</ul>` : '<span class="fac-hint">Aucun grade configuré.</span>'}</div>`;
   }
 }
 
@@ -73,7 +107,7 @@ async function facChargerFaction() {
   // Une réponse lente d'une ancienne sélection ne doit pas écraser la faction choisie ensuite.
   if (selectedKey !== facState.key) return;
   facState.data = data;
-  facState.players = { ready: false, loading: true, players: [] };
+  facState.players = { ready: false, loading: true, players: [], profiles: [] };
   facState.list = facState.list.map(f => f.key === selectedKey ? {
     ...f, troops: data.state.troops, credits: data.state.credits, reputation: data.state.reputation,
     leaderUserId: data.state.leaderUserId, shipCount: data.ships.length,
@@ -120,10 +154,10 @@ function facLeaderControlHTML(state, players) {
 }
 
 function facPlayersContentHTML(ships, players) {
-  if (players.loading) return '<div class="fac-note">Chargement des joueurs Discord… Les vaisseaux sont déjà disponibles.</div>';
+  if (players.loading) return '<div class="fac-note">Chargement des profils associés à cette faction…</div>';
   if (players.ready) return facPlayersHTML(ships);
   if (players.error) return `<div class="fac-note">Impossible de charger les joueurs Discord : ${escapeHtml(players.error)}</div>`;
-  return '<div class="fac-note">Pour lister les joueurs et attribuer des vaisseaux depuis le site, ajoute <code>DISCORD_BOT_TOKEN</code> dans le fichier <code>.env</code> du site. En attendant, utilise <code>/faction joueurs</code> et <code>/faction attribuer</code> sur Discord.</div>';
+  return '<div class="fac-note">Aucun profil associé à cette faction.</div>';
 }
 
 function facPilotControlHTML(ship, players) {
@@ -159,13 +193,14 @@ function facRender() {
       <div class="fac-form fac-create-faction">
         <label><span class="fac-label">Clé</span><input id="fac-new-key" class="fac-input" maxlength="48" placeholder="EX: RESISTANCE"></label>
         <label><span class="fac-label">Nom affiché</span><input id="fac-new-label" class="fac-input" maxlength="80" placeholder="Résistance"></label>
-        <label><span class="fac-label">ID rôle catégorie Discord</span><input id="fac-new-role" class="fac-input" inputmode="numeric" placeholder="ID du rôle Discord"></label>
-        <label class="full"><span class="fac-label">Grades (un par ligne : Nom|ID du rôle Discord)</span><textarea id="fac-new-grades" class="fac-input" rows="3" placeholder="Recrue|123456789012345678
-Capitaine|123456789012345679"></textarea></label>
+        <div class="fac-role-picker"><span class="fac-label">Rôle Discord de la faction</span><input id="fac-category-search" class="fac-input" type="search" placeholder="Rechercher un rôle…" oninput="facFiltrerRoles('fac-category-search','fac-new-role')"><select id="fac-new-role" class="fac-select"><option value="">${facState.rolesReady ? 'Choisir le rôle de faction…' : 'Rôles Discord indisponibles'}</option>${facRoleOptionsHTML()}</select></div>
+        <div class="full fac-grade-editor"><div class="fac-grade-editor-head"><span class="fac-label">Grades et rôles Discord associés</span><button type="button" class="btn-secondaire" onclick="facAjouterGradeRow()">＋ Ajouter un grade</button></div><div id="fac-new-grades" class="fac-grade-rows">${facGradeRowHTML()}</div></div>
       </div>
       <div class="fac-admin-actions"><button class="btn-principal" onclick="facCreerFaction()">＋ Ajouter la faction</button><button class="btn-secondaire btn-danger" onclick="facSupprimerFaction()">Supprimer cette faction</button></div>
     </div>
     <div class="fac-tabs">${tabs}</div>
+
+    <div class="fac-role-summary"><div><span class="fac-label">Rôle de faction</span><strong>${escapeHtml(facRoleName(def.categoryRoleId))}</strong></div><div class="fac-grade-summary"><span class="fac-label">Grades et rôles associés</span>${(def.grades || []).length ? `<ul>${def.grades.map(g => `<li><strong>${escapeHtml(g.name)}</strong><span>${escapeHtml(facRoleName(g.id))}</span></li>`).join('')}</ul>` : '<span class="fac-hint">Aucun grade configuré.</span>'}</div></div>
 
     <div class="fac-summary">
       <div class="fac-card"><h4>👑 Chef de faction</h4><div id="fac-leader-control">${facLeaderControlHTML(state, players)}</div></div>
@@ -227,18 +262,46 @@ function facShipHTML(s) {
 }
 
 function facPlayersHTML(ships) {
-  const rows = facState.players.players.map(p => {
-    const mine = ships.filter(s => s.assignedUserId === p.id).map(s => escapeHtml(s.name));
-    return `<tr><td>${p.avatar ? `<img class="fac-avatar" src="${escapeAttr(p.avatar)}" alt="">` : ''}${escapeHtml(p.name)}${p.isLeader ? ' 👑' : ''}</td><td>${p.rankName ? `<span class="fac-badge">${escapeHtml(p.rankName)}</span>` : '<span style="opacity:.5">—</span>'}</td><td>${mine.join(', ') || '<span style="opacity:.5">—</span>'}</td></tr>`;
+  const profiles = facState.players.profiles || [];
+  const rows = profiles.map(profile => {
+    const mine = ships.filter(s => s.assignedUserId === profile.userId).map(s => escapeHtml(s.name));
+    return `<tr><td><strong>${escapeHtml(profile.name)}</strong>${profile.nickname ? `<small>${escapeHtml(profile.nickname)}</small>` : ''}</td><td>${profile.userId ? `<code><@${escapeHtml(profile.userId)}></code>` : '<span style="opacity:.5">Joueur non associé</span>'}</td><td>${escapeHtml(profile.roleName || '—')}</td><td>${mine.join(', ') || '<span style="opacity:.5">—</span>'}</td></tr>`;
   }).join('');
-  return `<div class="fac-table-wrap"><table class="fac-table"><thead><tr><th>Joueur</th><th>Grade</th><th>Vaisseau(x)</th></tr></thead><tbody>${rows || '<tr><td colspan="3" style="opacity:.6">Aucun joueur trouvé.</td></tr>'}</tbody></table></div>`;
+  return `<div class="fac-table-wrap"><table class="fac-table"><thead><tr><th>Profil RP</th><th>Joueur Discord associé</th><th>Grade</th><th>Vaisseau(x)</th></tr></thead><tbody>${rows || '<tr><td colspan="4" style="opacity:.6">Aucun profil rattaché à cette faction. Modifie le rôle du profil dans Profils RP.</td></tr>'}</tbody></table></div>`;
 }
 
 // ------------------------------------------------------------------ gestion dynamique des factions et des possessions
+function facRoleName(roleId) {
+  const role = facState.roles.find(item => String(item.id) === String(roleId));
+  return role ? `@${role.name}` : (roleId ? `Rôle indisponible (${roleId})` : 'Aucun rôle associé');
+}
+function facRoleOptionsHTML(selected = '') {
+  return facState.roles.map(role => `<option value="${escapeAttr(role.id)}" ${String(role.id) === String(selected) ? 'selected' : ''}>${escapeHtml(role.name)}</option>`).join('');
+}
+function facFiltrerRoles(searchId, selectId) {
+  const query = (document.getElementById(searchId)?.value || '').trim().toLocaleLowerCase('fr');
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  for (const option of select.options) {
+    if (!option.value) continue;
+    const role = facState.roles.find(item => item.id === option.value);
+    option.hidden = Boolean(query && !`${role?.name || ''} ${role?.id || ''}`.toLocaleLowerCase('fr').includes(query));
+  }
+}
+function facGradeRowHTML(name = '', roleId = '') {
+  const id = `fac-grade-${Math.random().toString(36).slice(2, 9)}`;
+  return `<div class="fac-grade-row"><input class="fac-input" data-grade-name maxlength="80" placeholder="Nom du grade" value="${escapeAttr(name)}"><input class="fac-input" type="search" id="${id}-search" placeholder="Rechercher un rôle…" oninput="facFiltrerRoles('${id}-search','${id}-role')"><select class="fac-select" data-grade-role id="${id}-role"><option value="">Choisir le rôle…</option>${facRoleOptionsHTML(roleId)}</select><button type="button" class="btn-secondaire btn-danger" onclick="this.closest('.fac-grade-row').remove()">Retirer</button></div>`;
+}
+function facAjouterGradeRow(name = '', roleId = '') {
+  const host = document.getElementById('fac-new-grades');
+  if (host) host.insertAdjacentHTML('beforeend', facGradeRowHTML(name, roleId));
+}
+
 async function facCreerFaction() {
-  const grades = (document.getElementById('fac-new-grades')?.value || '').split(/\r?\n/).map(line => {
-    const [name, id] = line.split('|'); return { name: String(name || '').trim(), id: String(id || '').trim() };
-  }).filter(g => g.name || g.id);
+  const grades = [...document.querySelectorAll('.fac-grade-row')].map(row => ({
+    name: row.querySelector('[data-grade-name]')?.value.trim() || '',
+    id: row.querySelector('[data-grade-role]')?.value || '',
+  })).filter(g => g.name && g.id);
   try {
     const result = await facApi('/api/factions/definitions', 'POST', {
       key: document.getElementById('fac-new-key')?.value || '',
