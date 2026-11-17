@@ -212,3 +212,21 @@
 /* Bouton « Supprimer cette faction » dans le résumé des rôles, et grades en saisie d'ID */
 .fac-role-summary > .fac-admin-actions { grid-column: 1 / -1; margin-top: 0; }
 .fac-create-modal .fac-grade-row { grid-template-columns: minmax(150px, 1fr) minmax(180px, 1fr) auto; }
+
+/* Résumé des rôles : bouton « Afficher les grades » + panneau de liste / d'édition */
+.fac-role-summary { display: block; }
+.fac-role-summary > .fac-admin-actions { grid-column: auto; }
+.fac-role-main { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 18px; }
+.fac-role-main > div:first-child { display: grid; gap: 7px; }
+.fac-role-main .fac-admin-actions { margin-top: 0; flex-wrap: wrap; }
+.fac-grades-panel { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-subtle); display: grid; gap: 12px; }
+.fac-grades-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.fac-grades-head button { width: auto; padding: 8px 16px; height: auto; }
+.fac-grade-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.fac-grade-list li { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 9px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-input); }
+.fac-grade-rank { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border-soft); font-size: .75rem; opacity: .8; }
+.fac-grade-id { color: var(--text-muted); font-size: .82rem; }
+.fac-grade-row-edit { grid-template-columns: minmax(140px, 1fr) minmax(170px, 1fr) auto auto; }
+.fac-grade-move { display: inline-flex; gap: 4px; }
+.fac-grade-move button { width: 36px; padding: 0; height: 40px; }
+@media (max-width: 760px) { .fac-grade-row-edit { grid-template-columns: 1fr 1fr; } .fac-grade-list li { grid-template-columns: 28px 1fr; } .fac-grade-id { grid-column: 2; } }

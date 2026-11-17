@@ -129,6 +129,16 @@ function register(app, { logFromReq, recordEntityHistory }) {
     res.status(201).json(definition);
   }));
 
+  app.put('/api/factions/definitions/:key', wrap(async (req, res) => {
+    await store.loadFactionDefs();
+    const before = store.getFactionDef(req.params.key);
+    if (!before) return res.status(404).json({ error: 'Faction inconnue.' });
+    const definition = await store.updateFactionGrades(req.params.key, req.body?.grades);
+    classMetaCache = { at: 0, value: null };
+    if (logFromReq) logFromReq(req, 'faction_grades', `${definition.label} : grades modifiés (${definition.grades.length}).`);
+    res.json(definition);
+  }));
+
   app.delete('/api/factions/definitions/:key', wrap(async (req, res) => {
     await store.loadFactionDefs();
     const definition = store.getFactionDef(req.params.key);

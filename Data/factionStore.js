@@ -13,13 +13,17 @@ async function catalogCol() { return (await connect()).collection('item_catalog'
 
 let dynamicFactionDefs = new Map();
 let deletedFactionKeys = new Set();
+let factionGradeOverrides = new Map();
 let factionDefsLoadedAt = 0;
 const FACTION_DEFS_TTL_MS = 15_000;
 async function loadFactionDefs(force = false) {
   if (!force && Date.now() - factionDefsLoadedAt < FACTION_DEFS_TTL_MS) return listFactionDefs();
   const docs = await (await connect()).collection('faction_definitions').find({}).toArray();
   deletedFactionKeys = new Set(docs.filter(doc => doc.deleted === true).map(doc => String(doc._id)));
-  dynamicFactionDefs = new Map(docs.filter(doc => doc.deleted !== true).map(doc => [String(doc._id), {
+  const cleanGrades = (list) => Array.isArray(list) ? list.map(g => ({ name: String(g.name || ''), id: String(g.id || '') })) : [];
+  // Grades modifiés depuis le site pour une faction intégrée (config.js) : stockés avec override: true.
+  factionGradeOverrides = new Map(docs.filter(doc => doc.deleted !== true && doc.override === true).map(doc => [String(doc._id), cleanGrades(doc.grades)]));
+  dynamicFactionDefs = new Map(docs.filter(doc => doc.deleted !== true && doc.override !== true).map(doc => [String(doc._id), {
     key: String(doc._id), label: String(doc.label || doc._id), categoryRoleId: String(doc.categoryRoleId || ''),
     grades: Array.isArray(doc.grades) ? doc.grades.map(g => ({ name: String(g.name || ''), id: String(g.id || '') })) : [],
     dynamic: true,
@@ -28,14 +32,14 @@ async function loadFactionDefs(force = false) {
   return listFactionDefs();
 }
 function listFactionDefs() {
-  const fixed = Object.entries(config.FACTIONS).filter(([key]) => !deletedFactionKeys.has(key)).map(([key, f]) => ({ key, label: f.label, categoryRoleId: f.categoryRoleId, grades: f.grades || [], dynamic: false }));
+  const fixed = Object.entries(config.FACTIONS).filter(([key]) => !deletedFactionKeys.has(key)).map(([key, f]) => ({ key, label: f.label, categoryRoleId: f.categoryRoleId, grades: factionGradeOverrides.get(key) || f.grades || [], dynamic: false }));
   return [...fixed, ...dynamicFactionDefs.values()];
 }
 function getFactionDef(key) {
   key = String(key || '');
   if (deletedFactionKeys.has(key)) return null;
   const f = config.FACTIONS[key];
-  if (f) return { key, label: f.label, categoryRoleId: f.categoryRoleId, grades: f.grades || [], dynamic: false };
+  if (f) return { key, label: f.label, categoryRoleId: f.categoryRoleId, grades: factionGradeOverrides.get(key) || f.grades || [], dynamic: false };
   return dynamicFactionDefs.get(String(key)) || null;
 }
 async function createFactionDef(body = {}) {
@@ -49,6 +53,23 @@ async function createFactionDef(body = {}) {
   if (!grades.length && Array.isArray(body.grades) && body.grades.length) throw new Error('Chaque grade doit avoir un nom et un ID de rôle Discord valide.');
   const doc = { _id: key, label, categoryRoleId, grades, createdAt: new Date(), updatedAt: new Date() };
   await (await connect()).collection('faction_definitions').insertOne(doc);
+  await loadFactionDefs(true);
+  return getFactionDef(key);
+}
+async function updateFactionGrades(key, rawGrades) {
+  key = String(key || '').trim();
+  const definition = getFactionDef(key);
+  if (!definition) throw new Error('Faction inconnue.');
+  if (!Array.isArray(rawGrades)) throw new Error('Liste de grades invalide.');
+  const grades = rawGrades.map(g => ({ name: String(g?.name || '').trim().slice(0, 80), id: String(g?.id || '').trim() }));
+  if (grades.some(g => !g.name || !/^\d{15,22}$/.test(g.id))) throw new Error('Chaque grade doit avoir un nom et un ID de rôle Discord valide (15 à 22 chiffres).');
+  if (new Set(grades.map(g => g.id)).size !== grades.length) throw new Error('Deux grades ne peuvent pas utiliser le même ID de rôle.');
+  const col = (await connect()).collection('faction_definitions');
+  if (config.FACTIONS[key]) {
+    await col.updateOne({ _id: key }, { $set: { override: true, grades, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
+  } else {
+    await col.updateOne({ _id: key }, { $set: { grades, updatedAt: new Date() } });
+  }
   await loadFactionDefs(true);
   return getFactionDef(key);
 }
@@ -310,6 +331,6 @@ async function setShipClassImage(classKey, filename, imageData = null) {
 }
 module.exports = {
   repairShip, transferShip, assertShipNotInBattle, getShipRecord, listShipClassImages, getShipClassImageBuffer, setShipClassImage,
-  CREDITS_ITEM_ID, loadFactionDefs, listFactionDefs, listFactionSummaries, getFactionDef, getFactionState, setTroops, adjustTroops, setLeader, setReputation,
+  CREDITS_ITEM_ID, loadFactionDefs, updateFactionGrades, listFactionDefs, listFactionSummaries, getFactionDef, getFactionState, setTroops, adjustTroops, setLeader, setReputation,
   setFactionItem, adjustFactionItem, listShips, getShip, createShip, updateShip, deleteShip, assignShip,
 };

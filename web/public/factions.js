@@ -1,7 +1,7 @@
 // Page « Factions » : troupes, chef, vaisseaux, joueurs, inventaire de faction.
 // Utilise les fonctions globales de app.js : apiFetch, escapeHtml, jsAttr, toast, confirmerAction.
 
-const facState = { meta: null, list: [], key: null, data: null, players: { ready: false, loading: false, players: [], profiles: [] }, roles: [], rolesReady: false, catalogue: [], catalogueLoaded: false };
+const facState = { gradesOpen: false, gradesEdit: false, meta: null, list: [], key: null, data: null, players: { ready: false, loading: false, players: [], profiles: [] }, roles: [], rolesReady: false, catalogue: [], catalogueLoaded: false };
 const FAC_POSSESSION_KINDS = [['batiment','Bâtiment'],['zone_planetaire','Zone planétaire'],['planete','Planète'],['cantina','Cantina'],['autre','Autre']];
 let facCataloguePromise = null;
 
@@ -51,13 +51,78 @@ async function facChargerRoles() {
   }
 
   // Les rôles ne servent plus qu'à afficher un nom lisible à côté des ID saisis.
-  const summary = document.querySelector('.fac-role-summary');
-  if (summary && facState.data) summary.innerHTML = facRoleSummaryHTML(facState.data.def);
+  // Ne pas écraser une édition de grades en cours.
+  if (!facState.gradesEdit) facRafraichirResume();
 }
 
 function facRoleSummaryHTML(def) {
   const grades = def.grades || [];
-  return `<div><span class="fac-label">Rôle de faction</span><strong>${escapeHtml(facRoleName(def.categoryRoleId))}</strong></div><div class="fac-grade-summary"><span class="fac-label">Grades et rôles associés</span>${grades.length ? `<ul>${grades.map(g => `<li><strong>${escapeHtml(g.name)}</strong><span>${escapeHtml(facRoleName(g.id))}</span></li>`).join('')}</ul>` : '<span class="fac-hint">Aucun grade configuré.</span>'}</div><div class="fac-admin-actions"><button class="btn-secondaire btn-danger" onclick="facSupprimerFaction()">Supprimer cette faction</button></div>`;
+  const { gradesOpen, gradesEdit } = facState;
+  const panel = !gradesOpen ? '' : `<div class="fac-grades-panel">${gradesEdit ? facGradesEditHTML(grades) : facGradesListHTML(grades)}</div>`;
+  return `<div class="fac-role-main"><div><span class="fac-label">Rôle de faction</span><strong>${escapeHtml(facRoleName(def.categoryRoleId))}</strong></div><div class="fac-admin-actions"><button class="btn-secondaire" onclick="facToggleGrades()">${gradesOpen ? 'Masquer les grades' : 'Afficher les grades'} (${grades.length})</button><button class="btn-secondaire btn-danger" onclick="facSupprimerFaction()">Supprimer cette faction</button></div></div>${panel}`;
+}
+
+function facRafraichirResume() {
+  const summary = document.querySelector('.fac-role-summary');
+  if (summary && facState.data) summary.innerHTML = facRoleSummaryHTML(facState.data.def);
+}
+
+function facToggleGrades() {
+  facState.gradesOpen = !facState.gradesOpen;
+  if (!facState.gradesOpen) facState.gradesEdit = false;
+  facRafraichirResume();
+}
+
+// Grades affichés dans l'ordre enregistré : du plus haut (en haut) au plus bas.
+function facGradesListHTML(grades) {
+  const list = grades.length
+    ? `<ol class="fac-grade-list">${grades.map((g, i) => `<li><span class="fac-grade-rank">${i + 1}</span><strong>${escapeHtml(g.name)}</strong><span class="fac-grade-id">${escapeHtml(facRoleName(g.id))}</span></li>`).join('')}</ol>`
+    : '<span class="fac-hint">Aucun grade configuré.</span>';
+  return `<div class="fac-grades-head"><span class="fac-hint">Du grade le plus élevé au plus bas.</span><button class="btn-secondaire" onclick="facModifierGrades()">Modifier</button></div>${list}`;
+}
+
+function facGradeEditRowHTML(name = '', roleId = '') {
+  return `<div class="fac-grade-row fac-grade-row-edit"><input class="fac-input" data-grade-name maxlength="80" placeholder="Nom du grade" value="${escapeAttr(name)}"><input class="fac-input" data-grade-role inputmode="numeric" maxlength="22" placeholder="ID du rôle Discord" autocomplete="off" value="${escapeAttr(roleId)}"><span class="fac-grade-move"><button type="button" class="btn-secondaire" title="Monter" onclick="facDeplacerGrade(this,-1)">↑</button><button type="button" class="btn-secondaire" title="Descendre" onclick="facDeplacerGrade(this,1)">↓</button></span><button type="button" class="btn-secondaire btn-danger" onclick="this.closest('.fac-grade-row').remove()">Supprimer</button></div>`;
+}
+
+function facGradesEditHTML(grades) {
+  return `<div class="fac-grades-head"><span class="fac-hint">Du grade le plus élevé (en haut) au plus bas. Utilise ↑ ↓ pour réordonner.</span><button class="btn-secondaire" onclick="facAjouterGradeEdition()">＋ Ajouter un grade</button></div><div id="fac-edit-grades" class="fac-grade-rows">${grades.map(g => facGradeEditRowHTML(g.name, g.id)).join('')}</div><div class="fac-admin-actions"><button class="btn-secondaire" onclick="facAnnulerGrades()">Annuler</button><button class="btn-principal" onclick="facSauverGrades()">Enregistrer les grades</button></div>`;
+}
+
+function facModifierGrades() { facState.gradesEdit = true; facRafraichirResume(); }
+function facAnnulerGrades() { facState.gradesEdit = false; facRafraichirResume(); }
+function facAjouterGradeEdition() {
+  const host = document.getElementById('fac-edit-grades');
+  if (!host) return;
+  host.insertAdjacentHTML('beforeend', facGradeEditRowHTML());
+  host.lastElementChild?.querySelector('[data-grade-name]')?.focus();
+}
+function facDeplacerGrade(button, direction) {
+  const row = button.closest('.fac-grade-row');
+  if (!row) return;
+  if (direction < 0 && row.previousElementSibling) row.parentElement.insertBefore(row, row.previousElementSibling);
+  else if (direction > 0 && row.nextElementSibling) row.parentElement.insertBefore(row.nextElementSibling, row);
+}
+
+async function facSauverGrades() {
+  const def = facState.data?.def;
+  if (!def) return;
+  const grades = [];
+  for (const row of document.querySelectorAll('#fac-edit-grades .fac-grade-row')) {
+    const name = row.querySelector('[data-grade-name]')?.value.trim() || '';
+    const id = row.querySelector('[data-grade-role]')?.value.trim() || '';
+    if (!name && !id) continue;
+    if (!name || !FAC_ID_RE.test(id)) return toast('Chaque grade doit avoir un nom et un ID de rôle valide (15 à 22 chiffres).', 'erreur');
+    grades.push({ name, id });
+  }
+  if (new Set(grades.map(g => g.id)).size !== grades.length) return toast('Deux grades ne peuvent pas utiliser le même ID de rôle.', 'erreur');
+  if (!grades.length && !(await confirmerAction({ titre: 'Supprimer tous les grades', message: `Aucun grade ne sera conservé pour « ${def.label} ». Continuer ?`, texteValider: 'Continuer' }))) return;
+  try {
+    await facApi(`/api/factions/definitions/${encodeURIComponent(def.key)}`, 'PUT', { grades });
+    facState.gradesEdit = false;
+    toast('Grades enregistrés.', 'succes');
+    await facChargerFaction();
+  } catch (err) { toast(err.message, 'erreur'); }
 }
 
 async function facChargerCatalogue() {
@@ -123,6 +188,7 @@ async function facChargerJoueurs(selectedKey) {
 function facChoisir(key) {
   if (key === facState.key) return;
   facState.key = key;
+  facState.gradesOpen = false; facState.gradesEdit = false;
   facChargerFaction().catch(err => toast(err.message, 'erreur'));
 }
 
