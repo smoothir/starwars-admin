@@ -101,7 +101,7 @@ function facActualiserSelecteurObjets() {
 
 async function facChargerFaction() {
   const selectedKey = facState.key;
-  if (!selectedKey) { document.getElementById('contenu').innerHTML = '<div class="etat-vide"><p>Aucune faction configurée.</p></div>'; return; }
+  if (!selectedKey) { facRenderSansFaction(); return; }
   document.getElementById('contenu').innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
   const data = await facApi(`/api/factions/${encodeURIComponent(selectedKey)}`);
   // Une réponse lente d'une ancienne sélection ne doit pas écraser la faction choisie ensuite.
@@ -183,20 +183,14 @@ function facActualiserJoueursUI() {
 function facRender() {
   const { data, players, meta, list } = facState;
   const { def, state, ships } = data;
-  const tabs = list.map(f => `<button class="fac-tab ${f.key === facState.key ? 'active' : ''}" onclick="facChoisir('${jsAttr(f.key)}')">${escapeHtml(f.label)}<small>🚀 ${f.shipCount}</small></button>`).join('');
+  const tabs = facTabsHTML();
 
   const creditItem = meta.creditsItemId;
   const otherItems = Object.entries(state.items).filter(([id]) => id !== creditItem);
   document.getElementById('contenu').innerHTML = `
     <div class="fac-admin-tools">
-      <div><h3>Gestion des factions</h3><p>Ajoute une faction et ses rôles Discord. Une faction ne peut être supprimée que si elle ne possède plus de personnages, de vaisseaux, de possessions ou de bataille en cours.</p></div>
-      <div class="fac-form fac-create-faction">
-        <label><span class="fac-label">Clé</span><input id="fac-new-key" class="fac-input" maxlength="48" placeholder="EX: RESISTANCE"></label>
-        <label><span class="fac-label">Nom affiché</span><input id="fac-new-label" class="fac-input" maxlength="80" placeholder="Résistance"></label>
-        <div class="fac-role-picker"><span class="fac-label">Rôle Discord de la faction</span><input id="fac-category-search" class="fac-input" type="search" placeholder="Rechercher un rôle…" oninput="facFiltrerRoles('fac-category-search','fac-new-role')"><select id="fac-new-role" class="fac-select"><option value="">${facState.rolesReady ? 'Choisir le rôle de faction…' : 'Rôles Discord indisponibles'}</option>${facRoleOptionsHTML()}</select></div>
-        <div class="full fac-grade-editor"><div class="fac-grade-editor-head"><span class="fac-label">Grades et rôles Discord associés</span><button type="button" class="btn-secondaire" onclick="facAjouterGradeRow()">＋ Ajouter un grade</button></div><div id="fac-new-grades" class="fac-grade-rows">${facGradeRowHTML()}</div></div>
-      </div>
-      <div class="fac-admin-actions"><button class="btn-principal" onclick="facCreerFaction()">＋ Ajouter la faction</button><button class="btn-secondaire btn-danger" onclick="facSupprimerFaction()">Supprimer cette faction</button></div>
+      <div><h3>Gestion de la faction</h3><p>Une faction ne peut être supprimée que si elle ne possède plus de personnages, de vaisseaux, de possessions ou de bataille en cours.</p></div>
+      <div class="fac-admin-actions"><button class="btn-secondaire btn-danger" onclick="facSupprimerFaction()">Supprimer cette faction</button></div>
     </div>
     <div class="fac-tabs">${tabs}</div>
 
@@ -270,49 +264,55 @@ function facPlayersHTML(ships) {
   return `<div class="fac-table-wrap"><table class="fac-table"><thead><tr><th>Profil RP</th><th>Joueur Discord associé</th><th>Grade</th><th>Vaisseau(x)</th></tr></thead><tbody>${rows || '<tr><td colspan="4" style="opacity:.6">Aucun profil rattaché à cette faction. Modifie le rôle du profil dans Profils RP.</td></tr>'}</tbody></table></div>`;
 }
 
-// ------------------------------------------------------------------ gestion dynamique des factions et des possessions
-function facRoleName(roleId) {
-  const role = facState.roles.find(item => String(item.id) === String(roleId));
-  return role ? `@${role.name}` : (roleId ? `Rôle indisponible (${roleId})` : 'Aucun rôle associé');
+// ------------------------------------------------------------------ création des factions
+function facTabsHTML() {
+  const tabs = facState.list.map(f => `<button class="fac-tab ${f.key === facState.key ? 'active' : ''}" onclick="facChoisir('${jsAttr(f.key)}')">${escapeHtml(f.label)}<small>🚀 ${f.shipCount || 0}</small></button>`).join('');
+  return `${tabs}<button type="button" class="fac-tab fac-tab-add" aria-label="Ajouter une faction" title="Ajouter une faction" onclick="facOuvrirCreationFaction()">＋</button>`;
 }
-function facRoleOptionsHTML(selected = '') {
-  return facState.roles.map(role => `<option value="${escapeAttr(role.id)}" ${String(role.id) === String(selected) ? 'selected' : ''}>${escapeHtml(role.name)}</option>`).join('');
+
+function facRenderSansFaction() {
+  document.getElementById('contenu').innerHTML = `<div class="fac-tabs">${facTabsHTML()}</div><div class="etat-vide"><p>Aucune faction configurée.</p><span class="etat-vide-sub">Utilise le bouton + pour créer la première faction.</span></div>`;
 }
-function facFiltrerRoles(searchId, selectId) {
-  const query = (document.getElementById(searchId)?.value || '').trim().toLocaleLowerCase('fr');
-  const select = document.getElementById(selectId);
-  if (!select) return;
-  for (const option of select.options) {
-    if (!option.value) continue;
-    const role = facState.roles.find(item => item.id === option.value);
-    option.hidden = Boolean(query && !`${role?.name || ''} ${role?.id || ''}`.toLocaleLowerCase('fr').includes(query));
-  }
-}
+
 function facGradeRowHTML(name = '', roleId = '') {
-  const id = `fac-grade-${Math.random().toString(36).slice(2, 9)}`;
-  return `<div class="fac-grade-row"><input class="fac-input" data-grade-name maxlength="80" placeholder="Nom du grade" value="${escapeAttr(name)}"><input class="fac-input" type="search" id="${id}-search" placeholder="Rechercher un rôle…" oninput="facFiltrerRoles('${id}-search','${id}-role')"><select class="fac-select" data-grade-role id="${id}-role"><option value="">Choisir le rôle…</option>${facRoleOptionsHTML(roleId)}</select><button type="button" class="btn-secondaire btn-danger" onclick="this.closest('.fac-grade-row').remove()">Retirer</button></div>`;
+  return `<div class="fac-grade-row"><input class="fac-input" data-grade-name maxlength="80" placeholder="Nom du grade" value="${escapeAttr(name)}"><input class="fac-input" data-grade-role inputmode="numeric" maxlength="22" placeholder="ID du rôle Discord" value="${escapeAttr(roleId)}"><button type="button" class="btn-secondaire btn-danger" onclick="this.closest('.fac-grade-row').remove()">Retirer</button></div>`;
 }
+
 function facAjouterGradeRow(name = '', roleId = '') {
   const host = document.getElementById('fac-new-grades');
   if (host) host.insertAdjacentHTML('beforeend', facGradeRowHTML(name, roleId));
 }
 
+function facOuvrirCreationFaction() {
+  facFermerModale();
+  const overlay = document.createElement('div');
+  overlay.id = 'fac-overlay'; overlay.className = 'fac-overlay';
+  overlay.onclick = e => { if (e.target === overlay) facFermerModale(); };
+  overlay.innerHTML = `<div class="fac-modal fac-create-modal"><h3>Créer une faction</h3><div class="fac-form">
+    <label><span class="fac-label">Clé de la faction</span><input id="fac-new-key" class="fac-input" maxlength="48" placeholder="EX : RESISTANCE"></label>
+    <label><span class="fac-label">Nom affiché</span><input id="fac-new-label" class="fac-input" maxlength="80" placeholder="Résistance"></label>
+    <label class="full"><span class="fac-label">ID du rôle Discord de la faction</span><input id="fac-new-role" class="fac-input" inputmode="numeric" maxlength="22" placeholder="ID du rôle Discord"></label>
+    <div class="full fac-grade-editor"><div class="fac-grade-editor-head"><span class="fac-label">Grades et IDs des rôles Discord</span><button type="button" class="btn-secondaire" onclick="facAjouterGradeRow()">＋ Ajouter un grade</button></div><div id="fac-new-grades" class="fac-grade-rows">${facGradeRowHTML()}</div></div>
+  </div><div class="fac-modal-actions"><button class="btn-secondaire" onclick="facFermerModale()">Annuler</button><button class="btn-principal" onclick="facCreerFaction()">Créer la faction</button></div></div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('fac-new-key')?.focus();
+}
+
 async function facCreerFaction() {
   const grades = [...document.querySelectorAll('.fac-grade-row')].map(row => ({
     name: row.querySelector('[data-grade-name]')?.value.trim() || '',
-    id: row.querySelector('[data-grade-role]')?.value || '',
-  })).filter(g => g.name && g.id);
+    id: row.querySelector('[data-grade-role]')?.value.trim() || '',
+  })).filter(g => g.name || g.id);
   try {
     const result = await facApi('/api/factions/definitions', 'POST', {
       key: document.getElementById('fac-new-key')?.value || '',
       label: document.getElementById('fac-new-label')?.value || '',
-      categoryRoleId: document.getElementById('fac-new-role')?.value || '', grades,
+      categoryRoleId: document.getElementById('fac-new-role')?.value.trim() || '', grades,
     });
+    facFermerModale();
     toast(`Faction « ${result.label} » créée.`, 'succes');
     facState.key = result.key;
-    facState.catalogueLoaded = false; facState.catalogue = [];
     await chargerFactionsPage();
-    facState.key = result.key; await facChargerFaction();
   } catch (err) { toast(err.message, 'erreur'); }
 }
 

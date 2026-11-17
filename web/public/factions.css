@@ -201,3 +201,10 @@
   .fac-grade-row select { grid-column: 1 / -1; }
   .fac-role-summary { grid-template-columns: 1fr; }
 }
+
+/* Bouton d'ajout toujours visible à droite des onglets de faction. */
+.fac-tabs { align-items: center; }
+.fac-tab-add { min-width: 42px; justify-content: center; padding: 10px 14px; font-size: 1.15rem; line-height: 1; }
+.fac-create-modal { width: min(720px, 100%); }
+.fac-create-modal .fac-grade-row { grid-template-columns: minmax(150px, 1fr) minmax(180px, 1fr) auto; }
+@media (max-width: 600px) { .fac-create-modal .fac-grade-row { grid-template-columns: 1fr; } }
