@@ -208,3 +208,7 @@
 .fac-create-modal { width: min(720px, 100%); }
 .fac-create-modal .fac-grade-row { grid-template-columns: minmax(150px, 1fr) minmax(180px, 1fr) auto; }
 @media (max-width: 600px) { .fac-create-modal .fac-grade-row { grid-template-columns: 1fr; } }
+
+/* Bouton « Supprimer cette faction » dans le résumé des rôles, et grades en saisie d'ID */
+.fac-role-summary > .fac-admin-actions { grid-column: 1 / -1; margin-top: 0; }
+.fac-create-modal .fac-grade-row { grid-template-columns: minmax(150px, 1fr) minmax(180px, 1fr) auto; }

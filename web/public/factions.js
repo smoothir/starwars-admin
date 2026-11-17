@@ -50,24 +50,14 @@ async function facChargerRoles() {
     facState.rolesReady = false;
   }
 
-  // Met à jour les menus sans reconstruire toute la page ni effacer une saisie.
-  const category = document.getElementById('fac-new-role');
-  if (category) {
-    const selected = category.value;
-    category.innerHTML = `<option value="">${facState.rolesReady ? 'Choisir le rôle de faction…' : 'Rôles Discord indisponibles'}</option>${facRoleOptionsHTML(selected)}`;
-    category.value = selected;
-  }
-  document.querySelectorAll('[data-grade-role]').forEach(select => {
-    const selected = select.value;
-    select.innerHTML = `<option value="">Choisir le rôle…</option>${facRoleOptionsHTML(selected)}`;
-    select.value = selected;
-  });
-
+  // Les rôles ne servent plus qu'à afficher un nom lisible à côté des ID saisis.
   const summary = document.querySelector('.fac-role-summary');
-  if (summary && facState.data) {
-    const def = facState.data.def;
-    summary.innerHTML = `<div><span class="fac-label">Rôle de faction</span><strong>${escapeHtml(facRoleName(def.categoryRoleId))}</strong></div><div class="fac-grade-summary"><span class="fac-label">Grades et rôles associés</span>${(def.grades || []).length ? `<ul>${def.grades.map(g => `<li><strong>${escapeHtml(g.name)}</strong><span>${escapeHtml(facRoleName(g.id))}</span></li>`).join('')}</ul>` : '<span class="fac-hint">Aucun grade configuré.</span>'}</div>`;
-  }
+  if (summary && facState.data) summary.innerHTML = facRoleSummaryHTML(facState.data.def);
+}
+
+function facRoleSummaryHTML(def) {
+  const grades = def.grades || [];
+  return `<div><span class="fac-label">Rôle de faction</span><strong>${escapeHtml(facRoleName(def.categoryRoleId))}</strong></div><div class="fac-grade-summary"><span class="fac-label">Grades et rôles associés</span>${grades.length ? `<ul>${grades.map(g => `<li><strong>${escapeHtml(g.name)}</strong><span>${escapeHtml(facRoleName(g.id))}</span></li>`).join('')}</ul>` : '<span class="fac-hint">Aucun grade configuré.</span>'}</div><div class="fac-admin-actions"><button class="btn-secondaire btn-danger" onclick="facSupprimerFaction()">Supprimer cette faction</button></div>`;
 }
 
 async function facChargerCatalogue() {
@@ -188,19 +178,9 @@ function facRender() {
   const creditItem = meta.creditsItemId;
   const otherItems = Object.entries(state.items).filter(([id]) => id !== creditItem);
   document.getElementById('contenu').innerHTML = `
-    <div class="fac-admin-tools">
-      <div><h3>Gestion des factions</h3><p>Ajoute une faction et ses rôles Discord. Une faction ne peut être supprimée que si elle ne possède plus de personnages, de vaisseaux, de possessions ou de bataille en cours.</p></div>
-      <div class="fac-form fac-create-faction">
-        <label><span class="fac-label">Clé</span><input id="fac-new-key" class="fac-input" maxlength="48" placeholder="EX: RESISTANCE"></label>
-        <label><span class="fac-label">Nom affiché</span><input id="fac-new-label" class="fac-input" maxlength="80" placeholder="Résistance"></label>
-        <div class="fac-role-picker"><span class="fac-label">Rôle Discord de la faction</span><input id="fac-category-search" class="fac-input" type="search" placeholder="Rechercher un rôle…" oninput="facFiltrerRoles('fac-category-search','fac-new-role')"><select id="fac-new-role" class="fac-select"><option value="">${facState.rolesReady ? 'Choisir le rôle de faction…' : 'Rôles Discord indisponibles'}</option>${facRoleOptionsHTML()}</select></div>
-        <div class="full fac-grade-editor"><div class="fac-grade-editor-head"><span class="fac-label">Grades et rôles Discord associés</span><button type="button" class="btn-secondaire" onclick="facAjouterGradeRow()">＋ Ajouter un grade</button></div><div id="fac-new-grades" class="fac-grade-rows">${facGradeRowHTML()}</div></div>
-      </div>
-      <div class="fac-admin-actions"><button class="btn-principal" onclick="facCreerFaction()">＋ Ajouter la faction</button><button class="btn-secondaire btn-danger" onclick="facSupprimerFaction()">Supprimer cette faction</button></div>
-    </div>
-    <div class="fac-tabs">${tabs}</div>
+    <div class="fac-tabs">${tabs}<button type="button" class="fac-tab fac-tab-add" title="Ajouter une faction" aria-label="Ajouter une faction" onclick="facOuvrirCreationFaction()">＋</button></div>
 
-    <div class="fac-role-summary"><div><span class="fac-label">Rôle de faction</span><strong>${escapeHtml(facRoleName(def.categoryRoleId))}</strong></div><div class="fac-grade-summary"><span class="fac-label">Grades et rôles associés</span>${(def.grades || []).length ? `<ul>${def.grades.map(g => `<li><strong>${escapeHtml(g.name)}</strong><span>${escapeHtml(facRoleName(g.id))}</span></li>`).join('')}</ul>` : '<span class="fac-hint">Aucun grade configuré.</span>'}</div></div>
+    <div class="fac-role-summary">${facRoleSummaryHTML(def)}</div>
 
     <div class="fac-summary">
       <div class="fac-card"><h4>👑 Chef de faction</h4><div id="fac-leader-control">${facLeaderControlHTML(state, players)}</div></div>
@@ -274,47 +254,73 @@ function facPlayersHTML(ships) {
 // Exposé explicitement sur window pour garantir sa disponibilité dans les
 // fonctions de rendu et les éventuels appels globaux de la page.
 var facRoleName = window.facRoleName = function facRoleName(roleId) {
+  if (!roleId) return 'Aucun rôle associé';
   const role = facState.roles.find(item => String(item.id) === String(roleId));
-  return role ? `@${role.name}` : (roleId ? `Rôle indisponible (${roleId})` : 'Aucun rôle associé');
+  return role ? `@${role.name} (${roleId})` : `ID ${roleId}`;
 };
-function facRoleOptionsHTML(selected = '') {
-  return facState.roles.map(role => `<option value="${escapeAttr(role.id)}" ${String(role.id) === String(selected) ? 'selected' : ''}>${escapeHtml(role.name)}</option>`).join('');
-}
-function facFiltrerRoles(searchId, selectId) {
-  const query = (document.getElementById(searchId)?.value || '').trim().toLocaleLowerCase('fr');
-  const select = document.getElementById(selectId);
-  if (!select) return;
-  for (const option of select.options) {
-    if (!option.value) continue;
-    const role = facState.roles.find(item => item.id === option.value);
-    option.hidden = Boolean(query && !`${role?.name || ''} ${role?.id || ''}`.toLocaleLowerCase('fr').includes(query));
-  }
-}
+const FAC_ID_RE = /^\d{15,22}$/;
+
 function facGradeRowHTML(name = '', roleId = '') {
-  const id = `fac-grade-${Math.random().toString(36).slice(2, 9)}`;
-  return `<div class="fac-grade-row"><input class="fac-input" data-grade-name maxlength="80" placeholder="Nom du grade" value="${escapeAttr(name)}"><input class="fac-input" type="search" id="${id}-search" placeholder="Rechercher un rôle…" oninput="facFiltrerRoles('${id}-search','${id}-role')"><select class="fac-select" data-grade-role id="${id}-role"><option value="">Choisir le rôle…</option>${facRoleOptionsHTML(roleId)}</select><button type="button" class="btn-secondaire btn-danger" onclick="this.closest('.fac-grade-row').remove()">Retirer</button></div>`;
+  return `<div class="fac-grade-row"><input class="fac-input" data-grade-name maxlength="80" placeholder="Nom du grade" value="${escapeAttr(name)}"><input class="fac-input" data-grade-role inputmode="numeric" maxlength="22" placeholder="ID du rôle Discord" autocomplete="off" value="${escapeAttr(roleId)}"><button type="button" class="btn-secondaire btn-danger" onclick="this.closest('.fac-grade-row').remove()">Retirer</button></div>`;
 }
 function facAjouterGradeRow(name = '', roleId = '') {
   const host = document.getElementById('fac-new-grades');
-  if (host) host.insertAdjacentHTML('beforeend', facGradeRowHTML(name, roleId));
+  if (!host) return;
+  host.insertAdjacentHTML('beforeend', facGradeRowHTML(name, roleId));
+  host.lastElementChild?.querySelector('[data-grade-name]')?.focus();
+}
+
+// Clé technique proposée automatiquement à partir du nom, tant qu'elle n'a pas été modifiée à la main.
+function facSuggererCle() {
+  const key = document.getElementById('fac-new-key');
+  const label = document.getElementById('fac-new-label');
+  if (!key || !label || key.dataset.touched === '1') return;
+  key.value = label.value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48);
+}
+
+function facOuvrirCreationFaction() {
+  facFermerModale();
+  const overlay = document.createElement('div');
+  overlay.id = 'fac-overlay';
+  overlay.className = 'fac-overlay';
+  overlay.onclick = e => { if (e.target === overlay) facFermerModale(); };
+  overlay.innerHTML = `<div class="fac-modal fac-create-modal">
+    <h3>Nouvelle faction</h3>
+    <div class="fac-form">
+      <label><span class="fac-label">Nom affiché</span><input id="fac-new-label" class="fac-input" maxlength="80" placeholder="Résistance" autocomplete="off" oninput="facSuggererCle()"></label>
+      <label><span class="fac-label">Clé</span><input id="fac-new-key" class="fac-input" maxlength="48" placeholder="RESISTANCE" autocomplete="off" oninput="this.dataset.touched='1'"></label>
+      <label class="full"><span class="fac-label">ID du rôle Discord de la faction</span><input id="fac-new-role" class="fac-input" inputmode="numeric" maxlength="22" placeholder="Ex. 123456789012345678" autocomplete="off"></label>
+      <div class="full fac-grade-editor">
+        <div class="fac-grade-editor-head"><span class="fac-label">Grades (nom + ID du rôle Discord)</span><button type="button" class="btn-secondaire" onclick="facAjouterGradeRow()">＋ Ajouter un grade</button></div>
+        <div id="fac-new-grades" class="fac-grade-rows">${facGradeRowHTML()}</div>
+        <span class="fac-hint">Du grade le plus bas au plus haut. Les lignes laissées vides sont ignorées.</span>
+      </div>
+    </div>
+    <div class="fac-modal-actions"><button class="btn-secondaire" onclick="facFermerModale()">Annuler</button><button class="btn-principal" onclick="facCreerFaction()">Créer la faction</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('fac-new-label').focus();
 }
 
 async function facCreerFaction() {
-  const grades = [...document.querySelectorAll('.fac-grade-row')].map(row => ({
-    name: row.querySelector('[data-grade-name]')?.value.trim() || '',
-    id: row.querySelector('[data-grade-role]')?.value || '',
-  })).filter(g => g.name && g.id);
+  const val = id => (document.getElementById(id)?.value || '').trim();
+  const categoryRoleId = val('fac-new-role');
+  if (!val('fac-new-label') || !val('fac-new-key')) return toast('Le nom et la clé sont obligatoires.', 'erreur');
+  if (!FAC_ID_RE.test(categoryRoleId)) return toast('L’ID du rôle de la faction doit contenir 15 à 22 chiffres.', 'erreur');
+  const grades = [];
+  for (const row of document.querySelectorAll('#fac-new-grades .fac-grade-row')) {
+    const name = row.querySelector('[data-grade-name]')?.value.trim() || '';
+    const id = row.querySelector('[data-grade-role]')?.value.trim() || '';
+    if (!name && !id) continue;
+    if (!name || !FAC_ID_RE.test(id)) return toast('Chaque grade doit avoir un nom et un ID de rôle valide (15 à 22 chiffres).', 'erreur');
+    grades.push({ name, id });
+  }
   try {
-    const result = await facApi('/api/factions/definitions', 'POST', {
-      key: document.getElementById('fac-new-key')?.value || '',
-      label: document.getElementById('fac-new-label')?.value || '',
-      categoryRoleId: document.getElementById('fac-new-role')?.value || '', grades,
-    });
+    const result = await facApi('/api/factions/definitions', 'POST', { key: val('fac-new-key'), label: val('fac-new-label'), categoryRoleId, grades });
+    facFermerModale();
     toast(`Faction « ${result.label} » créée.`, 'succes');
     facState.key = result.key;
-    facState.catalogueLoaded = false; facState.catalogue = [];
     await chargerFactionsPage();
-    facState.key = result.key; await facChargerFaction();
   } catch (err) { toast(err.message, 'erreur'); }
 }
 
