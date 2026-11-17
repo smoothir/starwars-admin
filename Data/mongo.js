@@ -70,6 +70,8 @@ async function connect() {
     client = newClient;
     db = client.db(DB_NAME);
     console.log('✅ Connecté à MongoDB (base "westerosorigin")');
+    // Index utilisés par la page Factions : créés en arrière-plan, sans bloquer le démarrage.
+    ensureIndexes(db).catch(err => console.error('Création des index MongoDB impossible :', err?.message || err));
     return db;
   })();
 
@@ -78,6 +80,16 @@ async function connect() {
   } finally {
     connectingPromise = null;
   }
+}
+
+/** Crée (si absents) les index qui accélèrent les requêtes fréquentes. createIndex est idempotent. */
+async function ensureIndexes(database) {
+  await Promise.all([
+    database.collection(COLLECTION_PROFILS).createIndex({ categoryId: 1 }),
+    database.collection('faction_ships').createIndex({ factionKey: 1, name: 1 }),
+    database.collection(COLLECTION_POSSESSIONS).createIndex({ ownerType: 1, ownerId: 1 }),
+    database.collection('battles').createIndex({ status: 1 }),
+  ]);
 }
 
 async function getAvatarsCollection() {
