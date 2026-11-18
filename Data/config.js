@@ -15,6 +15,8 @@ module.exports = {
   VALIDATION_PING_ROLE_ID: '1545274332941385832',
   VALIDATION_ROLE_ID: '1545274332941385832',
   STAFF_ROLE_ID: '1545274332941385831',
+  // Rôles Discord autorisés à ouvrir le panel « Admin » du site (en plus du créateur ci-dessous).
+  ADMIN_ROLE_IDS: ['1545274332941385831', '1545274332941385837'],
   // ID Discord du créateur du bot/site : seul compte autorisé à voir le panel
   // "Admin" (qui se connecte, combien de fois, journal des actions).
   SUPER_ADMIN_ID: '391515665271357441',

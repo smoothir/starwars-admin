@@ -201,13 +201,37 @@ app.use(express.static(path.join(__dirname, 'public')));
 // bloque /api/me lui-même (401 permanent), et plus personne — même avec une
 // session Discord parfaitement valide — ne peut jamais passer l'écran de
 // connexion, puisque le site ne saurait plus jamais lui dire qu'il est connecté.
-app.get('/api/me', (req, res) => {
+// Accès au panel Admin : le créateur OU un membre ayant l'un des rôles de config.ADMIN_ROLE_IDS.
+// Les rôles sont mémorisés dans la session à la connexion ; pour une session ouverte avant cette
+// fonctionnalité, ils sont relus une fois via le bot puis mis en cache dans la session.
+async function canAccessAdmin(req) {
+  const user = req.session?.user;
+  if (!user) return false;
+  if (user.id === config.SUPER_ADMIN_ID) return true;
+  const allowed = new Set((config.ADMIN_ROLE_IDS || []).map(String));
+  if (!Array.isArray(req.session.roles)) {
+    const botToken = process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_TOKEN;
+    if (!botToken || !process.env.GUILD_ID) return false;
+    try {
+      const r = await fetch(`https://discord.com/api/v10/guilds/${process.env.GUILD_ID}/members/${user.id}`, { headers: { Authorization: `Bot ${botToken}` } });
+      if (!r.ok) return false;
+      const member = await r.json();
+      req.session.roles = Array.isArray(member.roles) ? member.roles.map(String) : [];
+    } catch (err) {
+      console.error('Lecture des rôles Discord impossible :', err.message);
+      return false;
+    }
+  }
+  return req.session.roles.some(id => allowed.has(String(id)));
+}
+
+app.get('/api/me', async (req, res) => {
   if (req.session.user) {
     return res.json({
       authenticated: true,
       via: 'discord',
       ...req.session.user,
-      isSuperAdmin: req.session.user.id === config.SUPER_ADMIN_ID,
+      isSuperAdmin: await canAccessAdmin(req),
       isFounder: req.session.user.id === FOUNDER_DISCORD_ID,
     });
   }
@@ -487,9 +511,9 @@ async function repairCatalogItemReferences(itemId) {
 // PANEL ADMIN (créateur uniquement) : qui se connecte, combien de fois, et
 // journal de toutes les actions faites sur le site.
 // ---------------------------------------------------------------------------
-app.use('/api/admin', (req, res, next) => {
-  if (req.session.user?.id === config.SUPER_ADMIN_ID) return next();
-  return res.status(403).json({ error: 'Réservé au créateur du site.' });
+app.use('/api/admin', async (req, res, next) => {
+  if (await canAccessAdmin(req)) return next();
+  return res.status(403).json({ error: 'Accès réservé aux rôles autorisés du serveur.' });
 });
 
 app.get('/api/admin/connexions', async (req, res) => {
@@ -654,6 +678,7 @@ app.get('/auth/discord/callback', async (req, res) => {
     // Nouvel identifiant de session à la connexion (anti « session fixation »).
     await new Promise((resolve, reject) => req.session.regenerate(err => (err ? reject(err) : resolve())));
     req.session.user = sessionUser;
+    req.session.roles = Array.isArray(member.roles) ? member.roles.map(String) : [];
     await new Promise((resolve, reject) => req.session.save(err => (err ? reject(err) : resolve())));
 
     // Suivi des connexions + journal, pour le panel Admin (créateur uniquement).
