@@ -239,10 +239,19 @@ function facPlayersContentHTML(ships, players) {
 }
 
 function facPilotControlHTML(ship, players) {
-  const pilot = players.players.find(player => player.id === ship.assignedUserId);
-  const current = pilot ? `${pilot.name}${pilot.rankName ? ` · ${pilot.rankName}` : ''}` : (ship.assignedUserId ? `ID ${ship.assignedUserId}` : 'Non attribué');
-  const status = players.ready ? '' : `<small>${players.loading ? 'Chargement des membres…' : escapeHtml(players.error || 'Liste des membres indisponible')}</small>`;
-  return `<div class="fac-pilot-picker"><div><span class="fac-label">Pilote</span><strong>${escapeHtml(current)}</strong>${status}</div><button class="btn-secondaire" onclick="facOuvrirMenuPilote('${jsAttr(ship.id)}')">${ship.assignedUserId ? 'Changer le pilote' : 'Attribuer un pilote'}</button></div>`;
+  const profiles = Array.isArray(players.profiles) ? players.profiles : [];
+  const pilotProfile = profiles.find(profile => profile.id === ship.assignedProfileId);
+  const owner = pilotProfile?.userId
+    ? pilotProfile.ownerName || (players.players || []).find(player => player.id === pilotProfile.userId)?.name || `<@${pilotProfile.userId}>`
+    : (players.players || []).find(player => player.id === ship.assignedUserId)?.name;
+  const current = pilotProfile
+    ? `${pilotProfile.name}${pilotProfile.roleName ? ` · ${pilotProfile.roleName}` : ''}${owner ? ` — ${owner}` : ''}`
+    : (ship.assignedProfileName
+      ? `${ship.assignedProfileName}${owner ? ` — ${owner}` : ''}`
+      : (ship.assignedUserId ? `Ancienne attribution à ${owner || `ID ${ship.assignedUserId}`} (profil non défini)` : 'Non attribué'));
+  const hasPilot = Boolean(ship.assignedProfileId || ship.assignedUserId);
+  const status = players.ready ? '' : `<small>${players.loading ? 'Chargement des profils RP…' : escapeHtml(players.error || 'Liste des profils indisponible')}</small>`;
+  return `<div class="fac-pilot-picker"><div><span class="fac-label">Profil pilote</span><strong>${escapeHtml(current)}</strong>${status}</div><button class="btn-secondaire" onclick="facOuvrirMenuPilote('${jsAttr(ship.id)}')">${hasPilot ? 'Changer le profil' : 'Attribuer un profil'}</button></div>`;
 }
 
 function facActualiserJoueursUI() {
@@ -520,11 +529,11 @@ function facAjouterObjet() {
   if (!id) return toast('Choisis un objet.', 'erreur');
   return facSetItem(id, qty);
 }
-async function facAssigner(shipId, userId) {
+async function facAssigner(shipId, profileId) {
   try {
-    await facApi(facUrl(`/vaisseaux/${encodeURIComponent(shipId)}/pilote`), 'PUT', { userId: userId || null });
+    await facApi(facUrl(`/vaisseaux/${encodeURIComponent(shipId)}/pilote`), 'PUT', { profileId: profileId || null });
     facFermerModale();
-    toast(userId ? 'Pilote attribué.' : 'Pilote retiré.');
+    toast(profileId ? 'Profil pilote attribué.' : 'Pilote retiré.');
     await facChargerFaction();
   } catch (err) { toast(err.message, 'erreur'); }
 }
@@ -538,22 +547,33 @@ function facOuvrirMenuPilote(shipId) {
   overlay.id = 'fac-overlay';
   overlay.className = 'fac-overlay';
   overlay.onclick = event => { if (event.target === overlay) facFermerModale(); };
-  let memberRows = '<div class="fac-picker-empty">Chargement des membres Discord…</div>';
+  let memberRows = '<div class="fac-picker-empty">Chargement des profils RP…</div>';
   if (facState.players.ready) {
-    memberRows = facState.players.players.length ? facState.players.players.map(player => {
-      const secondary = player.rankName || 'Aucun grade configuré';
-      const selected = player.id === ship.assignedUserId;
+    const profiles = Array.isArray(facState.players.profiles) ? facState.players.profiles : [];
+    memberRows = profiles.length ? profiles.map(profile => {
+      const owner = profile.userId
+        ? profile.ownerName || (facState.players.players || []).find(player => player.id === profile.userId)?.name || `<@${profile.userId}>`
+        : 'Aucun joueur Discord associé';
+      const grade = profile.roleName || 'Aucun grade renseigné';
+      const secondary = `${grade} · Joueur : ${owner}`;
+      const selected = profile.id === ship.assignedProfileId;
       const allowedIds = (ship.allowedGradeRoleIds || []).map(String);
-      const canPilot = !allowedIds.length || (player.gradeRoleIds || []).some(roleId => allowedIds.includes(String(roleId)));
-      const note = canPilot ? secondary : `${secondary} · Grade non autorisé`;
-      const search = `${player.name} ${note}`.toLocaleLowerCase('fr');
-      return `<button type="button" class="fac-member-option ${selected ? 'selected' : ''}" data-member-search="${escapeAttr(search)}" ${canPilot ? '' : 'disabled'} ${canPilot ? `onclick="facAssigner('${jsAttr(ship.id)}','${jsAttr(player.id)}')"` : ''}><span class="fac-member-avatar">${escapeHtml((player.name || '?').slice(0, 1).toUpperCase())}</span><span><strong>${escapeHtml(player.name)}</strong><small>${escapeHtml(note)}</small></span>${selected ? '<span class="fac-member-current">Pilote actuel</span>' : ''}</button>`;
-    }).join('') : '<div class="fac-picker-empty">Aucun membre Discord trouvé dans cette faction.</div>';
+      const hasOwner = Boolean(profile.userId);
+      const belongsToFaction = profile.inFaction === true;
+      const hasAllowedGrade = !allowedIds.length || (profile.roleId && allowedIds.includes(String(profile.roleId)));
+      const canPilot = hasOwner && belongsToFaction && hasAllowedGrade;
+      const note = !hasOwner
+        ? secondary
+        : (!belongsToFaction ? `${secondary} · Joueur hors faction` : (hasAllowedGrade ? secondary : `${secondary} · Grade non autorisé`));
+      const search = `${profile.name} ${profile.nickname || ''} ${note}`.toLocaleLowerCase('fr');
+      const avatarLetter = String(profile.name || '?').trim().slice(0, 1).toUpperCase();
+      return `<button type="button" class="fac-member-option ${selected ? 'selected' : ''}" data-member-search="${escapeAttr(search)}" ${canPilot ? '' : 'disabled'} ${canPilot ? `onclick="facAssigner('${jsAttr(ship.id)}','${jsAttr(profile.id)}')"` : ''}><span class="fac-member-avatar">${escapeHtml(avatarLetter)}</span><span><strong>${escapeHtml(profile.name || profile.id)}</strong><small>${escapeHtml(note)}</small></span>${selected ? '<span class="fac-member-current">Pilote actuel</span>' : ''}</button>`;
+    }).join('') : '<div class="fac-picker-empty">Aucun profil RP trouvé dans cette faction.</div>';
   } else if (facState.players.error) {
     memberRows = `<div class="fac-picker-empty">${escapeHtml(facState.players.error)}</div>`;
   }
   const clearPilotButton = facState.players.ready ? `<button class="btn-secondaire fac-clear-pilot" onclick="facAssigner('${jsAttr(ship.id)}',null)">Retirer le pilote</button>` : '';
-  overlay.innerHTML = `<div class="fac-modal fac-picker-modal"><div class="fac-modal-title-row"><div><h3>Attribuer un pilote</h3><p>${escapeHtml(ship.name)}</p></div><button class="btn-secondaire" onclick="facFermerModale()">✕</button></div><input class="fac-input fac-picker-search" type="search" placeholder="Rechercher un membre…" oninput="facFiltrerPilotes(this.value)">${clearPilotButton}<div class="fac-member-list">${memberRows}</div></div>`;
+  overlay.innerHTML = `<div class="fac-modal fac-picker-modal"><div class="fac-modal-title-row"><div><h3>Attribuer un pilote</h3><p>${escapeHtml(ship.name)}</p></div><button class="btn-secondaire" onclick="facFermerModale()">✕</button></div><input class="fac-input fac-picker-search" type="search" placeholder="Rechercher un profil RP ou un joueur…" oninput="facFiltrerPilotes(this.value)">${clearPilotButton}<div class="fac-member-list">${memberRows}</div></div>`;
   document.body.appendChild(overlay);
   overlay.querySelector('.fac-picker-search')?.focus();
 }

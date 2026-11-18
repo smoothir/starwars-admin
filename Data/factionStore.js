@@ -213,6 +213,9 @@ function shipFromDoc(doc) {
     mapLength: toInt(doc.mapLength ?? cls?.defaults?.mapLength, { min: 1, max: 10, fallback: 1 }),
     range: toInt(doc.range, { min: 1, max: 50, fallback: 1 }), barrage: toInt(doc.barrage), focus: toInt(doc.focus),
     assignedUserId: doc.assignedUserId || null,
+    assignedProfileId: doc.assignedProfileId || null,
+    assignedProfileName: doc.assignedProfileName || null,
+    assignedProfileRoleName: doc.assignedProfileRoleName || null,
     allowedGradeRoleIds: Array.isArray(doc.allowedGradeRoleIds) ? doc.allowedGradeRoleIds.map(String) : [],
   };
 }
@@ -246,7 +249,7 @@ async function createShip(factionKey, body) {
   if (!getFactionDef(factionKey)) throw new Error('Faction inconnue.');
   const fields = normalizeShipFields(body, { factionKey });
   const now = new Date();
-  const doc = { _id: `ship_${crypto.randomBytes(6).toString('hex')}`, factionKey, ...fields, hp: fields.hpMax, shield: fields.shieldMax, crew: fields.crewMax, assignedUserId: null, createdAt: now, updatedAt: now };
+  const doc = { _id: `ship_${crypto.randomBytes(6).toString('hex')}`, factionKey, ...fields, hp: fields.hpMax, shield: fields.shieldMax, crew: fields.crewMax, assignedUserId: null, assignedProfileId: null, assignedProfileName: null, assignedProfileRoleName: null, createdAt: now, updatedAt: now };
   await (await shipsCol()).insertOne(doc);
   return shipFromDoc(doc);
 }
@@ -277,7 +280,12 @@ async function setShipAllowedGrades(shipId, roleIds, { clearAssignedPilot = fals
   if (!ship) throw new Error('Vaisseau introuvable.');
   const fields = normalizeShipFields({ allowedGradeRoleIds: roleIds }, { partial: true, factionKey: ship.factionKey });
   const update = { allowedGradeRoleIds: fields.allowedGradeRoleIds, updatedAt: new Date() };
-  if (clearAssignedPilot) update.assignedUserId = null;
+  if (clearAssignedPilot) {
+    update.assignedUserId = null;
+    update.assignedProfileId = null;
+    update.assignedProfileName = null;
+    update.assignedProfileRoleName = null;
+  }
   await col.updateOne({ _id: ship._id }, { $set: update });
   return getShip(shipId);
 }
@@ -287,7 +295,10 @@ async function assignShip(shipId, userId, member = {}) {
   const ship = await col.findOne({ _id: String(shipId) });
   if (!ship) throw new Error('Vaisseau introuvable.');
   if (!userId) {
-    await col.updateOne({ _id: ship._id }, { $set: { assignedUserId: null, updatedAt: new Date() } });
+    await col.updateOne({ _id: ship._id }, { $set: {
+      assignedUserId: null, assignedProfileId: null, assignedProfileName: null,
+      assignedProfileRoleName: null, updatedAt: new Date(),
+    } });
     return getShip(shipId);
   }
   if (!member.inFaction) throw new Error('Ce joueur ne fait pas partie de la faction du vaisseau.');
@@ -296,7 +307,13 @@ async function assignShip(shipId, userId, member = {}) {
   if (allowedGrades.length && !allowedGrades.some(roleId => memberGrades.has(roleId))) {
     throw new Error('Le grade de ce joueur ne lui permet pas de piloter ce vaisseau.');
   }
-  await col.updateOne({ _id: ship._id }, { $set: { assignedUserId: String(userId), updatedAt: new Date() } });
+  await col.updateOne({ _id: ship._id }, { $set: {
+    assignedUserId: String(userId),
+    assignedProfileId: member.profileId ? String(member.profileId) : null,
+    assignedProfileName: member.profileName ? String(member.profileName) : null,
+    assignedProfileRoleName: member.profileRoleName ? String(member.profileRoleName) : null,
+    updatedAt: new Date(),
+  } });
   return getShip(shipId);
 }
 async function repairShip(shipId) {
@@ -313,7 +330,7 @@ async function transferShip(shipId, newFactionKey) {
   const col = await shipsCol();
   const ship = await col.findOne({ _id: String(shipId) });
   if (!ship) return null;
-  await col.updateOne({ _id: ship._id }, { $set: { factionKey: newFactionKey, assignedUserId: null, allowedGradeRoleIds: [], hp: ship.hpMax, shield: ship.shieldMax, crew: ship.crewMax, updatedAt: new Date() } });
+  await col.updateOne({ _id: ship._id }, { $set: { factionKey: newFactionKey, assignedUserId: null, assignedProfileId: null, assignedProfileName: null, assignedProfileRoleName: null, allowedGradeRoleIds: [], hp: ship.hpMax, shield: ship.shieldMax, crew: ship.crewMax, updatedAt: new Date() } });
   return getShip(shipId);
 }
 async function listShipClassImages() {
