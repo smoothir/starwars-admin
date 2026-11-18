@@ -331,6 +331,6 @@ async function setShipClassImage(classKey, filename, imageData = null) {
 }
 module.exports = {
   repairShip, transferShip, assertShipNotInBattle, getShipRecord, listShipClassImages, getShipClassImageBuffer, setShipClassImage,
-  CREDITS_ITEM_ID, loadFactionDefs, updateFactionGrades, listFactionDefs, listFactionSummaries, getFactionDef, getFactionState, setTroops, adjustTroops, setLeader, setReputation,
+  CREDITS_ITEM_ID, loadFactionDefs, updateFactionGrades, listFactionDefs, listFactionSummaries, getFactionDef, createFactionDef, deleteFactionDef, getFactionState, setTroops, adjustTroops, setLeader, setReputation,
   setFactionItem, adjustFactionItem, listShips, getShip, createShip, updateShip, deleteShip, assignShip,
 };
