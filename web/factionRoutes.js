@@ -83,29 +83,55 @@ async function getFactionProfiles(factionKey) {
   const grades = Array.isArray(def.grades) ? def.grades : [];
   const factionRoleIds = new Set([String(def.categoryRoleId), ...grades.map(grade => String(grade.id))]);
   let discordMembers = null;
+  let profileOwners = null;
+  const profileOwnerIds = new Set(profiles.map(profile => String(profile.userId || '')).filter(Boolean));
   if (discordReady()) {
     const cached = playersCache.get(def.key);
-    if (cached && Date.now() - cached.at < PLAYERS_TTL_MS) discordMembers = cached.members;
-    else {
-      const pending = [];
+    if (cached && Date.now() - cached.at < PLAYERS_TTL_MS) {
+      discordMembers = cached.members;
+      profileOwners = cached.profileOwners || new Map((cached.members || []).map(member => [String(member?.user?.id || ''), member]));
+      // Un profil peut venir d'être créé alors que la liste des membres est
+      // encore en cache : récupérer son propriétaire sans attendre l'expiration.
+      const newOwnerIds = [...profileOwnerIds].filter(userId => !profileOwners.has(userId));
+      if (newOwnerIds.length) {
+        const fetchedOwners = await Promise.all(newOwnerIds.map(async userId => {
+          try {
+            return [userId, await discordGet(`/guilds/${process.env.GUILD_ID}/members/${encodeURIComponent(userId)}`)];
+          } catch {
+            return [userId, null];
+          }
+        }));
+        for (const [userId, member] of fetchedOwners) profileOwners.set(userId, member);
+        playersCache.set(def.key, { ...cached, profileOwners });
+      }
+    } else {
+      const factionMembers = [];
+      const owners = new Map();
       let after = null;
       // Discord renvoie au maximum 1 000 membres par page. On continue jusqu'à
-      // la dernière page pour ne pas limiter artificiellement les factions.
+      // la dernière page afin de retrouver aussi les propriétaires de profils
+      // qui n'ont pas encore reçu leur rôle Discord de faction.
       for (let page = 0; page < 100; page += 1) {
         const query = new URLSearchParams({ limit: '1000' });
         if (after) query.set('after', after);
         const batch = await discordGet(`/guilds/${process.env.GUILD_ID}/members?${query.toString()}`);
         if (!Array.isArray(batch) || !batch.length) break;
         for (const member of batch) {
+          const memberId = String(member?.user?.id || '');
+          if (!member?.user?.bot && profileOwnerIds.has(memberId)) owners.set(memberId, member);
           const memberRoles = new Set((member?.roles || []).map(String));
-          if (!member?.user?.bot && [...factionRoleIds].some(roleId => memberRoles.has(roleId))) pending.push(member);
+          if (!member?.user?.bot && [...factionRoleIds].some(roleId => memberRoles.has(roleId))) factionMembers.push(member);
         }
         if (batch.length < 1000) break;
         after = batch[batch.length - 1]?.user?.id || null;
         if (!after) break;
       }
-      discordMembers = pending;
-      playersCache.set(def.key, { at: Date.now(), members: discordMembers });
+      // Mémoriser aussi les propriétaires absents du serveur pour ne pas
+      // relancer inutilement leur recherche pendant la durée du cache.
+      for (const userId of profileOwnerIds) if (!owners.has(userId)) owners.set(userId, null);
+      discordMembers = factionMembers;
+      profileOwners = owners;
+      playersCache.set(def.key, { at: Date.now(), members: discordMembers, profileOwners });
     }
   }
 
@@ -147,14 +173,28 @@ async function getFactionProfiles(factionKey) {
 
   const rankById = new Map(grades.map(grade => [String(grade.id), grade.name]));
   return {
-    profiles: profiles.map(profile => ({
-      id: String(profile._id), name: String(profile.nomPrenom || profile._id),
-      nickname: String(profile.surnom || ''), userId: profile.userId ? String(profile.userId) : null,
-      roleId: profile.roleId ? String(profile.roleId) : null,
-      roleName: String(profile.roleName || rankById.get(String(profile.roleId || '')) || '—'),
-      inFaction: Boolean(profile.userId && Array.isArray(discordMembers) && playersById.has(String(profile.userId))),
-      ownerName: profile.userId ? (playersById.get(String(profile.userId))?.name || null) : null,
-    })),
+    profiles: profiles.map(profile => {
+      const userId = profile.userId ? String(profile.userId) : null;
+      const ownerMember = userId ? profileOwners?.get(userId) : null;
+      const ownerUser = ownerMember?.user;
+      const ownerName = userId
+        ? (ownerMember
+          ? String(ownerMember.nick || ownerUser?.global_name || ownerUser?.username || `<@${userId}>`)
+          : (discordReady() && profileOwners ? `ID ${userId}` : `<@${userId}>`))
+        : null;
+      return {
+        id: String(profile._id), name: String(profile.nomPrenom || profile._id),
+        nickname: String(profile.surnom || ''), userId,
+        roleId: profile.roleId ? String(profile.roleId) : null,
+        roleName: String(profile.roleName || rankById.get(String(profile.roleId || '')) || '—'),
+        // Le profil est dans cette faction parce que categoryId correspond à
+        // la catégorie de faction. Le rôle Discord du propriétaire n'est pas
+        // utilisé pour déterminer l'appartenance RP du personnage.
+        inFaction: true,
+        ownerName,
+        ownerInGuild: userId ? (profileOwners ? Boolean(profileOwners.get(userId)) : null) : false,
+      };
+    }),
     players: [...playersById.values()].sort((a, b) => b.rankIndex - a.rankIndex || a.name.localeCompare(b.name, 'fr')),
   };
 }
@@ -425,25 +465,19 @@ function register(app, { logFromReq, recordEntityHistory }) {
     const beforeDocument = await store.getShipRecord(ctx.ship.id);
     let clearAssignedPilot = false;
     if (beforeDocument?.assignedProfileId) {
-      // Le pilote est un profil RP : le grade à vérifier est celui du profil,
-      // pas la liste brute des rôles Discord du joueur.
+      // Le pilote est un profil RP : la catégorie et le grade du personnage
+      // font foi. Le propriétaire n'a pas besoin de porter lui-même les rôles
+      // Discord de faction pour que son profil soit valide.
       const db = await connect();
       const assignedProfile = await db.collection('profils').findOne({
         _id: String(beforeDocument.assignedProfileId),
         categoryId: String(ctx.def.categoryRoleId),
-      }, { projection: { userId: 1, roleId: 1 } });
+        userId: { $exists: true, $nin: [null, ''] },
+      }, { projection: { roleId: 1 } });
       const profileRoleId = String(assignedProfile?.roleId || '');
-      if (!assignedProfile?.userId || !discordReady()) {
-        clearAssignedPilot = true;
-      } else {
-        const assignedMember = await discordGet(`/guilds/${process.env.GUILD_ID}/members/${encodeURIComponent(String(assignedProfile.userId))}`);
-        const assignedRoles = new Set((assignedMember.roles || []).map(String));
-        const stillInFaction = assignedRoles.has(String(ctx.def.categoryRoleId))
-          || (ctx.def.grades || []).some(grade => assignedRoles.has(String(grade.id)));
-        const stillAllowed = req.body.roleIds.length === 0
-          || (profileRoleId && req.body.roleIds.map(String).includes(profileRoleId) && assignedRoles.has(profileRoleId));
-        clearAssignedPilot = !stillInFaction || !stillAllowed;
-      }
+      const stillAllowed = req.body.roleIds.length === 0
+        || (profileRoleId && req.body.roleIds.map(String).includes(profileRoleId));
+      clearAssignedPilot = !assignedProfile || !stillAllowed;
     } else if (beforeDocument?.assignedUserId) {
       // Compatibilité avec les anciens vaisseaux attribués directement à un membre Discord.
       const assigned = await discordGet(`/guilds/${process.env.GUILD_ID}/members/${encodeURIComponent(String(beforeDocument.assignedUserId))}`);
@@ -475,15 +509,19 @@ function register(app, { logFromReq, recordEntityHistory }) {
       if (!profile) throw new Error('Ce profil RP ne fait pas partie de cette faction ou aucun joueur Discord ne lui est associé.');
 
       userId = String(profile.userId);
-      if (!discordReady()) throw new Error('La connexion au bot Discord est indisponible : impossible de vérifier le propriétaire du profil.');
-      const target = await discordGet(`/guilds/${process.env.GUILD_ID}/members/${encodeURIComponent(userId)}`);
-      const ownerRoles = new Set((target.roles || []).map(String));
-      const belongsToFaction = ownerRoles.has(String(ctx.def.categoryRoleId))
-        || (ctx.def.grades || []).some(grade => ownerRoles.has(String(grade.id)));
-      if (!belongsToFaction) throw new Error('Le propriétaire de ce profil ne possède plus de rôle dans cette faction.');
+      if (!discordReady()) throw new Error('La connexion au bot Discord est indisponible : impossible de vérifier le joueur propriétaire du profil.');
+      // On vérifie que le propriétaire est toujours membre du serveur, mais son
+      // rôle Discord n'est pas le grade RP du personnage : celui-ci vient de
+      // profile.roleId, choisi lors de la création de sa fiche.
+      await discordGet(`/guilds/${process.env.GUILD_ID}/members/${encodeURIComponent(userId)}`);
+      const profileRoleId = profile.roleId ? String(profile.roleId) : null;
+      const allowedGradeIds = (ctx.ship.allowedGradeRoleIds || []).map(String);
+      if (allowedGradeIds.length && (!profileRoleId || !allowedGradeIds.includes(profileRoleId))) {
+        throw new Error('Le grade de ce profil RP ne lui permet pas de piloter ce vaisseau.');
+      }
       member = {
         inFaction: true,
-        gradeRoleIds: profile.roleId && ownerRoles.has(String(profile.roleId)) ? [String(profile.roleId)] : [],
+        gradeRoleIds: profileRoleId ? [profileRoleId] : [],
         profileId: String(profile._id),
         profileName: String(profile.nomPrenom || profile._id),
         profileRoleName: String(profile.roleName || ''),

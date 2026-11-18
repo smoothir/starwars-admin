@@ -232,10 +232,10 @@ function facLeaderControlHTML(stateData, players) {
 }
 
 function facPlayersContentHTML(ships, players) {
-  if (players.loading) return '<div class="fac-note">Chargement des membres Discord de cette faction…</div>';
+  if (players.loading) return '<div class="fac-note">Chargement des profils RP de cette faction…</div>';
   if (players.ready) return facPlayersHTML(ships);
-  if (players.error) return `<div class="fac-note">Impossible de charger les joueurs Discord : ${escapeHtml(players.error)}</div>`;
-  return '<div class="fac-note">Aucun profil associé à cette faction.</div>';
+  if (players.error) return `<div class="fac-note">Impossible de charger les profils RP : ${escapeHtml(players.error)}</div>`;
+  return '<div class="fac-note">Aucun profil RP rattaché à cette faction.</div>';
 }
 
 function facPilotControlHTML(ship, players) {
@@ -302,7 +302,7 @@ function facRender() {
       ${ships.length ? `<div class="fac-ships">${ships.map(ship => facShipHTML(ship)).join('')}</div>` : '<div class="fac-note">Aucun vaisseau pour le moment. Crée le premier avec « Nouveau vaisseau ».</div>'}
     </div>
     <div class="fac-section">
-      <div class="fac-section-head"><div><h3>👥 Joueurs de la faction</h3><p>Liste des membres Discord et de leurs grades.</p></div></div>
+      <div class="fac-section-head"><div><h3>👥 Profils RP de la faction</h3><p>Personnages rattachés à cette faction, leur propriétaire Discord et leur grade.</p></div></div>
       <div id="fac-players-content">${facPlayersContentHTML(ships, players)}</div>
     </div>
     ${inventorySection}`;
@@ -343,19 +343,17 @@ function facShipHTML(s) {
 }
 
 function facPlayersHTML(ships) {
-  const players = facState.players.players || [];
+  // La table est construite exclusivement à partir des profils RP de la
+  // faction. Un joueur Discord n'apparaît jamais sans personnage associé.
   const profiles = facState.players.profiles || [];
-  const linkedProfileIds = new Set();
-  const rows = players.map(player => {
-    const linked = Array.isArray(player.profiles) ? player.profiles : profiles.filter(profile => profile.userId === player.id);
-    linked.forEach(profile => linkedProfileIds.add(String(profile.id)));
-    const mine = ships.filter(ship => ship.assignedUserId === player.id).map(ship => escapeHtml(ship.name));
-    const profileNames = linked.map(profile => escapeHtml(profile.name || profile.nickname || profile.id));
-    return `<tr><td><strong>${escapeHtml(player.name)}</strong><small>${escapeHtml(player.id)}</small></td><td>${escapeHtml(player.rankName || 'Aucun grade configuré')}</td><td>${profileNames.join(', ') || '<span style="opacity:.5">Aucun profil RP associé</span>'}</td><td>${mine.join(', ') || '<span style="opacity:.5">—</span>'}</td></tr>`;
+  const rows = profiles.map(profile => {
+    const owner = profile.ownerName || (profile.userId ? `ID ${profile.userId}` : 'Propriétaire non renseigné');
+    const assignedShips = ships
+      .filter(ship => ship.assignedProfileId === profile.id || (!ship.assignedProfileId && profile.userId && ship.assignedUserId === profile.userId))
+      .map(ship => escapeHtml(ship.name));
+    return `<tr><td><strong>${escapeHtml(profile.name || profile.id)}</strong>${profile.nickname ? `<small>${escapeHtml(profile.nickname)}</small>` : ''}</td><td>${escapeHtml(owner)}</td><td>${escapeHtml(profile.roleName || 'Grade non renseigné')}</td><td>${assignedShips.join(', ') || '<span style="opacity:.5">—</span>'}</td></tr>`;
   }).join('');
-  const unlinkedProfiles = profiles.filter(profile => !profile.userId || !linkedProfileIds.has(String(profile.id)));
-  const unlinkedRows = unlinkedProfiles.map(profile => `<tr><td><strong>${escapeHtml(profile.name)}</strong>${profile.nickname ? `<small>${escapeHtml(profile.nickname)}</small>` : ''}</td><td>${escapeHtml(profile.roleName || '—')}</td><td><span style="opacity:.5">Non associé à un membre Discord</span></td><td><span style="opacity:.5">—</span></td></tr>`).join('');
-  return `<div class="fac-table-wrap"><table class="fac-table"><thead><tr><th>Membre Discord</th><th>Grade</th><th>Profil(s) RP associé(s)</th><th>Vaisseau(x)</th></tr></thead><tbody>${rows}${unlinkedRows || ''}${!rows && !unlinkedRows ? '<tr><td colspan="4" style="opacity:.6">Aucun membre trouvé dans cette faction.</td></tr>' : ''}</tbody></table></div>`;
+  return `<div class="fac-table-wrap"><table class="fac-table"><thead><tr><th>Profil RP</th><th>Joué par</th><th>Grade</th><th>Vaisseau(x)</th></tr></thead><tbody>${rows || '<tr><td colspan="4" style="opacity:.6">Aucun profil RP rattaché à cette faction.</td></tr>'}</tbody></table></div>`;
 }
 
 // ------------------------------------------------------------------ gestion dynamique des factions et des possessions
@@ -559,12 +557,13 @@ function facOuvrirMenuPilote(shipId) {
       const selected = profile.id === ship.assignedProfileId;
       const allowedIds = (ship.allowedGradeRoleIds || []).map(String);
       const hasOwner = Boolean(profile.userId);
+      const ownerInGuild = profile.ownerInGuild !== false;
       const belongsToFaction = profile.inFaction === true;
       const hasAllowedGrade = !allowedIds.length || (profile.roleId && allowedIds.includes(String(profile.roleId)));
-      const canPilot = hasOwner && belongsToFaction && hasAllowedGrade;
+      const canPilot = hasOwner && ownerInGuild && belongsToFaction && hasAllowedGrade;
       const note = !hasOwner
         ? secondary
-        : (!belongsToFaction ? `${secondary} · Joueur hors faction` : (hasAllowedGrade ? secondary : `${secondary} · Grade non autorisé`));
+        : (!ownerInGuild ? `${secondary} · Joueur absent du serveur Discord` : (!belongsToFaction ? `${secondary} · Profil hors faction` : (hasAllowedGrade ? secondary : `${secondary} · Grade non autorisé`)));
       const search = `${profile.name} ${profile.nickname || ''} ${note}`.toLocaleLowerCase('fr');
       const avatarLetter = String(profile.name || '?').trim().slice(0, 1).toUpperCase();
       return `<button type="button" class="fac-member-option ${selected ? 'selected' : ''}" data-member-search="${escapeAttr(search)}" ${canPilot ? '' : 'disabled'} ${canPilot ? `onclick="facAssigner('${jsAttr(ship.id)}','${jsAttr(profile.id)}')"` : ''}><span class="fac-member-avatar">${escapeHtml(avatarLetter)}</span><span><strong>${escapeHtml(profile.name || profile.id)}</strong><small>${escapeHtml(note)}</small></span>${selected ? '<span class="fac-member-current">Pilote actuel</span>' : ''}</button>`;
