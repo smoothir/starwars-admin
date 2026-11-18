@@ -158,7 +158,21 @@ async function facChargerFaction() {
   const selectedKey = facState.key;
   if (!selectedKey) { document.getElementById('contenu').innerHTML = '<div class="etat-vide"><p>Aucune faction configurée.</p></div>'; return; }
   document.getElementById('contenu').innerHTML = '<div class="squelette"></div><div class="squelette"></div><div class="squelette"></div>';
-  const data = await facApi(`/api/factions/${encodeURIComponent(selectedKey)}`);
+  let data;
+  try {
+    data = await facApi(`/api/factions/${encodeURIComponent(selectedKey)}`);
+  } catch (err) {
+    if (selectedKey !== facState.key) return;
+    // Faction supprimée entre-temps (liste obsolète) : on recharge la liste au lieu de rester bloqué.
+    if (!facState.reloading && /inconnue/i.test(err.message)) {
+      facState.reloading = true;
+      facState.key = null;
+      try { await chargerFactionsPage(); } finally { facState.reloading = false; }
+      return;
+    }
+    document.getElementById('contenu').innerHTML = `<div class="etat-vide"><p>Impossible de charger cette faction.</p><span class="etat-vide-sub">${escapeHtml(err.message)}</span></div>`;
+    return;
+  }
   // Une réponse lente d'une ancienne sélection ne doit pas écraser la faction choisie ensuite.
   if (selectedKey !== facState.key) return;
   facState.data = data;

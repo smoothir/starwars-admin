@@ -83,7 +83,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
 
   app.get('/api/factions/meta', wrap(async (req, res) => {
     await store.loadFactionDefs();
-    res.set('Cache-Control', 'private, max-age=60');
+    res.set('Cache-Control', 'no-store');
     let meta = classMetaCache.value;
     if (!meta || Date.now() - classMetaCache.at > CLASS_META_TTL_MS) {
       if (!classMetaPromise) {
@@ -151,7 +151,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
 
   app.get('/api/factions', wrap(async (req, res) => {
     await store.loadFactionDefs();
-    res.set('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
+    res.set('Cache-Control', 'no-store');
     const out = await store.listFactionSummaries();
     res.json(out);
   }));
