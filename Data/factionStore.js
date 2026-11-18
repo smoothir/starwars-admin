@@ -2,7 +2,7 @@
 const crypto = require('crypto');
 const config = require('./config.js');
 const { connect } = require('./mongo.js');
-const { SHIP_CLASSES, canPilot } = require('./shipClasses.js');
+const { SHIP_CLASSES } = require('./shipClasses.js');
 const COLLECTION_FACTIONS = 'factions';
 const COLLECTION_SHIPS = 'faction_ships';
 const COLLECTION_CLASS_SETTINGS = 'ship_class_settings';
@@ -164,7 +164,7 @@ async function assertShipNotInBattle(shipId) {
   const active = await db.collection('battles').findOne({ status: { $in: ['preparation', 'active'] }, 'ships.id': String(shipId) }, { projection: { _id: 1, status: 1 } });
   if (active) throw new Error(`Modification impossible : ce vaisseau participe à la bataille ${active._id} (${active.status}).`);
 }
-function normalizeShipFields(body, { partial = false, resetClassDefaults = false } = {}) {
+function normalizeShipFields(body, { partial = false, resetClassDefaults = false, factionKey = null } = {}) {
   const b = body || {};
   const out = {};
   if (!partial || b.name !== undefined) {
@@ -186,6 +186,18 @@ function normalizeShipFields(body, { partial = false, resetClassDefaults = false
     const raw = b[field] === undefined || b[field] === null || b[field] === '' ? fallback[field] : b[field];
     out[field] = toInt(raw, { ...limits[field], fallback: fallback[field] ?? 0 });
   }
+  if (!partial || b.allowedGradeRoleIds !== undefined) {
+    const definition = factionKey ? getFactionDef(factionKey) : null;
+    const factionGradeIds = new Set((definition?.grades || []).map(grade => String(grade.id)));
+    const rawAllowedGradeRoleIds = b.allowedGradeRoleIds === undefined ? [] : b.allowedGradeRoleIds;
+    if (!Array.isArray(rawAllowedGradeRoleIds)) throw new Error('La sélection des grades doit être une liste.');
+    const requested = rawAllowedGradeRoleIds.map(id => String(id || '').trim()).filter(Boolean);
+    const unique = [...new Set(requested)];
+    if (unique.some(id => !factionGradeIds.has(id))) {
+      throw new Error('Un des grades sélectionnés ne fait pas partie de cette faction.');
+    }
+    out.allowedGradeRoleIds = unique;
+  }
   return out;
 }
 function shipFromDoc(doc) {
@@ -201,6 +213,7 @@ function shipFromDoc(doc) {
     mapLength: toInt(doc.mapLength ?? cls?.defaults?.mapLength, { min: 1, max: 10, fallback: 1 }),
     range: toInt(doc.range, { min: 1, max: 50, fallback: 1 }), barrage: toInt(doc.barrage), focus: toInt(doc.focus),
     assignedUserId: doc.assignedUserId || null,
+    allowedGradeRoleIds: Array.isArray(doc.allowedGradeRoleIds) ? doc.allowedGradeRoleIds.map(String) : [],
   };
 }
 async function listShips(factionKey) {
@@ -231,7 +244,7 @@ async function getShipRecord(shipId) { return (await shipsCol()).findOne({ _id: 
 async function getShip(shipId) { return shipFromDoc(await getShipRecord(shipId)); }
 async function createShip(factionKey, body) {
   if (!getFactionDef(factionKey)) throw new Error('Faction inconnue.');
-  const fields = normalizeShipFields(body);
+  const fields = normalizeShipFields(body, { factionKey });
   const now = new Date();
   const doc = { _id: `ship_${crypto.randomBytes(6).toString('hex')}`, factionKey, ...fields, hp: fields.hpMax, shield: fields.shieldMax, crew: fields.crewMax, assignedUserId: null, createdAt: now, updatedAt: now };
   await (await shipsCol()).insertOne(doc);
@@ -244,7 +257,7 @@ async function updateShip(shipId, body) {
   if (!before) throw new Error('Vaisseau introuvable.');
   const classKey = body?.classKey === undefined ? before.classKey : String(body.classKey);
   const classChanged = classKey !== before.classKey;
-  const fields = normalizeShipFields({ classKey: before.classKey, ...body }, { partial: true, resetClassDefaults: classChanged });
+  const fields = normalizeShipFields({ classKey: before.classKey, ...body }, { partial: true, resetClassDefaults: classChanged, factionKey: before.factionKey });
   const set = { ...fields, updatedAt: new Date() };
   if (fields.hpMax !== undefined) set.hp = Math.min(toInt(before.hp ?? before.hpMax), fields.hpMax);
   if (fields.shieldMax !== undefined) set.shield = Math.min(toInt(before.shield ?? before.shieldMax), fields.shieldMax);
@@ -257,6 +270,17 @@ async function deleteShip(shipId) {
   const res = await (await shipsCol()).deleteOne({ _id: String(shipId) });
   return res.deletedCount === 1;
 }
+async function setShipAllowedGrades(shipId, roleIds, { clearAssignedPilot = false } = {}) {
+  await assertShipNotInBattle(shipId);
+  const col = await shipsCol();
+  const ship = await col.findOne({ _id: String(shipId) });
+  if (!ship) throw new Error('Vaisseau introuvable.');
+  const fields = normalizeShipFields({ allowedGradeRoleIds: roleIds }, { partial: true, factionKey: ship.factionKey });
+  const update = { allowedGradeRoleIds: fields.allowedGradeRoleIds, updatedAt: new Date() };
+  if (clearAssignedPilot) update.assignedUserId = null;
+  await col.updateOne({ _id: ship._id }, { $set: update });
+  return getShip(shipId);
+}
 async function assignShip(shipId, userId, member = {}) {
   await assertShipNotInBattle(shipId);
   const col = await shipsCol();
@@ -267,8 +291,11 @@ async function assignShip(shipId, userId, member = {}) {
     return getShip(shipId);
   }
   if (!member.inFaction) throw new Error('Ce joueur ne fait pas partie de la faction du vaisseau.');
-  const check = canPilot(ship.classKey, member.rankIndex ?? -1, Boolean(member.isLeader));
-  if (!check.ok) throw new Error(check.reason);
+  const allowedGrades = Array.isArray(ship.allowedGradeRoleIds) ? ship.allowedGradeRoleIds.map(String) : [];
+  const memberGrades = new Set((Array.isArray(member.gradeRoleIds) ? member.gradeRoleIds : []).map(String));
+  if (allowedGrades.length && !allowedGrades.some(roleId => memberGrades.has(roleId))) {
+    throw new Error('Le grade de ce joueur ne lui permet pas de piloter ce vaisseau.');
+  }
   await col.updateOne({ _id: ship._id }, { $set: { assignedUserId: String(userId), updatedAt: new Date() } });
   return getShip(shipId);
 }
@@ -286,7 +313,7 @@ async function transferShip(shipId, newFactionKey) {
   const col = await shipsCol();
   const ship = await col.findOne({ _id: String(shipId) });
   if (!ship) return null;
-  await col.updateOne({ _id: ship._id }, { $set: { factionKey: newFactionKey, assignedUserId: null, hp: ship.hpMax, shield: ship.shieldMax, crew: ship.crewMax, updatedAt: new Date() } });
+  await col.updateOne({ _id: ship._id }, { $set: { factionKey: newFactionKey, assignedUserId: null, allowedGradeRoleIds: [], hp: ship.hpMax, shield: ship.shieldMax, crew: ship.crewMax, updatedAt: new Date() } });
   return getShip(shipId);
 }
 async function listShipClassImages() {
@@ -332,5 +359,5 @@ async function setShipClassImage(classKey, filename, imageData = null) {
 module.exports = {
   repairShip, transferShip, assertShipNotInBattle, getShipRecord, listShipClassImages, getShipClassImageBuffer, setShipClassImage,
   CREDITS_ITEM_ID, loadFactionDefs, updateFactionGrades, listFactionDefs, listFactionSummaries, getFactionDef, createFactionDef, deleteFactionDef, getFactionState, setTroops, adjustTroops, setLeader, setReputation,
-  setFactionItem, adjustFactionItem, listShips, getShip, createShip, updateShip, deleteShip, assignShip,
+  setFactionItem, adjustFactionItem, listShips, getShip, createShip, updateShip, deleteShip, setShipAllowedGrades, assignShip,
 };

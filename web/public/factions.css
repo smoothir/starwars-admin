@@ -230,3 +230,108 @@
 .fac-grade-move { display: inline-flex; gap: 4px; }
 .fac-grade-move button { width: 36px; padding: 0; height: 40px; }
 @media (max-width: 760px) { .fac-grade-row-edit { grid-template-columns: 1fr 1fr; } .fac-grade-list li { grid-template-columns: 28px 1fr; } .fac-grade-id { grid-column: 2; } }
+/* ---------- Sélecteurs de grades et de pilote par vaisseau ---------- */
+.fac-ship-grades,
+.fac-pilot-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.fac-ship-grades > div,
+.fac-pilot-picker > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.fac-grade-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fac-grade-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: var(--text-primary);
+  background: rgba(199,166,92,.08);
+  font-size: .76rem;
+}
+.fac-pilot-picker strong { overflow-wrap: anywhere; }
+.fac-pilot-picker small { color: var(--text-muted); font-size: .73rem; }
+.fac-ship-grades > button,
+.fac-pilot-picker > button { flex: 0 0 auto; width: auto; padding: 8px 12px; }
+.fac-access-note {
+  margin: -8px 0 18px;
+  color: var(--text-muted);
+  font-size: .82rem;
+}
+.fac-picker-modal { width: min(560px, 100%); }
+.fac-picker-modal .fac-modal-title-row p { margin: 0 0 14px; color: var(--text-muted); font-size: .83rem; }
+.fac-picker-search { margin: 4px 0 12px; }
+.fac-member-list,
+.fac-grade-picker-list {
+  display: grid;
+  gap: 7px;
+  max-height: min(52vh, 440px);
+  overflow: auto;
+  padding: 2px;
+}
+.fac-member-option,
+.fac-grade-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  background: var(--bg-card);
+  text-align: left;
+  font: inherit;
+}
+.fac-member-option { cursor: pointer; }
+.fac-member-option:hover,
+.fac-member-option.selected { border-color: var(--border-gold); background: var(--bg-card-hover); }
+.fac-member-option > span:nth-child(2),
+.fac-grade-option > span {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.fac-member-option strong,
+.fac-grade-option strong { font-size: .88rem; overflow-wrap: anywhere; }
+.fac-member-option small,
+.fac-grade-option small { color: var(--text-muted); font-size: .74rem; overflow-wrap: anywhere; }
+.fac-member-avatar {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--text-primary);
+  background: rgba(199,166,92,.16);
+  font-weight: 700;
+}
+.fac-member-current { color: var(--text-muted); font-size: .7rem; white-space: nowrap; }
+.fac-clear-pilot { width: 100%; margin-bottom: 10px; }
+.fac-picker-empty {
+  padding: 18px;
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  text-align: center;
+  font-size: .82rem;
+}
+.fac-grade-option { cursor: pointer; }
+.fac-grade-option input { width: 17px; height: 17px; flex: 0 0 17px; accent-color: var(--border-gold); }
+.fac-grade-all { margin: 2px 0 12px; border-color: var(--border-gold); }
+.fac-picker-modal .fac-hint { display: block; margin-top: 12px; }
+.fac-picker-modal .fac-modal-actions { position: sticky; bottom: -24px; padding: 14px 0 0; background: var(--bg-panel); }
+.fac-member-option[hidden] { display: none; }
+
+.fac-member-option:disabled { cursor: not-allowed; opacity: .42; filter: grayscale(.6); }

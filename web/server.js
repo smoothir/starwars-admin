@@ -110,8 +110,7 @@ function createRateLimiter({ windowMs, max, message }) {
 app.use('/auth', createRateLimiter({ windowMs: 10 * 60 * 1000, max: 40, message: 'Trop de tentatives de connexion, réessaie dans quelques minutes.' }));
 app.use('/api', createRateLimiter({ windowMs: 60 * 1000, max: 600, message: 'Trop de requêtes, ralentis un peu.' }));
 
-// --- Connexion Discord (OAuth2) : SEUL moyen d'accéder au site, réservé aux
-// membres du serveur Discord qui ont le rôle Staff (Data/config.js). ---
+// --- Connexion Discord : Staff et membres d'une faction peuvent se connecter. ---
 const {
   CLIENT_ID: DISCORD_CLIENT_ID,
   CLIENT_SECRET: DISCORD_CLIENT_SECRET,
@@ -225,17 +224,35 @@ async function canAccessAdmin(req) {
   return req.session.roles.some(id => allowed.has(String(id)));
 }
 
+function hasStaffSiteAccess(req) {
+  const user = req.session?.user;
+  if (!user) return false;
+  if (config.SUPER_ADMIN_ID && String(user.id) === String(config.SUPER_ADMIN_ID)) return true;
+  const allowedRoleIds = [config.STAFF_ROLE_ID, ...(config.ADMIN_ROLE_IDS || [])]
+    .filter(Boolean).map(String);
+  const memberRoleIds = Array.isArray(req.session?.roles) ? req.session.roles.map(String) : [];
+  return memberRoleIds.some(roleId => allowedRoleIds.includes(roleId));
+}
+
 app.get('/api/me', async (req, res) => {
-  if (req.session.user) {
-    return res.json({
-      authenticated: true,
-      via: 'discord',
-      ...req.session.user,
-      isSuperAdmin: await canAccessAdmin(req),
-      isFounder: req.session.user.id === FOUNDER_DISCORD_ID,
-    });
+  if (!hasStaffSiteAccess(req)) {
+    if (req.session?.user) {
+      return req.session.destroy(() => {
+        res.clearCookie('rpadmin.sid');
+        res.json({ authenticated: false });
+      });
+    }
+    return res.json({ authenticated: false });
   }
-  res.json({ authenticated: false });
+  return res.json({
+    authenticated: true,
+    via: 'discord',
+    ...req.session.user,
+    isStaff: true,
+    factionKeys: [],
+    isSuperAdmin: await canAccessAdmin(req),
+    isFounder: req.session.user.id === FOUNDER_DISCORD_ID,
+  });
 });
 
 // Sondes de santé : /healthz confirme que Node/Express répond ; /readyz vérifie aussi MongoDB.
@@ -251,10 +268,12 @@ app.get('/readyz', async (_req, res) => {
   }
 });
 
-// Seule une session Discord valide (rôle Staff vérifié à la connexion) donne accès.
+// Toutes les API du site restent réservées aux comptes Staff autorisés.
+// Les anciennes sessions ouvertes uniquement avec un rôle de faction sont refusées.
 app.use('/api', (req, res, next) => {
-  if (req.session.user) return next();
-  return res.status(401).json({ error: 'Authentification requise.' });
+  if (!req.session?.user) return res.status(401).json({ error: 'Authentification requise.' });
+  if (!hasStaffSiteAccess(req)) return res.status(403).json({ error: 'Cette section est réservée au Staff.' });
+  return next();
 });
 
 
@@ -666,7 +685,8 @@ app.get('/auth/discord/callback', async (req, res) => {
     if (!memberRes.ok) throw new Error('Impossible de recuperer tes roles sur le serveur.');
     const member = await memberRes.json();
 
-    if (!config.STAFF_ROLE_ID || !member.roles?.includes(config.STAFF_ROLE_ID)) {
+    const memberRoleIds = Array.isArray(member.roles) ? member.roles.map(String) : [];
+    if (!config.STAFF_ROLE_ID || !memberRoleIds.includes(String(config.STAFF_ROLE_ID))) {
       return res.redirect('/?auth_error=' + encodeURIComponent("Tu n'as pas le role Staff requis sur le serveur Discord, connexion refusee."));
     }
 
@@ -678,7 +698,7 @@ app.get('/auth/discord/callback', async (req, res) => {
     // Nouvel identifiant de session à la connexion (anti « session fixation »).
     await new Promise((resolve, reject) => req.session.regenerate(err => (err ? reject(err) : resolve())));
     req.session.user = sessionUser;
-    req.session.roles = Array.isArray(member.roles) ? member.roles.map(String) : [];
+    req.session.roles = memberRoleIds;
     await new Promise((resolve, reject) => req.session.save(err => (err ? reject(err) : resolve())));
 
     // Suivi des connexions + journal, pour le panel Admin (créateur uniquement).

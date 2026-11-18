@@ -58,8 +58,11 @@ async function facChargerRoles() {
 function facRoleSummaryHTML(def) {
   const grades = def.grades || [];
   const { gradesOpen, gradesEdit } = facState;
-  const panel = !gradesOpen ? '' : `<div class="fac-grades-panel">${gradesEdit ? facGradesEditHTML(grades) : facGradesListHTML(grades)}</div>`;
-  return `<div class="fac-role-main"><div><span class="fac-label">Rôle de faction</span><strong>${escapeHtml(facRoleName(def.categoryRoleId))}</strong></div><div class="fac-admin-actions"><button class="btn-secondaire" onclick="facToggleGrades()">${gradesOpen ? 'Masquer les grades' : 'Afficher les grades'} (${grades.length})</button><button class="btn-secondaire btn-danger" onclick="facSupprimerFaction()">Supprimer cette faction</button></div></div>${panel}`;
+  const panel = !gradesOpen ? '' : `<div class="fac-grades-panel">${gradesEdit && state.isStaff ? facGradesEditHTML(grades) : facGradesListHTML(grades)}</div>`;
+  const actions = state.isStaff
+    ? `<div class="fac-admin-actions"><button class="btn-secondaire" onclick="facToggleGrades()">${gradesOpen ? 'Masquer les grades' : 'Afficher les grades'} (${grades.length})</button><button class="btn-secondaire btn-danger" onclick="facSupprimerFaction()">Supprimer cette faction</button></div>`
+    : `<div class="fac-admin-actions"><button class="btn-secondaire" onclick="facToggleGrades()">${gradesOpen ? 'Masquer les grades' : 'Afficher les grades'} (${grades.length})</button></div>`;
+  return `<div class="fac-role-main"><div><span class="fac-label">Rôle de faction</span><strong>${escapeHtml(facRoleName(def.categoryRoleId))}</strong></div>${actions}</div>${panel}`;
 }
 
 function facRafraichirResume() {
@@ -78,7 +81,7 @@ function facGradesListHTML(grades) {
   const list = grades.length
     ? `<ol class="fac-grade-list">${grades.map((g, i) => `<li><span class="fac-grade-rank">${i + 1}</span><strong>${escapeHtml(g.name)}</strong><span class="fac-grade-id">${escapeHtml(facRoleName(g.id))}</span></li>`).join('')}</ol>`
     : '<span class="fac-hint">Aucun grade configuré.</span>';
-  return `<div class="fac-grades-head"><span class="fac-hint">Du grade le plus élevé au plus bas.</span><button class="btn-secondaire" onclick="facModifierGrades()">Modifier</button></div>${list}`;
+  return `<div class="fac-grades-head"><span class="fac-hint">Du grade le plus élevé au plus bas.</span>${state.isStaff ? '<button class="btn-secondaire" onclick="facModifierGrades()">Modifier</button>' : ''}</div>${list}`;
 }
 
 function facGradeEditRowHTML(name = '', roleId = '') {
@@ -89,7 +92,7 @@ function facGradesEditHTML(grades) {
   return `<div class="fac-grades-head"><span class="fac-hint">Du grade le plus élevé (en haut) au plus bas. Utilise ↑ ↓ pour réordonner.</span><button class="btn-secondaire" onclick="facAjouterGradeEdition()">＋ Ajouter un grade</button></div><div id="fac-edit-grades" class="fac-grade-rows">${grades.map(g => facGradeEditRowHTML(g.name, g.id)).join('')}</div><div class="fac-admin-actions"><button class="btn-secondaire" onclick="facAnnulerGrades()">Annuler</button><button class="btn-principal" onclick="facSauverGrades()">Enregistrer les grades</button></div>`;
 }
 
-function facModifierGrades() { facState.gradesEdit = true; facRafraichirResume(); }
+function facModifierGrades() { if (!state.isStaff) return; facState.gradesEdit = true; facRafraichirResume(); }
 function facAnnulerGrades() { facState.gradesEdit = false; facRafraichirResume(); }
 function facAjouterGradeEdition() {
   const host = document.getElementById('fac-edit-grades');
@@ -105,6 +108,7 @@ function facDeplacerGrade(button, direction) {
 }
 
 async function facSauverGrades() {
+  if (!state.isStaff) return toast('Action réservée au Staff.', 'erreur');
   const def = facState.data?.def;
   if (!def) return;
   const grades = [];
@@ -197,6 +201,7 @@ async function facChargerJoueurs(selectedKey) {
     facState.players = { ready: false, loading: false, players: [], error: err.message };
   }
   facActualiserJoueursUI();
+  if (facState.pilotPickerShipId && document.getElementById('fac-overlay')) facOuvrirMenuPilote(facState.pilotPickerShipId);
 }
 
 function facChoisir(key) {
@@ -211,12 +216,15 @@ function facItemInfo(id) {
   return { name: it?.name || id, emoji: it?.emoji || '📦' };
 }
 
-function facLeaderControlHTML(state, players) {
+function facLeaderControlHTML(stateData, players) {
+  const playerName = players.players.find(p => p.id === stateData.leaderUserId)?.name || (stateData.leaderUserId ? `ID ${stateData.leaderUserId}` : 'Aucun chef désigné');
+  if (!state.isStaff) {
+    return `<div class="fac-value">${escapeHtml(playerName)}</div><div class="fac-hint">Le chef de faction est désigné par le Staff.</div>`;
+  }
   if (players.loading) return '<div class="fac-hint">Chargement des joueurs Discord…</div>';
   if (players.ready) {
-    return `<div class="fac-row"><select id="fac-leader" class="fac-select"><option value="">Aucun chef désigné</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === state.leaderUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select><button class="btn-secondaire fac-btn" onclick="facEnregistrerChef()">Valider</button></div><div class="fac-hint">Sans chef, le plus haut gradé présent commande en bataille.</div>`;
+    return `<div class="fac-row"><select id="fac-leader" class="fac-select"><option value="">Aucun chef désigné</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === stateData.leaderUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select><button class="btn-secondaire fac-btn" onclick="facEnregistrerChef()">Valider</button></div><div class="fac-hint">Sans chef, le plus haut gradé présent commande en bataille.</div>`;
   }
-  const playerName = players.players.find(p => p.id === state.leaderUserId)?.name || (state.leaderUserId ? `ID ${state.leaderUserId}` : 'Aucun chef désigné');
   const note = players.error
     ? `Impossible de charger les joueurs Discord : ${escapeHtml(players.error)}`
     : 'Sans chef, le plus haut gradé présent commande en bataille. Désignation sur Discord avec <code>/faction chef</code>.';
@@ -224,18 +232,17 @@ function facLeaderControlHTML(state, players) {
 }
 
 function facPlayersContentHTML(ships, players) {
-  if (players.loading) return '<div class="fac-note">Chargement des profils associés à cette faction…</div>';
+  if (players.loading) return '<div class="fac-note">Chargement des membres Discord de cette faction…</div>';
   if (players.ready) return facPlayersHTML(ships);
   if (players.error) return `<div class="fac-note">Impossible de charger les joueurs Discord : ${escapeHtml(players.error)}</div>`;
   return '<div class="fac-note">Aucun profil associé à cette faction.</div>';
 }
 
 function facPilotControlHTML(ship, players) {
-  if (players.ready) {
-    return `<div><span class="fac-label">Pilote</span><select class="fac-select" onchange="facAssigner('${jsAttr(ship.id)}', this.value)"><option value="">Non attribué</option>${players.players.map(p => `<option value="${escapeAttr(p.id)}" ${p.id === ship.assignedUserId ? 'selected' : ''}>${escapeHtml(p.name)}${p.rankName ? ' · ' + escapeHtml(p.rankName) : ''}</option>`).join('')}</select></div>`;
-  }
-  const status = players.loading ? 'Chargement…' : (ship.assignedUserId ? 'ID ' + escapeHtml(ship.assignedUserId) : 'Non attribué');
-  return `<div><span class="fac-label">Pilote</span><div class="fac-hint">${status}</div></div>`;
+  const pilot = players.players.find(player => player.id === ship.assignedUserId);
+  const current = pilot ? `${pilot.name}${pilot.rankName ? ` · ${pilot.rankName}` : ''}` : (ship.assignedUserId ? `ID ${ship.assignedUserId}` : 'Non attribué');
+  const status = players.ready ? '' : `<small>${players.loading ? 'Chargement des membres…' : escapeHtml(players.error || 'Liste des membres indisponible')}</small>`;
+  return `<div class="fac-pilot-picker"><div><span class="fac-label">Pilote</span><strong>${escapeHtml(current)}</strong>${status}</div><button class="btn-secondaire" onclick="facOuvrirMenuPilote('${jsAttr(ship.id)}')">${ship.assignedUserId ? 'Changer le pilote' : 'Attribuer un pilote'}</button></div>`;
 }
 
 function facActualiserJoueursUI() {
@@ -252,43 +259,44 @@ function facActualiserJoueursUI() {
 
 function facRender() {
   const { data, players, meta, list } = facState;
-  const { def, state, ships } = data;
+  const { def, state: factionState, ships } = data;
+  const isStaff = state.isStaff === true;
   const tabs = list.map(f => `<button class="fac-tab ${f.key === facState.key ? 'active' : ''}" onclick="facChoisir('${jsAttr(f.key)}')">${escapeHtml(f.label)}<small>🚀 ${f.shipCount}</small></button>`).join('');
-
   const creditItem = meta.creditsItemId;
-  const otherItems = Object.entries(state.items).filter(([id]) => id !== creditItem);
-  document.getElementById('contenu').innerHTML = `
-    <div class="fac-tabs">${tabs}<button type="button" class="fac-tab fac-tab-add" title="Ajouter une faction" aria-label="Ajouter une faction" onclick="facOuvrirCreationFaction()">＋</button></div>
-
-    <div class="fac-role-summary">${facRoleSummaryHTML(def)}</div>
-
+  const otherItems = Object.entries(factionState.items).filter(([id]) => id !== creditItem);
+  const staffSections = isStaff ? `
     <div class="fac-summary">
-      <div class="fac-card"><h4>👑 Chef de faction</h4><div id="fac-leader-control">${facLeaderControlHTML(state, players)}</div></div>
-      <div class="fac-card"><h4>🪖 Troupes</h4><div class="fac-row"><input id="fac-troops" class="fac-input" type="number" min="0" value="${state.troops}" placeholder="Nombre de soldats"><button class="btn-secondaire fac-btn" onclick="facEnregistrerTroupes()">Enregistrer</button></div><div class="fac-hint">Effectif total de la faction (utilisé par le recrutement et le massacre).</div></div>
-      <div class="fac-card"><h4>💰 Crédits</h4><div class="fac-row"><input id="fac-credits" class="fac-input" type="number" min="0" value="${state.credits}" placeholder="Montant en crédits"><button class="btn-secondaire fac-btn" onclick="facEnregistrerCredits()">Enregistrer</button></div><div class="fac-hint">Trésorerie de la faction (pillée en cas de défaite).</div></div>
-      <div class="fac-card"><h4>⭐ Réputation</h4><div class="fac-row"><input id="fac-reputation" class="fac-input" type="number" min="0" max="100" value="${state.reputation ?? 50}" placeholder="0 à 100"><button class="btn-secondaire fac-btn" onclick="facEnregistrerReputation()">Enregistrer</button></div><div class="fac-hint">Réputation diplomatique de la faction, de 0 (détestée) à 100 (prestigieuse).</div></div>
+      <div class="fac-card"><h4>👑 Chef de faction</h4><div id="fac-leader-control">${facLeaderControlHTML(factionState, players)}</div></div>
+      <div class="fac-card"><h4>🪖 Troupes</h4><div class="fac-row"><input id="fac-troops" class="fac-input" type="number" min="0" value="${factionState.troops}" placeholder="Nombre de soldats"><button class="btn-secondaire fac-btn" onclick="facEnregistrerTroupes()">Enregistrer</button></div><div class="fac-hint">Effectif total de la faction (utilisé par le recrutement et le massacre).</div></div>
+      <div class="fac-card"><h4>💰 Crédits</h4><div class="fac-row"><input id="fac-credits" class="fac-input" type="number" min="0" value="${factionState.credits}" placeholder="Montant en crédits"><button class="btn-secondaire fac-btn" onclick="facEnregistrerCredits()">Enregistrer</button></div><div class="fac-hint">Trésorerie de la faction (pillée en cas de défaite).</div></div>
+      <div class="fac-card"><h4>⭐ Réputation</h4><div class="fac-row"><input id="fac-reputation" class="fac-input" type="number" min="0" max="100" value="${factionState.reputation ?? 50}" placeholder="0 à 100"><button class="btn-secondaire fac-btn" onclick="facEnregistrerReputation()">Enregistrer</button></div><div class="fac-hint">Réputation diplomatique de la faction, de 0 (détestée) à 100 (prestigieuse).</div></div>
     </div>
-
     <div class="fac-section">
       <div class="fac-section-head"><div><h3>🏛️ Possessions (${(data.possessions || []).length})</h3><p>Bâtiments, zones planétaires, planètes, cantinas et autres propriétés. Les productions et recrutements peuvent exiger une possession.</p></div><button class="btn-principal" onclick="facOuvrirPossession(null)">＋ Nouvelle possession</button></div>
       ${(data.possessions || []).length ? `<div class="fac-possession-grid">${data.possessions.map(p => facPossessionCardHTML(p)).join('')}</div>` : '<div class="fac-note">Cette faction ne possède encore aucun lieu ou bâtiment.</div>'}
-    </div>
-
-    <div class="fac-section">
-      <div class="fac-section-head"><div><h3>🚀 Vaisseaux (${ships.length})</h3><p>Propriété de la faction, attribués à un joueur selon son grade.</p></div><button class="btn-principal" onclick="facOuvrirVaisseau(null)">+ Nouveau vaisseau</button></div>
-      ${ships.length ? `<div class="fac-ships">${ships.map(s => facShipHTML(s)).join('')}</div>` : '<div class="fac-note">Aucun vaisseau pour le moment. Crée le premier avec « Nouveau vaisseau ».</div>'}
-    </div>
-
-    <div class="fac-section">
-      <div class="fac-section-head"><div><h3>👥 Joueurs de la faction</h3><p>Grades militaires lus depuis les rôles Discord.</p></div></div>
-      <div id="fac-players-content">${facPlayersContentHTML(ships, players)}</div>
-    </div>
-
+    </div>` : '';
+  const factionTabs = isStaff ? `${tabs}<button type="button" class="fac-tab fac-tab-add" title="Ajouter une faction" aria-label="Ajouter une faction" onclick="facOuvrirCreationFaction()">＋</button>` : tabs;
+  const staffNavNote = isStaff ? '' : '<p class="fac-access-note">Accès faction : tu peux créer des vaisseaux, définir leurs grades autorisés et attribuer leurs pilotes.</p>';
+  const inventorySection = isStaff ? `
     <div class="fac-section">
       <div class="fac-section-head"><div><h3>🎒 Inventaire de faction</h3><p>Objets stockés par la faction (hors crédits).</p></div></div>
       ${otherItems.length ? `<div class="fac-items">${otherItems.map(([id, qty]) => { const info = facItemInfo(id); return `<div class="fac-item"><span>${escapeHtml(info.emoji)}</span><span class="fac-item-name" title="${escapeAttr(id)}">${escapeHtml(info.name)}</span><input class="fac-input" type="number" min="0" value="${qty}" onchange="facSetItem('${jsAttr(id)}', this.value)"></div>`; }).join('')}</div>` : '<div class="fac-note" style="margin-bottom:18px">Inventaire vide.</div>'}
       <div class="fac-add"><select id="fac-new-item" class="fac-select" onfocus="facChargerCatalogue().catch(err => toast(err.message, 'erreur'))"><option value="">${facState.catalogueLoaded ? 'Ajouter un objet…' : 'Charger le catalogue…'}</option>${facState.catalogue.map(c => `<option value="${escapeAttr(c.id ?? c._id)}">${escapeHtml((c.emoji || '') + ' ' + (c.name || c.id))}</option>`).join('')}</select><input id="fac-new-qty" class="fac-input" type="number" min="1" value="1" placeholder="Quantité"><button class="btn-secondaire fac-btn" onclick="facAjouterObjet()">Ajouter</button></div>
-    </div>`;
+    </div>` : '';
+  document.getElementById('contenu').innerHTML = `
+    <div class="fac-tabs">${factionTabs}</div>
+    ${staffNavNote}
+    <div class="fac-role-summary">${facRoleSummaryHTML(def)}</div>
+    ${staffSections}
+    <div class="fac-section">
+      <div class="fac-section-head"><div><h3>🚀 Vaisseaux (${ships.length})</h3><p>Les grades autorisés et le pilote se configurent séparément pour chaque vaisseau.</p></div><button class="btn-principal" onclick="facOuvrirVaisseau(null)">+ Nouveau vaisseau</button></div>
+      ${ships.length ? `<div class="fac-ships">${ships.map(ship => facShipHTML(ship)).join('')}</div>` : '<div class="fac-note">Aucun vaisseau pour le moment. Crée le premier avec « Nouveau vaisseau ».</div>'}
+    </div>
+    <div class="fac-section">
+      <div class="fac-section-head"><div><h3>👥 Joueurs de la faction</h3><p>Liste des membres Discord et de leurs grades.</p></div></div>
+      <div id="fac-players-content">${facPlayersContentHTML(ships, players)}</div>
+    </div>
+    ${inventorySection}`;
 }
 
 function facFootprintHTML(width, length) {
@@ -301,6 +309,15 @@ function facShipHTML(s) {
   const cls = facState.meta.classes.find(c => c.key === s.classKey);
   const players = facState.players;
   const damaged = s.hp < s.hpMax || s.shield < s.shieldMax || s.crew < s.crewMax;
+  const allowedIds = Array.isArray(s.allowedGradeRoleIds) ? s.allowedGradeRoleIds.map(String) : [];
+  const grades = facState.data.def.grades || [];
+  const allowedNames = allowedIds.length ? grades.filter(grade => allowedIds.includes(String(grade.id))).map(grade => grade.name) : ['Tous les grades'];
+  const gradeMarkup = allowedNames.length ? allowedNames.map(name => `<span class="fac-grade-chip">${escapeHtml(name)}</span>`).join('') : '<span class="fac-hint">Aucun grade valide</span>';
+  const staffActions = state.isStaff ? `
+      <button class="btn-modifier" onclick="facOuvrirVaisseau('${jsAttr(s.id)}')">Modifier</button>
+      <button class="btn-secondaire" ${damaged ? '' : 'disabled'} onclick="facReparerVaisseau('${jsAttr(s.id)}')">Réparer</button>
+      <button class="btn-secondaire" onclick="ouvrirHistorique('vaisseau','${jsAttr(s.id)}','${jsAttr(s.name)}')">Historique</button>
+      <button class="btn-secondaire btn-danger" onclick="facSupprimerVaisseau('${jsAttr(s.id)}')">Supprimer</button>` : '';
   return `<div class="fac-ship">
     ${cls?.image ? `<img class="fac-ship-image" src="${escapeAttr(cls.image)}" alt="Illustration ${escapeAttr(cls.label)}" loading="lazy">` : '<div class="fac-ship-image fac-ship-image-empty">Aucune image de classe</div>'}
     <div class="fac-ship-top"><strong class="fac-ship-name">${escapeHtml(s.name)}</strong><span class="fac-ship-class">${escapeHtml(s.className)}</span></div>
@@ -309,25 +326,27 @@ function facShipHTML(s) {
       <div><span>Points de vie</span>${facNum(s.hp)} / ${facNum(s.hpMax)}</div><div><span>Bouclier</span>${facNum(s.shield)} / ${facNum(s.shieldMax)}</div>
       <div><span>Équipage</span>${facNum(s.crew)} / ${facNum(s.crewMax)}</div><div><span>Portée</span>${s.range} cases</div>
       <div><span>Tir de barrage</span>${facNum(s.barrage)}</div><div><span>Tir ciblé</span>${facNum(s.focus)}</div>
-      <div><span>Grade requis</span>${escapeHtml(cls?.requirement || '—')}</div>
     </div>
+    <div class="fac-ship-grades"><div><span class="fac-label">Grades autorisés</span><div class="fac-grade-chips">${gradeMarkup}</div></div><button class="btn-secondaire" onclick="facOuvrirPermissionsVaisseau('${jsAttr(s.id)}')">Gérer les grades</button></div>
     <div class="fac-ship-pilot" id="fac-ship-pilot-${jsAttr(s.id)}">${facPilotControlHTML(s, players)}</div>
-    <div class="fac-ship-actions">
-      <button class="btn-modifier" onclick="facOuvrirVaisseau('${jsAttr(s.id)}')">Modifier</button>
-      <button class="btn-secondaire" ${damaged ? '' : 'disabled'} onclick="facReparerVaisseau('${jsAttr(s.id)}')">Réparer</button>
-      <button class="btn-secondaire" onclick="ouvrirHistorique('vaisseau','${jsAttr(s.id)}','${jsAttr(s.name)}')">Historique</button>
-      <button class="btn-secondaire btn-danger" onclick="facSupprimerVaisseau('${jsAttr(s.id)}')">Supprimer</button>
-    </div>
+    <div class="fac-ship-actions">${staffActions}</div>
   </div>`;
 }
 
 function facPlayersHTML(ships) {
+  const players = facState.players.players || [];
   const profiles = facState.players.profiles || [];
-  const rows = profiles.map(profile => {
-    const mine = ships.filter(s => s.assignedUserId === profile.userId).map(s => escapeHtml(s.name));
-    return `<tr><td><strong>${escapeHtml(profile.name)}</strong>${profile.nickname ? `<small>${escapeHtml(profile.nickname)}</small>` : ''}</td><td>${profile.userId ? `<code><@${escapeHtml(profile.userId)}></code>` : '<span style="opacity:.5">Joueur non associé</span>'}</td><td>${escapeHtml(profile.roleName || '—')}</td><td>${mine.join(', ') || '<span style="opacity:.5">—</span>'}</td></tr>`;
+  const linkedProfileIds = new Set();
+  const rows = players.map(player => {
+    const linked = Array.isArray(player.profiles) ? player.profiles : profiles.filter(profile => profile.userId === player.id);
+    linked.forEach(profile => linkedProfileIds.add(String(profile.id)));
+    const mine = ships.filter(ship => ship.assignedUserId === player.id).map(ship => escapeHtml(ship.name));
+    const profileNames = linked.map(profile => escapeHtml(profile.name || profile.nickname || profile.id));
+    return `<tr><td><strong>${escapeHtml(player.name)}</strong><small>${escapeHtml(player.id)}</small></td><td>${escapeHtml(player.rankName || 'Aucun grade configuré')}</td><td>${profileNames.join(', ') || '<span style="opacity:.5">Aucun profil RP associé</span>'}</td><td>${mine.join(', ') || '<span style="opacity:.5">—</span>'}</td></tr>`;
   }).join('');
-  return `<div class="fac-table-wrap"><table class="fac-table"><thead><tr><th>Profil RP</th><th>Joueur Discord associé</th><th>Grade</th><th>Vaisseau(x)</th></tr></thead><tbody>${rows || '<tr><td colspan="4" style="opacity:.6">Aucun profil rattaché à cette faction. Modifie le rôle du profil dans Profils RP.</td></tr>'}</tbody></table></div>`;
+  const unlinkedProfiles = profiles.filter(profile => !profile.userId || !linkedProfileIds.has(String(profile.id)));
+  const unlinkedRows = unlinkedProfiles.map(profile => `<tr><td><strong>${escapeHtml(profile.name)}</strong>${profile.nickname ? `<small>${escapeHtml(profile.nickname)}</small>` : ''}</td><td>${escapeHtml(profile.roleName || '—')}</td><td><span style="opacity:.5">Non associé à un membre Discord</span></td><td><span style="opacity:.5">—</span></td></tr>`).join('');
+  return `<div class="fac-table-wrap"><table class="fac-table"><thead><tr><th>Membre Discord</th><th>Grade</th><th>Profil(s) RP associé(s)</th><th>Vaisseau(x)</th></tr></thead><tbody>${rows}${unlinkedRows || ''}${!rows && !unlinkedRows ? '<tr><td colspan="4" style="opacity:.6">Aucun membre trouvé dans cette faction.</td></tr>' : ''}</tbody></table></div>`;
 }
 
 // ------------------------------------------------------------------ gestion dynamique des factions et des possessions
@@ -359,6 +378,7 @@ function facSuggererCle() {
 }
 
 function facOuvrirCreationFaction() {
+  if (!state.isStaff) return toast('Action réservée au Staff.', 'erreur');
   facFermerModale();
   const overlay = document.createElement('div');
   overlay.id = 'fac-overlay';
@@ -373,7 +393,7 @@ function facOuvrirCreationFaction() {
       <div class="full fac-grade-editor">
         <div class="fac-grade-editor-head"><span class="fac-label">Grades (nom + ID du rôle Discord)</span><button type="button" class="btn-secondaire" onclick="facAjouterGradeRow()">＋ Ajouter un grade</button></div>
         <div id="fac-new-grades" class="fac-grade-rows">${facGradeRowHTML()}</div>
-        <span class="fac-hint">Du grade le plus bas au plus haut. Les lignes laissées vides sont ignorées.</span>
+        <span class="fac-hint">Du grade le plus élevé au plus bas. Les lignes laissées vides sont ignorées.</span>
       </div>
     </div>
     <div class="fac-modal-actions"><button class="btn-secondaire" onclick="facFermerModale()">Annuler</button><button class="btn-principal" onclick="facCreerFaction()">Créer la faction</button></div>
@@ -383,6 +403,7 @@ function facOuvrirCreationFaction() {
 }
 
 async function facCreerFaction() {
+  if (!state.isStaff) return toast('Action réservée au Staff.', 'erreur');
   const val = id => (document.getElementById(id)?.value || '').trim();
   const categoryRoleId = val('fac-new-role');
   if (!val('fac-new-label') || !val('fac-new-key')) return toast('Le nom et la clé sont obligatoires.', 'erreur');
@@ -405,6 +426,7 @@ async function facCreerFaction() {
 }
 
 async function facSupprimerFaction() {
+  if (!state.isStaff) return toast('Action réservée au Staff.', 'erreur');
   const def = facState.data?.def;
   if (!def) return toast('Faction introuvable.', 'erreur');
   const ok = await confirmerAction({ titre: 'Supprimer la faction', message: `Supprimer « ${def.label} » ? Les factions qui possèdent encore des personnages, vaisseaux, possessions ou batailles en cours ne peuvent pas être supprimées.`, texteValider: 'Supprimer' });
@@ -498,9 +520,86 @@ function facAjouterObjet() {
   if (!id) return toast('Choisis un objet.', 'erreur');
   return facSetItem(id, qty);
 }
-function facAssigner(shipId, userId) { return facAction(() => facApi(facUrl(`/vaisseaux/${encodeURIComponent(shipId)}/pilote`), 'PUT', { userId: userId || null }), userId ? 'Vaisseau attribué.' : 'Vaisseau retiré à son pilote.'); }
+async function facAssigner(shipId, userId) {
+  try {
+    await facApi(facUrl(`/vaisseaux/${encodeURIComponent(shipId)}/pilote`), 'PUT', { userId: userId || null });
+    facFermerModale();
+    toast(userId ? 'Pilote attribué.' : 'Pilote retiré.');
+    await facChargerFaction();
+  } catch (err) { toast(err.message, 'erreur'); }
+}
+
+function facOuvrirMenuPilote(shipId) {
+  const ship = facState.data?.ships.find(item => item.id === shipId);
+  if (!ship) return toast('Vaisseau introuvable.', 'erreur');
+  facFermerModale();
+  facState.pilotPickerShipId = shipId;
+  const overlay = document.createElement('div');
+  overlay.id = 'fac-overlay';
+  overlay.className = 'fac-overlay';
+  overlay.onclick = event => { if (event.target === overlay) facFermerModale(); };
+  let memberRows = '<div class="fac-picker-empty">Chargement des membres Discord…</div>';
+  if (facState.players.ready) {
+    memberRows = facState.players.players.length ? facState.players.players.map(player => {
+      const secondary = player.rankName || 'Aucun grade configuré';
+      const selected = player.id === ship.assignedUserId;
+      const allowedIds = (ship.allowedGradeRoleIds || []).map(String);
+      const canPilot = !allowedIds.length || (player.gradeRoleIds || []).some(roleId => allowedIds.includes(String(roleId)));
+      const note = canPilot ? secondary : `${secondary} · Grade non autorisé`;
+      const search = `${player.name} ${note}`.toLocaleLowerCase('fr');
+      return `<button type="button" class="fac-member-option ${selected ? 'selected' : ''}" data-member-search="${escapeAttr(search)}" ${canPilot ? '' : 'disabled'} ${canPilot ? `onclick="facAssigner('${jsAttr(ship.id)}','${jsAttr(player.id)}')"` : ''}><span class="fac-member-avatar">${escapeHtml((player.name || '?').slice(0, 1).toUpperCase())}</span><span><strong>${escapeHtml(player.name)}</strong><small>${escapeHtml(note)}</small></span>${selected ? '<span class="fac-member-current">Pilote actuel</span>' : ''}</button>`;
+    }).join('') : '<div class="fac-picker-empty">Aucun membre Discord trouvé dans cette faction.</div>';
+  } else if (facState.players.error) {
+    memberRows = `<div class="fac-picker-empty">${escapeHtml(facState.players.error)}</div>`;
+  }
+  const clearPilotButton = facState.players.ready ? `<button class="btn-secondaire fac-clear-pilot" onclick="facAssigner('${jsAttr(ship.id)}',null)">Retirer le pilote</button>` : '';
+  overlay.innerHTML = `<div class="fac-modal fac-picker-modal"><div class="fac-modal-title-row"><div><h3>Attribuer un pilote</h3><p>${escapeHtml(ship.name)}</p></div><button class="btn-secondaire" onclick="facFermerModale()">✕</button></div><input class="fac-input fac-picker-search" type="search" placeholder="Rechercher un membre…" oninput="facFiltrerPilotes(this.value)">${clearPilotButton}<div class="fac-member-list">${memberRows}</div></div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.fac-picker-search')?.focus();
+}
+
+function facFiltrerPilotes(query) {
+  const needle = String(query || '').trim().toLocaleLowerCase('fr');
+  document.querySelectorAll('[data-member-search]').forEach(button => {
+    button.hidden = !String(button.dataset.memberSearch || '').includes(needle);
+  });
+}
+
+function facToggleTousGrades(checked) {
+  document.querySelectorAll('[data-ship-grade]').forEach(input => { input.disabled = checked; if (checked) input.checked = false; });
+}
+
+function facOuvrirPermissionsVaisseau(shipId) {
+  const ship = facState.data?.ships.find(item => item.id === shipId);
+  if (!ship) return toast('Vaisseau introuvable.', 'erreur');
+  const grades = facState.data.def.grades || [];
+  const allowed = Array.isArray(ship.allowedGradeRoleIds) ? ship.allowedGradeRoleIds.map(String) : [];
+  const all = allowed.length === 0;
+  facFermerModale();
+  const overlay = document.createElement('div');
+  overlay.id = 'fac-overlay';
+  overlay.className = 'fac-overlay';
+  overlay.onclick = event => { if (event.target === overlay) facFermerModale(); };
+  const gradeRows = grades.length ? grades.map(grade => `<label class="fac-grade-option"><input type="checkbox" data-ship-grade value="${escapeAttr(grade.id)}" ${allowed.includes(String(grade.id)) ? 'checked' : ''} ${all ? 'disabled' : ''}><span><strong>${escapeHtml(grade.name)}</strong><small>${escapeHtml(facRoleName(grade.id))}</small></span></label>`).join('') : '<div class="fac-picker-empty">Aucun grade n’est configuré pour cette faction. Tous les membres pourront piloter ce vaisseau.</div>';
+  overlay.innerHTML = `<div class="fac-modal fac-picker-modal"><div class="fac-modal-title-row"><div><h3>Grades autorisés</h3><p>${escapeHtml(ship.name)}</p></div><button class="btn-secondaire" onclick="facFermerModale()">✕</button></div><label class="fac-grade-option fac-grade-all"><input id="fac-all-grades" type="checkbox" ${all ? 'checked' : ''} onchange="facToggleTousGrades(this.checked)"><span><strong>Tous les grades de la faction</strong><small>Autoriser chaque membre de cette faction</small></span></label><div class="fac-grade-picker-list">${gradeRows}</div><p class="fac-hint">Décoche « Tous les grades », puis sélectionne un ou plusieurs grades. Un vaisseau sans restriction est accessible à tous les grades de la faction.</p><div class="fac-modal-actions"><button class="btn-secondaire" onclick="facFermerModale()">Annuler</button><button class="btn-principal" onclick="facSauverPermissionsVaisseau('${jsAttr(ship.id)}')">Enregistrer</button></div></div>`;
+  document.body.appendChild(overlay);
+}
+
+async function facSauverPermissionsVaisseau(shipId) {
+  const all = document.getElementById('fac-all-grades')?.checked;
+  const roleIds = all ? [] : [...document.querySelectorAll('[data-ship-grade]:checked')].map(input => input.value);
+  if (!all && !roleIds.length) return toast('Choisis au moins un grade ou réactive « Tous les grades ».', 'erreur');
+  try {
+    await facApi(facUrl(`/vaisseaux/${encodeURIComponent(shipId)}/grades`), 'PUT', { roleIds });
+    facFermerModale();
+    toast('Grades autorisés enregistrés.');
+    await facChargerFaction();
+  } catch (err) { toast(err.message, 'erreur'); }
+}
+
 
 async function facReparerVaisseau(shipId) {
+  if (!state.isStaff) return toast('Action réservée au Staff.', 'erreur');
   const ship = facState.data.ships.find(s => s.id === shipId);
   const ok = await confirmerAction({ titre: 'Réparer le vaisseau', message: `Restaurer les PV, le bouclier et l’équipage de « ${ship?.name || shipId} » à leur maximum ?`, texteValider: 'Réparer' });
   if (!ok) return;
@@ -508,6 +607,7 @@ async function facReparerVaisseau(shipId) {
 }
 
 async function facSupprimerVaisseau(shipId) {
+  if (!state.isStaff) return toast('Action réservée au Staff.', 'erreur');
   const ship = facState.data.ships.find(s => s.id === shipId);
   const ok = await confirmerAction({ titre: 'Supprimer le vaisseau', message: `Supprimer définitivement « ${ship?.name || shipId} » ?`, texteValider: 'Supprimer' });
   if (!ok) return;
@@ -515,9 +615,10 @@ async function facSupprimerVaisseau(shipId) {
 }
 
 // ------------------------------------------------------------------ modale vaisseau
-function facFermerModale() { document.getElementById('fac-overlay')?.remove(); }
+function facFermerModale() { document.getElementById('fac-overlay')?.remove(); facState.pilotPickerShipId = null; }
 
 function facOuvrirVaisseau(shipId) {
+  if (shipId && !state.isStaff) return toast('La modification des caractéristiques est réservée au Staff.', 'erreur');
   const ship = shipId ? facState.data.ships.find(s => s.id === shipId) : null;
   const classes = facState.meta.classes;
   const base = ship || { classKey: classes[0].key, ...Object.fromEntries(Object.entries(classes[0].defaults).map(([k, v]) => [k, v])), mapWidth: classes[0].defaults.mapWidth, mapLength: classes[0].defaults.mapLength };
@@ -535,7 +636,7 @@ function facOuvrirVaisseau(shipId) {
       <label class="full"><span class="fac-label">Nom du vaisseau</span><input id="fv-name" class="fac-input" type="text" maxlength="60" value="${escapeAttr(v.name)}" placeholder="Ex. Vengeance, Faucon d'Argent…" autocomplete="off"></label>
       <label class="full"><span class="fac-label">Classe</span><select id="fv-class" class="fac-select" onchange="facAppliquerClasse()">${classes.map(c => `<option value="${escapeAttr(c.key)}" ${c.key === v.classKey ? 'selected' : ''}>${escapeHtml(c.label)} (${escapeHtml(c.size)}) — ${escapeHtml(c.requirement)}</option>`).join('')}</select></label>
       <div class="fac-class-preview full" id="fv-class-preview"></div>
-      <label class="full"><span class="fac-label">Illustration de cette catégorie</span><input id="fv-class-image" class="fac-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onchange="facUploaderImageClasse(this)"><span class="fac-hint">PNG, JPEG, WEBP ou GIF · 4 Mo maximum. L’image sera enregistrée dans web/ship.</span></label>
+      ${state.isStaff ? '<label class="full"><span class="fac-label">Illustration de cette catégorie</span><input id="fv-class-image" class="fac-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onchange="facUploaderImageClasse(this)"><span class="fac-hint">PNG, JPEG, WEBP ou GIF · 4 Mo maximum. L’image sera enregistrée dans web/ship.</span></label>' : ''}
       ${field('fv-hp', 'PV max', v.hpMax, 'min="1"')}${field('fv-shield', 'Bouclier max', v.shieldMax)}
       ${field('fv-crew', 'Équipage max', v.crewMax)}${field('fv-range', 'Portée (cases)', v.range, 'min="1"')}
       ${field('fv-barrage', 'Dégâts tir de barrage', v.barrage)}${field('fv-focus', 'Dégâts tir ciblé', v.focus)}

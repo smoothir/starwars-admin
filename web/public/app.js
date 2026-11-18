@@ -4,6 +4,8 @@ const state = {
   selectedCatalogIds: new Set(),
   selectedProfileIds: new Set(),
   isFounder: false,
+  isStaff: false,
+  factionKeys: [],
   ticketManagerRows: [],
   ticketManagerStages: [],
   catalogue: [],
@@ -103,13 +105,23 @@ async function verifierSessionExistante() {
     if (me.authenticated) {
       afficherUtilisateurConnecte(me);
       afficherApplication();
-      demarrerApplication().then(() => chargerDonnees('dashboard'));
+      if (state.isStaff) {
+        demarrerApplication().then(() => chargerDonnees('dashboard'));
+      } else {
+        setStatutConnexion(true);
+        chargerDonnees('factions');
+      }
     }
   } catch { /* pas connecté : l'écran de connexion reste affiché */ }
 }
 
 function afficherUtilisateurConnecte(me) {
   state.isFounder = me?.isFounder === true;
+  state.isStaff = me?.isStaff === true;
+  state.factionKeys = Array.isArray(me?.factionKeys) ? me.factionKeys : [];
+  document.querySelectorAll('.nav-btn').forEach(button => {
+    button.hidden = !state.isStaff && button.dataset.collection !== 'factions';
+  });
   const badge = document.getElementById('topbar-user');
   if (!me.username) { badge.hidden = true; return; }
   document.getElementById('user-nom').textContent = me.username;
@@ -140,6 +152,7 @@ function apiFetch(url, options = {}) {
 }
 
 function demarrerApplication() {
+  if (!state.isStaff) return Promise.resolve(setStatutConnexion(true));
   return Promise.allSettled([
     apiFetch('/api/profils').then(r => r.json()).then(d => { state.cache.profils = d; majCompteur('profils', d.length); majCompteur('inventaire', d.length); }),
     apiFetch('/api/statuts').then(r => r.json()).then(d => { state.statuts = d; }),
@@ -259,6 +272,7 @@ async function chargerDashboardPage() {
 // Chargement d'une section : Profils RP, Inventaire, Catalogue ou Admin
 // -----------------------------------------------------------------------
 async function chargerDonnees(collection) {
+  if (!state.isStaff && collection !== 'factions') collection = 'factions';
   state.collectionActuelle = collection;
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.collection === collection));
 

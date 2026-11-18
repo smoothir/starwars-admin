@@ -5,18 +5,21 @@ const fs = require('fs/promises');
 const path = require('path');
 const store = require('../Data/factionStore.js');
 const possessionStore = require('../Data/possessionStore.js');
-const { RANKS, SHIP_CLASSES } = require('../Data/shipClasses.js');
+const { SHIP_CLASSES } = require('../Data/shipClasses.js');
+const config = require('../Data/config.js');
 const { connect } = require('../Data/mongo.js');
 
 const DISCORD_API = 'https://discord.com/api/v10';
 const ROLES_TTL_MS = 5 * 60 * 1000;
 const CLASS_META_TTL_MS = 5 * 60 * 1000;
+const PLAYERS_TTL_MS = 30 * 1000;
 let rolesCache = { at: 0, list: null };
 let rolesPromise = null;
 let classMetaCache = { at: 0, value: null };
 let classMetaPromise = null;
+const playersCache = new Map();
 
-function botToken() { return process.env.DISCORD_BOT_TOKEN || ''; }
+function botToken() { return process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_TOKEN || ''; }
 function discordReady() { return Boolean(botToken() && process.env.GUILD_ID); }
 
 async function discordGet(path) {
@@ -43,7 +46,24 @@ async function fetchGuildRoles(force = false) {
   finally { rolesPromise = null; }
 }
 
-/** Les membres d'une faction sont les PROFILS dont categoryId correspond au rôle de faction. */
+function isStaff(req) {
+  const roles = new Set((req.session?.roles || []).map(String));
+  const privileged = [config.STAFF_ROLE_ID, ...(config.ADMIN_ROLE_IDS || [])].filter(Boolean).map(String);
+  return req.session?.user?.id === String(config.SUPER_ADMIN_ID) || privileged.some(id => roles.has(id));
+}
+
+function hasFactionAccess(req) {
+  // Un rôle de faction (Empire, Nouvelle République, etc.) ne donne aucun accès au site.
+  return isStaff(req);
+}
+
+function requireStaff(req, res) {
+  if (isStaff(req)) return true;
+  res.status(403).json({ error: 'Cette action est réservée au Staff.' });
+  return false;
+}
+
+/** Membres Discord réels de la faction, puis rattachement éventuel de leurs profils RP. */
 async function getFactionProfiles(factionKey) {
   const def = store.getFactionDef(factionKey);
   if (!def) return { profiles: [], players: [] };
@@ -52,18 +72,86 @@ async function getFactionProfiles(factionKey) {
     { categoryId: String(def.categoryRoleId), _id: { $not: /^__/ } },
     { projection: { _id: 1, userId: 1, nomPrenom: 1, surnom: 1, roleId: 1, roleName: 1 } },
   ).sort({ nomPrenom: 1, _id: 1 }).toArray();
-  const rankById = new Map((def.grades || []).map((grade, index) => [String(grade.id), { name: grade.name, index }]));
-  const playersById = new Map();
+  const profilesByUserId = new Map();
   for (const profile of profiles) {
     const userId = String(profile.userId || '');
     if (!userId) continue;
-    const rank = rankById.get(String(profile.roleId || ''));
-    const player = playersById.get(userId) || { id: userId, name: `<@${userId}>`, rankName: null, rankIndex: -1, profiles: [] };
-    player.profiles.push({ id: String(profile._id), name: String(profile.nomPrenom || profile._id), nickname: String(profile.surnom || ''), roleName: String(profile.roleName || rank?.name || '') });
-    if (rank && rank.index > player.rankIndex) { player.rankIndex = rank.index; player.rankName = rank.name; }
-    playersById.set(userId, player);
+    if (!profilesByUserId.has(userId)) profilesByUserId.set(userId, []);
+    profilesByUserId.get(userId).push(profile);
   }
-  return { profiles: profiles.map(profile => ({ id: String(profile._id), name: String(profile.nomPrenom || profile._id), nickname: String(profile.surnom || ''), userId: profile.userId ? String(profile.userId) : null, roleName: String(profile.roleName || rankById.get(String(profile.roleId || ''))?.name || '—') })), players: [...playersById.values()] };
+
+  let discordMembers = null;
+  if (discordReady()) {
+    const cached = playersCache.get(def.key);
+    if (cached && Date.now() - cached.at < PLAYERS_TTL_MS) discordMembers = cached.members;
+    else {
+      const pending = [];
+      let after = null;
+      // Discord renvoie au maximum 1 000 membres par page. On continue jusqu'à
+      // la dernière page pour ne pas limiter artificiellement les factions.
+      for (let page = 0; page < 100; page += 1) {
+        const query = new URLSearchParams({ limit: '1000' });
+        if (after) query.set('after', after);
+        const batch = await discordGet(`/guilds/${process.env.GUILD_ID}/members?${query.toString()}`);
+        if (!Array.isArray(batch) || !batch.length) break;
+        for (const member of batch) {
+          if (!member?.user?.bot && Array.isArray(member?.roles) && member.roles.includes(String(def.categoryRoleId))) pending.push(member);
+        }
+        if (batch.length < 1000) break;
+        after = batch[batch.length - 1]?.user?.id || null;
+        if (!after) break;
+      }
+      discordMembers = pending;
+      playersCache.set(def.key, { at: Date.now(), members: discordMembers });
+    }
+  }
+
+  const grades = Array.isArray(def.grades) ? def.grades : [];
+  const playersById = new Map();
+  if (Array.isArray(discordMembers)) {
+    for (const member of discordMembers) {
+      const user = member.user;
+      const userId = String(user.id);
+      const roleIds = new Set((member.roles || []).map(String));
+      // Les grades sont ordonnés du plus élevé au plus bas : le premier rôle
+      // correspondant est donc le grade le plus élevé du membre.
+      const gradeIndex = grades.findIndex(grade => roleIds.has(String(grade.id)));
+      const grade = gradeIndex >= 0 ? grades[gradeIndex] : null;
+      const linkedProfiles = profilesByUserId.get(userId) || [];
+      playersById.set(userId, {
+        id: userId,
+        name: String(user.global_name || user.username || `<@${userId}>`),
+        rankName: grade?.name || null,
+        rankIndex: grade ? grades.length - gradeIndex : -1,
+        gradeRoleIds: grades.filter(item => roleIds.has(String(item.id))).map(item => String(item.id)),
+        profiles: linkedProfiles.map(profile => ({ id: String(profile._id), name: String(profile.nomPrenom || profile._id), nickname: String(profile.surnom || ''), roleName: String(profile.roleName || grade?.name || '') })),
+      });
+    }
+  } else {
+    // Mode de secours : si Discord ne répond pas, conserver les joueurs déjà
+    // associés à un profil. Le contrôle d'attribution revalidera le membre côté API.
+    for (const [userId, linkedProfiles] of profilesByUserId) {
+      const roleIds = new Set(linkedProfiles.map(profile => String(profile.roleId || '')).filter(Boolean));
+      const gradeIndex = grades.findIndex(grade => roleIds.has(String(grade.id)));
+      const grade = gradeIndex >= 0 ? grades[gradeIndex] : null;
+      playersById.set(userId, {
+        id: userId, name: `<@${userId}>`, rankName: grade?.name || null,
+        rankIndex: grade ? grades.length - gradeIndex : -1,
+        gradeRoleIds: grade ? [String(grade.id)] : [],
+        profiles: linkedProfiles.map(profile => ({ id: String(profile._id), name: String(profile.nomPrenom || profile._id), nickname: String(profile.surnom || ''), roleName: String(profile.roleName || grade?.name || '') })),
+      });
+    }
+  }
+
+  const rankById = new Map(grades.map(grade => [String(grade.id), grade.name]));
+  return {
+    profiles: profiles.map(profile => ({
+      id: String(profile._id), name: String(profile.nomPrenom || profile._id),
+      nickname: String(profile.surnom || ''), userId: profile.userId ? String(profile.userId) : null,
+      roleName: String(profile.roleName || rankById.get(String(profile.roleId || '')) || '—'),
+    })),
+    players: [...playersById.values()].sort((a, b) => b.rankIndex - a.rankIndex || a.name.localeCompare(b.name, 'fr')),
+  };
 }
 
 function register(app, { logFromReq, recordEntityHistory }) {
@@ -78,6 +166,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   const needFaction = (req, res) => {
     const def = store.getFactionDef(req.params.key);
     if (!def) { res.status(404).json({ error: 'Faction inconnue.' }); return null; }
+    if (!hasFactionAccess(req)) { res.status(403).json({ error: 'Cette section est réservée au Staff.' }); return null; }
     return def;
   };
 
@@ -94,11 +183,11 @@ function register(app, { logFromReq, recordEntityHistory }) {
           const images = await store.listShipClassImages();
           return {
             factions: store.listFactionDefs(),
-            ranks: RANKS.map(r => ({ key: r.key, name: r.name })),
+            ranks: [],
             classes: Object.entries(SHIP_CLASSES).map(([key, c]) => ({
               key, id: c.id, image: images[key] ? `/ship/${encodeURIComponent(images[key])}` : null,
               label: c.label, size: c.size, defaults: c.defaults,
-              requirement: c.leaderOnly ? 'Chef de faction' : RANKS[c.minRank].name,
+              requirement: 'Grades autorisés définis sur le vaisseau',
             })),
             creditsItemId: store.CREDITS_ITEM_ID,
           };
@@ -111,17 +200,25 @@ function register(app, { logFromReq, recordEntityHistory }) {
         classMetaPromise = null;
       }
     }
-    res.json({ ...meta, discordReady: discordReady() });
+    const visibleMeta = isStaff(req) ? meta : { ...meta, factions: meta.factions.filter(def => hasFactionAccess(req)) };
+    res.json({ ...visibleMeta, discordReady: discordReady() });
   }));
 
 
   app.get('/api/factions/discord-roles', wrap(async (req, res) => {
     if (!discordReady()) return res.json({ ready: false, roles: [] });
     res.set('Cache-Control', 'private, max-age=300');
-    res.json({ ready: true, roles: await fetchGuildRoles() });
+    let roles = await fetchGuildRoles();
+    if (!isStaff(req)) {
+      await store.loadFactionDefs();
+      const allowed = new Set(store.listFactionDefs().filter(def => hasFactionAccess(req)).flatMap(def => [def.categoryRoleId, ...(def.grades || []).map(grade => grade.id)]).map(String));
+      roles = roles.filter(role => allowed.has(String(role.id)));
+    }
+    res.json({ ready: true, roles });
   }));
 
   app.post('/api/factions/definitions', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     await store.loadFactionDefs();
     const definition = await store.createFactionDef(req.body || {});
     classMetaCache = { at: 0, value: null };
@@ -130,6 +227,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   }));
 
   app.put('/api/factions/definitions/:key', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     await store.loadFactionDefs();
     const before = store.getFactionDef(req.params.key);
     if (!before) return res.status(404).json({ error: 'Faction inconnue.' });
@@ -140,6 +238,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   }));
 
   app.delete('/api/factions/definitions/:key', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     await store.loadFactionDefs();
     const definition = store.getFactionDef(req.params.key);
     if (!definition) return res.status(404).json({ error: 'Faction inconnue.' });
@@ -153,18 +252,20 @@ function register(app, { logFromReq, recordEntityHistory }) {
     await store.loadFactionDefs();
     res.set('Cache-Control', 'no-store');
     const out = await store.listFactionSummaries();
-    res.json(out);
+    res.json(isStaff(req) ? out : out.filter(def => hasFactionAccess(req)).map(def => ({ key: def.key, label: def.label, shipCount: def.shipCount })));
   }));
 
   app.get('/api/factions/:key', wrap(async (req, res) => {
     const def = needFaction(req, res); if (!def) return;
     res.set('Cache-Control', 'no-store');
-    const [state, ships, possessions] = await Promise.all([store.getFactionState(def.key), store.listShips(def.key), possessionStore.listPossessions('faction', def.key)]);
-    res.json({ def, state, ships, possessions });
+    const [factionState, ships, possessions] = await Promise.all([store.getFactionState(def.key), store.listShips(def.key), isStaff(req) ? possessionStore.listPossessions('faction', def.key) : Promise.resolve([])]);
+    const safeState = isStaff(req) ? factionState : { troops: 0, credits: 0, reputation: 50, leaderUserId: null, items: {} };
+    res.json({ def, state: safeState, ships, possessions });
   }));
 
 
   app.post('/api/factions/:key/possessions', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     const def = needFaction(req, res); if (!def) return;
     const doc = await possessionStore.createPossession('faction', def.key, req.body || {});
     if (logFromReq) logFromReq(req, 'possession_faction_creee', `${def.label} : possession « ${doc.name} » créée.`);
@@ -172,6 +273,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   }));
 
   app.patch('/api/factions/:key/possessions/:id', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     const def = needFaction(req, res); if (!def) return;
     const before = await possessionStore.getPossession(req.params.id);
     if (!before || before.ownerType !== 'faction' || before.ownerId !== def.key) throw new Error('Possession de faction introuvable.');
@@ -180,6 +282,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   }));
 
   app.delete('/api/factions/:key/possessions/:id', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     const def = needFaction(req, res); if (!def) return;
     const before = await possessionStore.getPossession(req.params.id);
     if (!before || before.ownerType !== 'faction' || before.ownerId !== def.key) throw new Error('Possession de faction introuvable.');
@@ -197,6 +300,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   }));
 
   app.put('/api/factions/:key', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     const def = needFaction(req, res); if (!def) return;
     const body = req.body || {};
     if (body.troops !== undefined) {
@@ -220,6 +324,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   }));
 
   app.put('/api/factions/:key/inventaire/:itemId', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     const def = needFaction(req, res); if (!def) return;
     const state = await store.setFactionItem(def.key, req.params.itemId, req.body?.quantity);
     logFromReq(req, 'faction_inventaire', `${def.label} : ${req.params.itemId} = ${state.items[req.params.itemId] || 0}`);
@@ -227,6 +332,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   }));
 
   app.post('/api/factions/classes/:classKey/image', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     const classKey = String(req.params.classKey || '');
     const cls = SHIP_CLASSES[classKey];
     if (!cls) throw new Error('Classe de vaisseau inconnue.');
@@ -277,6 +383,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   };
 
   app.put('/api/factions/:key/vaisseaux/:shipId', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     const ctx = await ownShip(req, res); if (!ctx) return;
     const beforeDocument = await store.getShipRecord(ctx.ship.id);
     const updated = await store.updateShip(ctx.ship.id, req.body);
@@ -287,6 +394,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   }));
 
   app.delete('/api/factions/:key/vaisseaux/:shipId', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     const ctx = await ownShip(req, res); if (!ctx) return;
     const beforeDocument = await store.getShipRecord(ctx.ship.id);
     await store.deleteShip(ctx.ship.id);
@@ -296,6 +404,7 @@ function register(app, { logFromReq, recordEntityHistory }) {
   }));
 
   app.put('/api/factions/:key/vaisseaux/:shipId/reparer', wrap(async (req, res) => {
+    if (!requireStaff(req, res)) return;
     const ctx = await ownShip(req, res); if (!ctx) return;
     const beforeDocument = await store.getShipRecord(ctx.ship.id);
     const repaired = await store.repairShip(ctx.ship.id);
@@ -305,15 +414,39 @@ function register(app, { logFromReq, recordEntityHistory }) {
     res.json(repaired);
   }));
 
+  app.put('/api/factions/:key/vaisseaux/:shipId/grades', wrap(async (req, res) => {
+    const ctx = await ownShip(req, res); if (!ctx) return;
+    if (!Array.isArray(req.body?.roleIds)) throw new Error('Sélection de grades invalide.');
+    const beforeDocument = await store.getShipRecord(ctx.ship.id);
+    let clearAssignedPilot = false;
+    if (beforeDocument?.assignedUserId) {
+      // Vérifie le rôle de faction et les nouveaux grades avant d'enregistrer
+      // les permissions, afin de ne jamais conserver un pilote devenu interdit.
+      const assigned = await discordGet(`/guilds/${process.env.GUILD_ID}/members/${encodeURIComponent(String(beforeDocument.assignedUserId))}`);
+      const assignedRoles = new Set((assigned.roles || []).map(String));
+      const stillInFaction = assignedRoles.has(String(ctx.def.categoryRoleId));
+      const stillAllowed = req.body.roleIds.length === 0 || req.body.roleIds.some(roleId => assignedRoles.has(String(roleId)));
+      clearAssignedPilot = !stillInFaction || !stillAllowed;
+    }
+    const updated = await store.setShipAllowedGrades(ctx.ship.id, req.body.roleIds, { clearAssignedPilot });
+    const afterDocument = await store.getShipRecord(ctx.ship.id);
+    if (recordEntityHistory) await recordEntityHistory(req, { entityType: 'vaisseau', collectionName: 'faction_ships', beforeDocument, afterDocument, action: 'permissions de grade modifiées', entityName: updated.name });
+    logFromReq(req, 'faction_vaisseau_grades', `${ctx.def.label} : permissions de grade de ${updated.name} modifiées.`);
+    res.json(updated);
+  }));
+
   app.put('/api/factions/:key/vaisseaux/:shipId/pilote', wrap(async (req, res) => {
     const ctx = await ownShip(req, res); if (!ctx) return;
     const userId = req.body?.userId ? String(req.body.userId) : null;
     let member = {};
     if (userId) {
-      const { players } = await getFactionProfiles(ctx.def.key);
-      const target = players.find(player => player.id === userId);
-      const state = await store.getFactionState(ctx.def.key);
-      member = { inFaction: Boolean(target), rankIndex: target ? target.rankIndex : -1, isLeader: state.leaderUserId === userId };
+      if (!discordReady()) throw new Error('La connexion au bot Discord est indisponible : impossible de vérifier ce membre.');
+      const target = await discordGet(`/guilds/${process.env.GUILD_ID}/members/${encodeURIComponent(userId)}`);
+      const roleIds = new Set((target.roles || []).map(String));
+      member = {
+        inFaction: roleIds.has(String(ctx.def.categoryRoleId)),
+        gradeRoleIds: (ctx.def.grades || []).filter(grade => roleIds.has(String(grade.id))).map(grade => String(grade.id)),
+      };
     }
     const beforeDocument = await store.getShipRecord(ctx.ship.id);
     const updated = await store.assignShip(ctx.ship.id, userId, member);
