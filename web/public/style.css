@@ -2010,38 +2010,41 @@ html { font-size: 14px; }
   .inventory-bulk-row .item-corps { flex: 1 1 55%; }
 }
 
-/* Bonus / malus configurables et gestion des primes */
+/* Bonus / malus : cartes compactes et faciles à parcourir */
 .trait-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 9px;
+  align-items: start;
 }
 .trait-card {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px;
+  gap: 7px;
+  padding: 11px;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
+  border-radius: 11px;
   background: var(--bg-card);
 }
 .trait-card.masquee { display: none; }
 .trait-card.trait-inactif { opacity: .62; }
-.trait-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.trait-point { display: inline-flex; align-items: center; justify-content: center; min-width: 72px; padding: 5px 10px; border: 1px solid var(--border-soft); border-radius: 999px; font-weight: 800; font-size: .76rem; }
+.trait-card-head { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+.trait-point { display: inline-flex; align-items: center; justify-content: center; min-width: 0; padding: 4px 8px; border: 1px solid var(--border-soft); border-radius: 999px; font-weight: 800; font-size: .72rem; white-space: nowrap; }
 .trait-point-malus { color: #ffb6b6; border-color: rgba(255,90,90,.42); background: rgba(255,60,60,.08); }
 .trait-point-bonus { color: #a8f0c1; border-color: rgba(70,195,125,.42); background: rgba(70,195,125,.08); }
-.trait-card h3 { font-size: .94rem; overflow-wrap: anywhere; }
-.trait-card > p { margin: 0; color: var(--text-secondary); font-size: .76rem; line-height: 1.5; }
-.trait-effets { display: flex; flex-direction: column; gap: 5px; padding: 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: rgba(255,255,255,.025); }
-.trait-effets strong { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; }
-.trait-effets span { color: var(--text-secondary); font-size: .72rem; line-height: 1.45; overflow-wrap: anywhere; }
-.trait-actions { display: flex; gap: 8px; margin-top: auto; }
-.trait-actions button { min-height: 34px; flex: 1; }
+.trait-card h3 { margin: 0; font-size: .84rem; line-height: 1.3; overflow-wrap: anywhere; }
+.trait-card > p { margin: 0; color: var(--text-secondary); font-size: .72rem; line-height: 1.4; overflow-wrap: anywhere; }
+.trait-actions { display: flex; gap: 6px; margin-top: 3px; }
+.trait-actions button { min-height: 29px; flex: 1; padding: 5px 8px; font-size: .7rem; }
 .trait-json-input { min-height: 260px !important; font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important; font-size: .76rem !important; white-space: pre; }
 .prime-row.masquee { display: none; }
-@media (max-width: 900px) { .trait-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .trait-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap: 8px; }
+  .trait-filtres { width: 100%; }
+  .trait-filtre-bouton { flex: 1; }
+  .trait-action-card { padding: 11px; }
+}
 
 /* Filtres et éditeur d'actions des bonus/malus */
 .trait-filtres { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 18px; }

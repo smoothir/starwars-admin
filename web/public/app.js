@@ -1068,24 +1068,6 @@ const TRAIT_ACTION_TYPES = [
   ['relationChoice', 'Choix d’une relation de départ'],
 ];
 
-function resumeEffetsTrait(effects) {
-  const e = effects || {};
-  const parts = [];
-  if (Number(e.credits?.amount)) parts.push(`Argent : ${Number(e.credits.amount) > 0 ? '+' : ''}${Number(e.credits.amount).toLocaleString('fr-FR')} crédits`);
-  if (e.bounty) parts.push(`Prime : ${Number(e.bounty.amount) || 0} crédits`);
-  for (const item of e.debts || []) parts.push(`Dette : ${Number(item.amount) || 0} crédits (${item.creditor || 'créancier'})`);
-  for (const s of e.stats || []) parts.push(`${Number(s.amount) > 0 ? '+' : ''}${s.amount} ${s.stat}`);
-  for (const r of e.relations || []) parts.push(`Relation ${r.factionKey}: ${r.mode === 'set' ? '→' : Number(r.value) > 0 ? '+' : ''}${r.value}`);
-  for (const i of e.items || []) {
-    if (String(i.itemId || '').toLowerCase() === TRAIT_CURRENCY_ID) parts.push(`Argent : +${Number(i.quantity) || 1} crédits`);
-    else parts.push(`Objet : ${i.fallbackName || i.itemId} ×${i.quantity || 1}`);
-  }
-  for (const i of e.randomItems || []) parts.push(`Objet aléatoire : ${i.rarity || 'Peu commun'} ×${i.quantity || 1}`);
-  for (const a of e.addictions || []) parts.push(`Addiction : ${a.stat || 'Résistance'} ${a.amount || -10}, tous les ${a.intervalDays || 3} jours`);
-  if (e.relationChoice) parts.push('Choix de relation');
-  return parts.join(' · ') || 'Aucun effet configuré.';
-}
-
 function renderTraitsPage() {
   const contenuDiv = document.getElementById('contenu');
   const filtre = state.filtreTraits || 'tous';
@@ -1117,11 +1099,15 @@ function renderTraitsPage() {
         const type = points > 0 ? 'malus' : points < 0 ? 'bonus' : 'neutre';
         return `
         <article class="trait-card ${trait.enabled === false ? 'trait-inactif' : ''}" data-trait-type="${type}" data-nom="${escapeAttr(`${traitTiretSimple(trait.name)} ${trait._id} ${traitTiretSimple(trait.description || '')}`.toLowerCase())}">
-          <div class="trait-card-head"><span class="trait-point ${points > 0 ? 'trait-point-malus' : 'trait-point-bonus'}">${escapeHtml(pointsTraitTexte(points))}</span><span class="badge ${trait.enabled === false ? 'badge-sang' : 'badge-vert'}">${trait.enabled === false ? 'Désactivé' : 'Actif'}</span></div>
+          <div class="trait-card-head">
+            <span class="trait-point ${points > 0 ? 'trait-point-malus' : 'trait-point-bonus'}">${escapeHtml(pointsTraitTexte(points))}</span>
+          </div>
           <h3>${escapeHtml(traitTiretSimple(trait.name))}</h3>
           <p>${escapeHtml(traitTiretSimple(trait.description || 'Aucune description.'))}</p>
-          <div class="trait-effets"><strong>Actions configurées</strong><span>${escapeHtml(traitTiretSimple(resumeEffetsTrait(trait.effects)))}</span></div>
-          <div class="trait-actions"><button class="btn-secondaire" onclick="ouvrirEditeurTrait('${jsAttr(trait._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerTrait('${jsAttr(trait._id)}')">Supprimer</button></div>
+          <div class="trait-actions">
+            <button class="btn-secondaire" onclick="ouvrirEditeurTrait('${jsAttr(trait._id)}')">Modifier</button>
+            <button class="btn-secondaire btn-danger" onclick="supprimerTrait('${jsAttr(trait._id)}')">Supprimer</button>
+          </div>
         </article>`;
       }).join('') || '<div class="etat-vide"><p>Aucun trait configuré.</p></div>'}
     </div>
