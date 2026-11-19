@@ -25,6 +25,7 @@ const state = {
   traitActuel: null,
   traitActionsDraft: [],
   filtreTraits: 'tous',
+  filtreRecompenseTrait: 'tous',
   statuts: [],
   listes: { relationFactions: [], relationLevels: [], defaultStats: [], statMax: 10 },
   collectionActuelle: null,
@@ -1005,7 +1006,10 @@ function filtrerListe() {
     document.querySelectorAll('.trait-card').forEach(card => {
       const queryOk = !q || (card.dataset.nom || '').includes(q);
       const typeOk = typeFilter === 'tous' || card.dataset.traitType === typeFilter;
-      const correspond = queryOk && typeOk;
+      const rewardFilter = state.filtreRecompenseTrait || 'tous';
+      const rewardTypes = (card.dataset.traitReward || '').split(/\s+/).filter(Boolean);
+      const rewardOk = rewardFilter === 'tous' || rewardTypes.includes(rewardFilter);
+      const correspond = queryOk && typeOk && rewardOk;
       card.classList.toggle('masquee', !correspond);
       if (correspond) visibles += 1;
     });
@@ -1052,6 +1056,27 @@ function pointsTraitTexte(points) {
   return `${n > 0 ? '+' : ''}${n} pts`;
 }
 
+// Catégories utilisées par les filtres : un même trait peut apparaître
+// dans plusieurs catégories lorsqu'il distribue plusieurs types d'effets.
+function categoriesRecompenseTrait(effects) {
+  const e = effects || {};
+  const categories = new Set();
+  const relations = Array.isArray(e.relations) ? e.relations : [];
+  const debts = Array.isArray(e.debts) ? e.debts : [];
+  const items = Array.isArray(e.items) ? e.items : [];
+  const randomItems = Array.isArray(e.randomItems) ? e.randomItems : [];
+  const stats = Array.isArray(e.stats) ? e.stats : [];
+  const addictions = Array.isArray(e.addictions) ? e.addictions : [];
+
+  if (relations.length || e.relationChoice || debts.length) categories.add('relation');
+  if (items.some(row => String(row?.itemId || '').toLowerCase() !== TRAIT_CURRENCY_ID) || randomItems.length) categories.add('objets');
+  if (stats.length || addictions.length) categories.add('stats');
+  if ((Number(e.credits?.amount) || 0) !== 0 || debts.length || (Number(e.bounty?.amount) || 0) !== 0
+      || items.some(row => String(row?.itemId || '').toLowerCase() === TRAIT_CURRENCY_ID)) categories.add('credits');
+
+  return [...categories];
+}
+
 const TRAIT_CURRENCY_ID = 'credits_de_la_nouvelle_republique';
 const TRAIT_ACTION_TYPES = [
   ['moneyAdd', 'Ajouter de l’argent'],
@@ -1093,12 +1118,19 @@ function renderTraitsPage() {
       <button type="button" class="trait-filtre-bouton ${filtre === 'bonus' ? 'actif' : ''}" data-filtre-trait="bonus" onclick="choisirFiltreTraits('bonus')">Bonus</button>
       <button type="button" class="trait-filtre-bouton ${filtre === 'malus' ? 'actif' : ''}" data-filtre-trait="malus" onclick="choisirFiltreTraits('malus')">Malus</button>
     </div>
+    <div class="trait-filtres trait-filtres-recompense" role="group" aria-label="Filtrer par récompense donnée">
+      <span class="trait-filtres-label">Récompense :</span>
+      ${[['tous', 'Tout'], ['relation', 'Relation'], ['objets', 'Objets'], ['stats', 'Stats'], ['credits', 'Crédits']].map(([value, label]) => `
+        <button type="button" class="trait-filtre-bouton ${state.filtreRecompenseTrait === value ? 'actif' : ''}" data-filtre-recompense-trait="${value}" onclick="choisirFiltreRecompenseTrait('${value}')">${label}</button>
+      `).join('')}
+    </div>
     <div class="trait-grid">
       ${traitsTries.map(trait => {
         const points = Number(trait.points) || 0;
         const type = points > 0 ? 'malus' : points < 0 ? 'bonus' : 'neutre';
+        const categoriesRecompense = categoriesRecompenseTrait(trait.effects || {});
         return `
-        <article class="trait-card ${trait.enabled === false ? 'trait-inactif' : ''}" data-trait-type="${type}" data-nom="${escapeAttr(`${traitTiretSimple(trait.name)} ${trait._id} ${traitTiretSimple(trait.description || '')}`.toLowerCase())}">
+        <article class="trait-card ${trait.enabled === false ? 'trait-inactif' : ''}" data-trait-type="${type}" data-trait-reward="${categoriesRecompense.join(' ')}" data-nom="${escapeAttr(`${traitTiretSimple(trait.name)} ${trait._id} ${traitTiretSimple(trait.description || '')}`.toLowerCase())}">
           <div class="trait-card-head">
             <span class="trait-point ${points > 0 ? 'trait-point-malus' : 'trait-point-bonus'}">${escapeHtml(pointsTraitTexte(points))}</span>
           </div>
@@ -1119,6 +1151,15 @@ function renderTraitsPage() {
 function choisirFiltreTraits(filtre) {
   state.filtreTraits = ['bonus', 'malus'].includes(filtre) ? filtre : 'tous';
   document.querySelectorAll('[data-filtre-trait]').forEach(btn => btn.classList.toggle('actif', btn.dataset.filtreTrait === state.filtreTraits));
+  filtrerListe();
+}
+
+function choisirFiltreRecompenseTrait(filtre) {
+  const filtresAutorises = ['relation', 'objets', 'stats', 'credits'];
+  state.filtreRecompenseTrait = filtresAutorises.includes(filtre) ? filtre : 'tous';
+  document.querySelectorAll('[data-filtre-recompense-trait]').forEach(btn => {
+    btn.classList.toggle('actif', btn.dataset.filtreRecompenseTrait === state.filtreRecompenseTrait);
+  });
   filtrerListe();
 }
 

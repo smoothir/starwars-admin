@@ -2043,6 +2043,7 @@ html { font-size: 14px; }
   .trait-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap: 8px; }
   .trait-filtres { width: 100%; }
   .trait-filtre-bouton { flex: 1; }
+  .trait-filtres-label { flex-basis: 100%; }
   .trait-action-card { padding: 11px; }
 }
 
@@ -2051,6 +2052,8 @@ html { font-size: 14px; }
 .trait-filtre-bouton { border: 1px solid var(--border-subtle); border-radius: 999px; padding: 8px 15px; color: var(--text-secondary); background: var(--bg-card); font: inherit; font-size: .78rem; cursor: pointer; transition: background .15s ease, color .15s ease, border-color .15s ease; }
 .trait-filtre-bouton:hover { color: var(--text-primary); border-color: var(--border-soft); }
 .trait-filtre-bouton.actif { color: var(--text-primary); background: rgba(255,255,255,.1); border-color: var(--border-soft); }
+.trait-filtres-recompense { align-items: center; margin-top: -7px; }
+.trait-filtres-label { color: var(--text-secondary); font-size: .76rem; font-weight: 700; margin-right: 2px; }
 .trait-actions-titre { margin-top: 22px; }
 .trait-actions-liste { display: grid; gap: 12px; margin-top: 12px; }
 .trait-action-card { padding: 14px; border: 1px solid var(--border-soft); border-radius: var(--radius); background: rgba(255,255,255,.025); }
@@ -2065,6 +2068,7 @@ html { font-size: 14px; }
 @media (max-width: 760px) {
   .trait-filtres { width: 100%; }
   .trait-filtre-bouton { flex: 1; }
+  .trait-filtres-label { flex-basis: 100%; }
   .trait-action-card { padding: 11px; }
 }
 
