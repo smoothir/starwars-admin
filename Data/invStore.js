@@ -5,10 +5,11 @@
 const { getInvCollection, getItemCatalogCollection } = require('./mongo.js');
 const { applyPermanentStatChange, addTemporaryStatEffect, normalizeStatName } = require('./profileStore.js');
 
-const EQUIPMENT_SLOTS = ['casque', 'plastron', 'mainGauche', 'mainDroite', 'jambes', 'pieds'];
+const EQUIPMENT_SLOTS = ['casque', 'plastron', 'avantBras', 'mainGauche', 'mainDroite', 'ceinture', 'jambes', 'pieds'];
 const EQUIPMENT_SLOT_LABELS = {
-  casque: 'Casque', plastron: 'Plastron', mainGauche: 'Main gauche',
-  mainDroite: 'Main droite', jambes: 'Jambes', pieds: 'Pieds',
+  casque: 'Tête', plastron: 'Plastron', avantBras: 'Avant-bras',
+  mainGauche: 'Main gauche', mainDroite: 'Main droite', ceinture: 'Ceinture',
+  jambes: 'Jambières', pieds: 'Bottes',
 };
 const ITEM_RARITIES = ['Épique', 'Rare', 'Peu commun', 'Commun'];
 const SEED_MARKER_ID = '__seeded__';
