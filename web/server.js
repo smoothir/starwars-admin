@@ -440,8 +440,8 @@ function historyDiff(before, after) {
 
 function snapshotCatalogPayload(document) {
   if (!document) return null;
-  const { _id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction } = document;
-  return { id: String(_id), name, emoji, category, rarity, description, image: image ?? null, slot: slot ?? null, usable: Boolean(usable), statBonus: statBonus || {}, useAction: useAction ?? null };
+  const { _id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction, weight, bagCapacity } = document;
+  return { id: String(_id), name, emoji, category, rarity, description, image: image ?? null, slot: slot ?? null, usable: Boolean(usable), statBonus: statBonus || {}, useAction: useAction ?? null, weight: Number(weight) || 0, bagCapacity: Number(bagCapacity) || 0 };
 }
 
 async function usageOfCatalogItems(itemIds) {
@@ -1338,8 +1338,8 @@ app.get('/api/inventaire/catalogue', async (req, res) => {
 
 app.post('/api/inventaire/catalogue', async (req, res) => {
   try {
-    const { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction } = req.body || {};
-    const created = await addCatalogItem({ id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction });
+    const { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction, weight, bagCapacity } = req.body || {};
+    const created = await addCatalogItem({ id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction, weight, bagCapacity });
     const after = await (await getItemCatalogCollection()).findOne({ _id: created.id });
     await recordEntityHistory(req, { entityType: 'catalogue', collectionName: 'item_catalog', beforeDocument: null, afterDocument: after, action: 'cree', entityName: created.name });
     logFromReq(req, 'objet_cree', `A ajouté l'objet "${name}" au catalogue.`);
@@ -1415,11 +1415,11 @@ app.delete('/api/inventaire/catalogue/bulk', async (req, res) => {
 
 app.patch('/api/inventaire/catalogue/:itemId', async (req, res) => {
   try {
-    const { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction } = req.body || {};
+    const { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction, weight, bagCapacity } = req.body || {};
     const rawCol = await getItemCatalogCollection();
     const before = await rawCol.findOne({ _id: req.params.itemId });
     if (!before) return res.status(404).json({ error: 'Objet introuvable.' });
-    const updated = await updateCatalogItem(req.params.itemId, { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction });
+    const updated = await updateCatalogItem(req.params.itemId, { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction, weight, bagCapacity });
     const after = await rawCol.findOne({ _id: updated.id });
     await recordEntityHistory(req, { entityType: 'catalogue', collectionName: 'item_catalog', beforeDocument: before, afterDocument: after, action: 'modifie', entityName: updated.name });
     const imageInfo = image === undefined ? '' : (image ? ' (image modifiée)' : ' (image retirée)');
@@ -1525,7 +1525,7 @@ app.post('/api/inventaire/:profileId/items/bulk', async (req, res) => {
     const before = await getInventory(req.params.profileId);
     for (const row of normalized) {
       const result = await addItem(req.params.profileId, row.itemId, row.quantity);
-      if (!result.ok) throw new Error(`Impossible d’ajouter ${row.itemId}.`);
+      if (!result.ok) throw new Error(result.message || `Impossible d’ajouter ${row.itemId}.`);
     }
     const after = await getInventory(req.params.profileId);
     await recordEntityHistory(req, { entityType: 'inventaire', collectionName: 'inv', beforeDocument: before, afterDocument: after, action: 'ajout_masse', entityName: `Inventaire ${req.params.profileId}` });
@@ -1549,7 +1549,7 @@ app.patch('/api/inventaire/:profileId/items/bulk', async (req, res) => {
     const before = await getInventory(req.params.profileId);
     for (const row of normalized) {
       const result = await setItemQuantity(req.params.profileId, row.itemId, row.quantity);
-      if (!result.ok) throw new Error(`Impossible de modifier ${row.itemId}.`);
+      if (!result.ok) throw new Error(result.message || `Impossible de modifier ${row.itemId}.`);
     }
     const after = await getInventory(req.params.profileId);
     await recordEntityHistory(req, { entityType: 'inventaire', collectionName: 'inv', beforeDocument: before, afterDocument: after, action: 'quantites_masse', entityName: `Inventaire ${req.params.profileId}` });
@@ -1565,7 +1565,7 @@ app.post('/api/inventaire/:profileId/items', async (req, res) => {
     const { itemId, quantity } = req.body || {};
     const before = await getInventory(req.params.profileId);
     const result = await addItem(req.params.profileId, itemId, Number(quantity) || 1);
-    if (!result.ok) return res.status(400).json({ error: `Objet inconnu (${itemId}).` });
+    if (!result.ok) return res.status(400).json({ error: result.message || `Objet inconnu (${itemId}).` });
     const after = await getInventory(req.params.profileId);
     await recordEntityHistory(req, { entityType: 'inventaire', collectionName: 'inv', beforeDocument: before, afterDocument: after, action: 'ajout', entityName: `Inventaire ${req.params.profileId}` });
     logFromReq(req, 'inventaire_ajout', `A ajouté ${Number(quantity) || 1}× "${itemId}" à l'inventaire de ${req.params.profileId}.`);
@@ -1582,7 +1582,7 @@ app.patch('/api/inventaire/:profileId/items/:itemId', async (req, res) => {
     const { quantity } = req.body || {};
     const before = await getInventory(req.params.profileId);
     const result = await setItemQuantity(req.params.profileId, req.params.itemId, Number(quantity));
-    if (!result.ok) return res.status(400).json({ error: `Objet inconnu (${req.params.itemId}).` });
+    if (!result.ok) return res.status(400).json({ error: result.message || `Objet inconnu (${req.params.itemId}).` });
     const after = await getInventory(req.params.profileId);
     await recordEntityHistory(req, { entityType: 'inventaire', collectionName: 'inv', beforeDocument: before, afterDocument: after, action: 'quantite_modifiee', entityName: `Inventaire ${req.params.profileId}` });
     logFromReq(req, 'inventaire_quantite', `A mis la quantité de "${req.params.itemId}" à ${Number(quantity)} pour ${req.params.profileId}.`);

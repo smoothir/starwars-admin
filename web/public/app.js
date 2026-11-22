@@ -25,7 +25,6 @@ const state = {
   traitActuel: null,
   traitActionsDraft: [],
   filtreTraits: 'tous',
-  filtreRecompenseTrait: 'tous',
   statuts: [],
   listes: { relationFactions: [], relationLevels: [], defaultStats: [], statMax: 10 },
   collectionActuelle: null,
@@ -892,7 +891,7 @@ function catalogueItemHTML(item) {
   return `<article class="catalogue-item item-row" data-id="${escapeAttr(itemId)}" data-nom="${escapeAttr(searchable)}" data-category="${escapeAttr(item.category || 'Divers')}" data-rarity="${escapeAttr(rarity)}" data-slot="${escapeAttr(item.slot || '')}" data-usable="${item.usable ? '1' : '0'}" data-use-action="${item.useAction ? '1' : '0'}">
     <label class="catalogue-item-select" title="Sélectionner pour modification en masse"><input type="checkbox" ${state.selectedCatalogIds.has(itemId) ? 'checked' : ''} onchange="toggleCatalogueSelection('${jsAttr(itemId)}',this.checked)"><span></span></label>
     <div class="catalogue-item-visual">${itemVisuelHTML(item)}</div>
-    <div class="item-corps"><div class="catalogue-item-title-row"><div class="item-nom">${escapeHtml(item.name)}</div><span class="rarity-badge ${classeRariete(rarity)}">✨ ${escapeHtml(rarity)}</span></div><div class="item-description">${escapeHtml(item.description || 'Aucune description.')}</div><div class="item-meta">${labelSlot ? `<span class="badge badge-defaut">🧷 ${escapeHtml(labelSlot)}</span>` : ''}${item.usable ? '<span class="badge badge-defaut">✅ Utilisable</span>' : ''}<span class="badge badge-defaut">ID : ${escapeHtml(item.id)}</span>${Object.entries(item.statBonus || {}).map(([stat, value]) => `<span class="badge badge-defaut">📊 ${value > 0 ? '+' : ''}${value} ${escapeHtml(stat)}</span>`).join('')}</div></div>
+    <div class="item-corps"><div class="catalogue-item-title-row"><div class="item-nom">${escapeHtml(item.name)}</div><span class="rarity-badge ${classeRariete(rarity)}">✨ ${escapeHtml(rarity)}</span></div><div class="item-description">${escapeHtml(item.description || 'Aucune description.')}</div><div class="item-meta">${labelSlot ? `<span class="badge badge-defaut">🧷 ${escapeHtml(labelSlot)}</span>` : ''}${item.usable ? '<span class="badge badge-defaut">✅ Utilisable</span>' : ''}<span class="badge badge-defaut">ID : ${escapeHtml(item.id)}</span><span class="badge badge-defaut">⚖️ ${Number(item.weight || 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} kg / unité</span>${item.slot === 'sac' && Number(item.bagCapacity) > 0 ? `<span class="badge badge-defaut">🎒 +${Number(item.bagCapacity).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} kg de charge</span>` : ''}${Object.entries(item.statBonus || {}).map(([stat, value]) => `<span class="badge badge-defaut">📊 ${value > 0 ? '+' : ''}${value} ${escapeHtml(stat)}</span>`).join('')}</div></div>
     <div class="catalogue-item-actions"><button class="btn-secondaire" onclick="ouvrirHistorique('catalogue','${jsAttr(itemId)}','${jsAttr(item.name)}')">Historique</button><button class="btn-secondaire" onclick="ouvrirEditeurCatalogue('${jsAttr(itemId)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerCatalogueItem('${jsAttr(itemId)}')">Supprimer</button></div>
   </article>`;
 }
@@ -1006,10 +1005,7 @@ function filtrerListe() {
     document.querySelectorAll('.trait-card').forEach(card => {
       const queryOk = !q || (card.dataset.nom || '').includes(q);
       const typeOk = typeFilter === 'tous' || card.dataset.traitType === typeFilter;
-      const rewardFilter = state.filtreRecompenseTrait || 'tous';
-      const rewardTypes = (card.dataset.traitReward || '').split(/\s+/).filter(Boolean);
-      const rewardOk = rewardFilter === 'tous' || rewardTypes.includes(rewardFilter);
-      const correspond = queryOk && typeOk && rewardOk;
+      const correspond = queryOk && typeOk;
       card.classList.toggle('masquee', !correspond);
       if (correspond) visibles += 1;
     });
@@ -1056,27 +1052,6 @@ function pointsTraitTexte(points) {
   return `${n > 0 ? '+' : ''}${n} pts`;
 }
 
-// Catégories utilisées par les filtres : un même trait peut apparaître
-// dans plusieurs catégories lorsqu'il distribue plusieurs types d'effets.
-function categoriesRecompenseTrait(effects) {
-  const e = effects || {};
-  const categories = new Set();
-  const relations = Array.isArray(e.relations) ? e.relations : [];
-  const debts = Array.isArray(e.debts) ? e.debts : [];
-  const items = Array.isArray(e.items) ? e.items : [];
-  const randomItems = Array.isArray(e.randomItems) ? e.randomItems : [];
-  const stats = Array.isArray(e.stats) ? e.stats : [];
-  const addictions = Array.isArray(e.addictions) ? e.addictions : [];
-
-  if (relations.length || e.relationChoice || debts.length) categories.add('relation');
-  if (items.some(row => String(row?.itemId || '').toLowerCase() !== TRAIT_CURRENCY_ID) || randomItems.length) categories.add('objets');
-  if (stats.length || addictions.length) categories.add('stats');
-  if ((Number(e.credits?.amount) || 0) !== 0 || debts.length || (Number(e.bounty?.amount) || 0) !== 0
-      || items.some(row => String(row?.itemId || '').toLowerCase() === TRAIT_CURRENCY_ID)) categories.add('credits');
-
-  return [...categories];
-}
-
 const TRAIT_CURRENCY_ID = 'credits_de_la_nouvelle_republique';
 const TRAIT_ACTION_TYPES = [
   ['moneyAdd', 'Ajouter de l’argent'],
@@ -1092,6 +1067,24 @@ const TRAIT_ACTION_TYPES = [
   ['addiction', 'Ajouter une addiction'],
   ['relationChoice', 'Choix d’une relation de départ'],
 ];
+
+function resumeEffetsTrait(effects) {
+  const e = effects || {};
+  const parts = [];
+  if (Number(e.credits?.amount)) parts.push(`Argent : ${Number(e.credits.amount) > 0 ? '+' : ''}${Number(e.credits.amount).toLocaleString('fr-FR')} crédits`);
+  if (e.bounty) parts.push(`Prime : ${Number(e.bounty.amount) || 0} crédits`);
+  for (const item of e.debts || []) parts.push(`Dette : ${Number(item.amount) || 0} crédits (${item.creditor || 'créancier'})`);
+  for (const s of e.stats || []) parts.push(`${Number(s.amount) > 0 ? '+' : ''}${s.amount} ${s.stat}`);
+  for (const r of e.relations || []) parts.push(`Relation ${r.factionKey}: ${r.mode === 'set' ? '→' : Number(r.value) > 0 ? '+' : ''}${r.value}`);
+  for (const i of e.items || []) {
+    if (String(i.itemId || '').toLowerCase() === TRAIT_CURRENCY_ID) parts.push(`Argent : +${Number(i.quantity) || 1} crédits`);
+    else parts.push(`Objet : ${i.fallbackName || i.itemId} ×${i.quantity || 1}`);
+  }
+  for (const i of e.randomItems || []) parts.push(`Objet aléatoire : ${i.rarity || 'Peu commun'} ×${i.quantity || 1}`);
+  for (const a of e.addictions || []) parts.push(`Addiction : ${a.stat || 'Résistance'} ${a.amount || -10}, tous les ${a.intervalDays || 3} jours`);
+  if (e.relationChoice) parts.push('Choix de relation');
+  return parts.join(' · ') || 'Aucun effet configuré.';
+}
 
 function renderTraitsPage() {
   const contenuDiv = document.getElementById('contenu');
@@ -1118,28 +1111,17 @@ function renderTraitsPage() {
       <button type="button" class="trait-filtre-bouton ${filtre === 'bonus' ? 'actif' : ''}" data-filtre-trait="bonus" onclick="choisirFiltreTraits('bonus')">Bonus</button>
       <button type="button" class="trait-filtre-bouton ${filtre === 'malus' ? 'actif' : ''}" data-filtre-trait="malus" onclick="choisirFiltreTraits('malus')">Malus</button>
     </div>
-    <div class="trait-filtres trait-filtres-recompense" role="group" aria-label="Filtrer par récompense donnée">
-      <span class="trait-filtres-label">Récompense :</span>
-      ${[['tous', 'Tout'], ['relation', 'Relation'], ['objets', 'Objets'], ['stats', 'Stats'], ['credits', 'Crédits']].map(([value, label]) => `
-        <button type="button" class="trait-filtre-bouton ${state.filtreRecompenseTrait === value ? 'actif' : ''}" data-filtre-recompense-trait="${value}" onclick="choisirFiltreRecompenseTrait('${value}')">${label}</button>
-      `).join('')}
-    </div>
     <div class="trait-grid">
       ${traitsTries.map(trait => {
         const points = Number(trait.points) || 0;
         const type = points > 0 ? 'malus' : points < 0 ? 'bonus' : 'neutre';
-        const categoriesRecompense = categoriesRecompenseTrait(trait.effects || {});
         return `
-        <article class="trait-card ${trait.enabled === false ? 'trait-inactif' : ''}" data-trait-type="${type}" data-trait-reward="${categoriesRecompense.join(' ')}" data-nom="${escapeAttr(`${traitTiretSimple(trait.name)} ${trait._id} ${traitTiretSimple(trait.description || '')}`.toLowerCase())}">
-          <div class="trait-card-head">
-            <span class="trait-point ${points > 0 ? 'trait-point-malus' : 'trait-point-bonus'}">${escapeHtml(pointsTraitTexte(points))}</span>
-          </div>
+        <article class="trait-card ${trait.enabled === false ? 'trait-inactif' : ''}" data-trait-type="${type}" data-nom="${escapeAttr(`${traitTiretSimple(trait.name)} ${trait._id} ${traitTiretSimple(trait.description || '')}`.toLowerCase())}">
+          <div class="trait-card-head"><span class="trait-point ${points > 0 ? 'trait-point-malus' : 'trait-point-bonus'}">${escapeHtml(pointsTraitTexte(points))}</span><span class="badge ${trait.enabled === false ? 'badge-sang' : 'badge-vert'}">${trait.enabled === false ? 'Désactivé' : 'Actif'}</span></div>
           <h3>${escapeHtml(traitTiretSimple(trait.name))}</h3>
           <p>${escapeHtml(traitTiretSimple(trait.description || 'Aucune description.'))}</p>
-          <div class="trait-actions">
-            <button class="btn-secondaire" onclick="ouvrirEditeurTrait('${jsAttr(trait._id)}')">Modifier</button>
-            <button class="btn-secondaire btn-danger" onclick="supprimerTrait('${jsAttr(trait._id)}')">Supprimer</button>
-          </div>
+          <div class="trait-effets"><strong>Actions configurées</strong><span>${escapeHtml(traitTiretSimple(resumeEffetsTrait(trait.effects)))}</span></div>
+          <div class="trait-actions"><button class="btn-secondaire" onclick="ouvrirEditeurTrait('${jsAttr(trait._id)}')">Modifier</button><button class="btn-secondaire btn-danger" onclick="supprimerTrait('${jsAttr(trait._id)}')">Supprimer</button></div>
         </article>`;
       }).join('') || '<div class="etat-vide"><p>Aucun trait configuré.</p></div>'}
     </div>
@@ -1151,15 +1133,6 @@ function renderTraitsPage() {
 function choisirFiltreTraits(filtre) {
   state.filtreTraits = ['bonus', 'malus'].includes(filtre) ? filtre : 'tous';
   document.querySelectorAll('[data-filtre-trait]').forEach(btn => btn.classList.toggle('actif', btn.dataset.filtreTrait === state.filtreTraits));
-  filtrerListe();
-}
-
-function choisirFiltreRecompenseTrait(filtre) {
-  const filtresAutorises = ['relation', 'objets', 'stats', 'credits'];
-  state.filtreRecompenseTrait = filtresAutorises.includes(filtre) ? filtre : 'tous';
-  document.querySelectorAll('[data-filtre-recompense-trait]').forEach(btn => {
-    btn.classList.toggle('actif', btn.dataset.filtreRecompenseTrait === state.filtreRecompenseTrait);
-  });
   filtrerListe();
 }
 
@@ -1974,7 +1947,9 @@ function panneauCatalogueItem(item) {
       <div class="champ"><label for="f-item-emoji">Emoji</label><input type="text" id="f-item-emoji" value="${escapeAttr(item?.emoji || '')}" maxlength="4"></div>
       <div class="champ"><label for="f-item-category">Catégorie</label><input type="text" id="f-item-category" value="${escapeAttr(item?.category || '')}" placeholder="Arme, Équipement, Ressource..."></div>
       <div class="champ"><label for="f-item-rarity">Rareté</label><select id="f-item-rarity">${(state.listes.itemRarities || ['Épique', 'Rare', 'Peu commun', 'Commun']).map(r => `<option value="${escapeAttr(r)}" ${((item?.rarity || 'Commun') === r) ? 'selected' : ''}>${escapeHtml(r)}</option>`).join('')}</select></div>
+      <div class="champ"><label for="f-item-weight">Poids par unité (kg)</label><input type="number" id="f-item-weight" min="0" max="1000000" step="0.01" value="${Number(item?.weight) || 0}" placeholder="Ex. 0.5"></div>
     </div>
+    <div class="champ" id="bloc-sac-capacite" ${item?.slot === 'sac' ? '' : 'hidden'}><label for="f-item-bag-capacity">Capacité supplémentaire du sac (kg)</label><input type="number" id="f-item-bag-capacity" min="0" max="1000000" step="0.01" value="${Number(item?.bagCapacity) || 0}" placeholder="Ex. 15"><p class="section-note">Ce bonus s'ajoute aux 10 kg de base uniquement lorsque ce sac est équipé.</p></div>
     <div class="champ"><label for="f-item-description">Description</label><textarea id="f-item-description">${escapeHtml(item?.description || '')}</textarea></div>
 
     <div class="champ">
@@ -2161,6 +2136,8 @@ function onSlotObjetChange() {
   caseUsable.disabled = aUnSlot;
   if (aUnSlot) caseUsable.checked = true;
   note.hidden = !aUnSlot;
+  const bagBlock = document.getElementById('bloc-sac-capacite');
+  if (bagBlock) bagBlock.hidden = val('f-item-slot') !== 'sac';
 }
 
 function construireUtiliteObjet() {
@@ -2202,6 +2179,8 @@ async function sauvegarderCatalogueItem(itemId) {
       category: val('f-item-category'),
       rarity: val('f-item-rarity') || 'Commun',
       description: val('f-item-description'),
+      weight: Number(val('f-item-weight')) || 0,
+      bagCapacity: Number(val('f-item-bag-capacity')) || 0,
       slot: val('f-item-slot') || null,
       usable: document.getElementById('f-item-usable').checked || (val('f-item-use-action') || 'aucune') !== 'aucune',
       useAction: construireUtiliteObjet(),

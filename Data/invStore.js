@@ -5,11 +5,13 @@
 const { getInvCollection, getItemCatalogCollection } = require('./mongo.js');
 const { applyPermanentStatChange, addTemporaryStatEffect, normalizeStatName } = require('./profileStore.js');
 
-const EQUIPMENT_SLOTS = ['casque', 'plastron', 'avantBras', 'mainGauche', 'mainDroite', 'ceinture', 'jambes', 'pieds'];
+const EQUIPMENT_SLOTS = ['casque', 'plastron', 'avantBras', 'mainGauche', 'mainDroite', 'ceinture', 'jambes', 'pieds', 'sac'];
+// Charge de base sans sac ; le sac équipé ajoute sa valeur bagCapacity (en kg).
+const BASE_CARRY_CAPACITY_KG = 10;
 const EQUIPMENT_SLOT_LABELS = {
   casque: 'Tête', plastron: 'Plastron', avantBras: 'Avant-bras',
   mainGauche: 'Main gauche', mainDroite: 'Main droite', ceinture: 'Ceinture',
-  jambes: 'Jambières', pieds: 'Bottes',
+  jambes: 'Jambières', pieds: 'Bottes', sac: 'Sac',
 };
 const ITEM_RARITIES = ['Épique', 'Rare', 'Peu commun', 'Commun'];
 const SEED_MARKER_ID = '__seeded__';
@@ -65,6 +67,12 @@ function normalizeSlot(slot) {
   if (slot === null || slot === '') return null;
   if (!EQUIPMENT_SLOTS.includes(slot)) throw new Error(`Emplacement invalide : ${slot}`);
   return slot;
+}
+function normalizeWeight(value, fieldLabel = 'Poids') {
+  if (value === undefined || value === null || value === '') return 0;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || number > 1000000) throw new Error(`${fieldLabel} invalide (valeur positive attendue en kg).`);
+  return Math.round(number * 100) / 100;
 }
 function normalizeImage(image) {
   if (image === undefined) return undefined;
@@ -122,6 +130,8 @@ function toItem(doc) {
     description: doc.description || '', useAction: normalizeUseAction(doc.useAction),
     slot: doc.slot || null, image: doc.image || null, usable: Boolean(doc.usable),
     statBonus: normalizeStatBonus(doc.statBonus),
+    weight: normalizeWeight(doc.weight),
+    bagCapacity: normalizeWeight(doc.bagCapacity, 'Capacité du sac'),
   };
 }
 
@@ -190,7 +200,7 @@ async function getCatalogMetadata() {
     { $match: { _id: { $not: RESERVED_ID } } },
     { $project: {
       _id: 1, name: 1, emoji: 1, category: 1, rarity: 1, description: 1,
-      useAction: 1, slot: 1, usable: 1, statBonus: 1,
+      useAction: 1, slot: 1, usable: 1, statBonus: 1, weight: 1, bagCapacity: 1,
       image: { $cond: [embeddedImage, { $concat: ['/api/inventaire/catalogue/', { $toString: '$_id' }, '/image'] }, '$image'] },
     } },
   ]).toArray();
@@ -211,7 +221,7 @@ async function getItem(itemId) {
   return doc ? toItem(doc) : null;
 }
 
-async function addCatalogItem({ id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction }) {
+async function addCatalogItem({ id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction, weight, bagCapacity }) {
   if (!String(name || '').trim()) throw new Error('Le nom est obligatoire.');
   const finalId = slugify(id || name);
   if (!finalId || isReservedId(finalId)) throw new Error('Identifiant de catalogue invalide.');
@@ -228,13 +238,14 @@ async function addCatalogItem({ id, name, emoji, category, rarity, description, 
     description: String(description || '').slice(0, 2000), useAction: normalizedUseAction,
     slot: finalSlot || null, image: normalizeImage(image) || null,
     usable: finalSlot ? true : Boolean(usable), statBonus: normalizeStatBonus(statBonus),
+    weight: normalizeWeight(weight), bagCapacity: finalSlot === 'sac' ? normalizeWeight(bagCapacity, 'Capacité du sac') : 0,
     createdAt: new Date(), updatedAt: new Date(),
   };
   await col.insertOne(doc);
   return toItem(doc);
 }
 
-async function updateCatalogItem(itemId, { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction }) {
+async function updateCatalogItem(itemId, { id, name, emoji, category, rarity, description, image, slot, usable, statBonus, useAction, weight, bagCapacity }) {
   const col = await catalogCollection();
   const oldDoc = await col.findOne({ _id: String(itemId) });
   if (!oldDoc || isReservedId(oldDoc._id)) throw new Error('Objet introuvable.');
@@ -255,6 +266,10 @@ async function updateCatalogItem(itemId, { id, name, emoji, category, rarity, de
   if (slot !== undefined) { fields.slot = normalizeSlot(slot); if (fields.slot) fields.usable = true; }
   if (usable !== undefined) fields.usable = Boolean(usable);
   if (statBonus !== undefined) fields.statBonus = normalizeStatBonus(statBonus);
+  if (weight !== undefined) fields.weight = normalizeWeight(weight);
+  const nextSlot = fields.slot !== undefined ? fields.slot : oldDoc.slot;
+  if (bagCapacity !== undefined) fields.bagCapacity = nextSlot === 'sac' ? normalizeWeight(bagCapacity, 'Capacité du sac') : 0;
+  if (fields.slot !== undefined && fields.slot !== 'sac' && bagCapacity === undefined) fields.bagCapacity = 0;
   if (useAction !== undefined) fields.useAction = normalizeUseAction(useAction);
   if (fields.useAction?.type === 'donner_objet' && !(await col.findOne({ _id: fields.useAction.itemId }))) {
     throw new Error("L'objet à donner n'existe pas dans le catalogue.");
@@ -306,15 +321,112 @@ async function listAllInventories() {
   const col = await getInvCollection();
   return col.find({}).toArray();
 }
+function roundWeight(value) { return Math.round((Number(value) || 0) * 100) / 100; }
+function calculateInventoryLoad(inventory, catalog) {
+  const lookup = new Map((catalog || []).map(item => [String(item.id), item]));
+  let totalWeight = 0;
+  for (const [itemId, quantityRaw] of Object.entries(inventory?.items || {})) {
+    const quantity = Math.max(0, Number(quantityRaw) || 0);
+    totalWeight += (Number(lookup.get(itemId)?.weight) || 0) * quantity;
+  }
+  for (const itemId of Object.values(inventory?.equipement || {})) {
+    if (itemId) totalWeight += Number(lookup.get(String(itemId))?.weight) || 0;
+  }
+  const bagId = inventory?.equipement?.sac;
+  const bag = bagId ? lookup.get(String(bagId)) : null;
+  const bagBonus = Math.max(0, Number(bag?.bagCapacity) || 0);
+  const maxWeight = BASE_CARRY_CAPACITY_KG + bagBonus;
+  return { totalWeight: roundWeight(totalWeight), maxWeight: roundWeight(maxWeight), baseCapacity: BASE_CARRY_CAPACITY_KG, bagBonus: roundWeight(bagBonus), overloaded: totalWeight > maxWeight + 0.000001 };
+}
+async function getInventoryLoad(profileId) {
+  const [inventory, catalog] = await Promise.all([getInventory(profileId), getCatalog()]);
+  return calculateInventoryLoad(inventory, catalog);
+}
+function overloadAmount(load) { return Math.max(0, (Number(load?.totalWeight) || 0) - (Number(load?.maxWeight) || 0)); }
+function overweightResult(load, nextWeight) {
+  const weight = roundWeight(nextWeight);
+  return {
+    ok: false,
+    reason: 'overweight',
+    weight,
+    capacity: load.maxWeight,
+    message: `Poids maximum dépassé : ${weight.toLocaleString('fr-FR')} kg transportés pour ${load.maxWeight.toLocaleString('fr-FR')} kg autorisés. Équipe un sac ou retire des objets.`,
+  };
+}
 async function addItem(profileId, itemId, quantity = 1) {
   const item = await getItem(itemId);
   if (!item) return { ok: false, reason: 'unknown_item' };
   const qty = Math.max(1, Math.floor(Number(quantity) || 1));
+  const inventory = await getInventory(profileId);
+  const catalog = await getCatalog();
+  const load = calculateInventoryLoad(inventory, catalog);
+  const nextWeight = load.totalWeight + (Number(item.weight) || 0) * qty;
+  if (nextWeight > load.maxWeight + 0.000001 && nextWeight > load.totalWeight + 0.000001) return { ...overweightResult(load, nextWeight), item };
   const col = await getInvCollection();
   await col.updateOne({ _id: String(profileId) }, { $inc: { [`items.${item.id}`]: qty }, $set: { updatedAt: new Date() } }, { upsert: true });
   const doc = await col.findOne({ _id: String(profileId) });
-  return { ok: true, item, quantity: Number(doc?.items?.[item.id]) || 0 };
+  return { ok: true, item, quantity: Number(doc?.items?.[item.id]) || 0, load: await getInventoryLoad(profileId) };
 }
+async function addItemsOnce(profileId, rows, receiptField, receiptId) {
+  const allowedReceiptFields = new Set(['craftDeliveries', 'productionDeliveries', 'traitRewardReceipts', 'traitCreditReceipts']);
+  if (!allowedReceiptFields.has(receiptField)) throw new Error('Champ de reçu d’inventaire invalide.');
+  const receipt = String(receiptId || '').trim();
+  if (!receipt) throw new Error('Identifiant de livraison manquant.');
+
+  const merged = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const itemId = String(row?.itemId || '').trim();
+    const quantity = Math.max(0, Math.floor(Number(row?.quantity) || 0));
+    if (!itemId || isReservedId(itemId) || !quantity) continue;
+    merged.set(itemId, (merged.get(itemId) || 0) + quantity);
+  }
+  const entries = [...merged.entries()].map(([itemId, quantity]) => ({ itemId, quantity }));
+
+  const col = await getInvCollection();
+  const profileKey = String(profileId);
+  await col.updateOne(
+    { _id: profileKey },
+    { $setOnInsert: { items: {}, equipement: emptyEquipement() } },
+    { upsert: true },
+  );
+  const already = await col.findOne({ _id: profileKey, [receiptField]: receipt }, { projection: { _id: 1 } });
+  if (already) return { ok: true, already: true };
+
+  const catalog = await getCatalog();
+  const lookup = new Map(catalog.map(item => [String(item.id), item]));
+  let additionalWeight = 0;
+  const increments = {};
+  for (const row of entries) {
+    const item = lookup.get(row.itemId);
+    if (!item) return { ok: false, reason: 'unknown_item', itemId: row.itemId };
+    additionalWeight += (Number(item.weight) || 0) * row.quantity;
+    increments[`items.${row.itemId}`] = row.quantity;
+  }
+
+  const inventory = await getInventory(profileKey);
+  const load = calculateInventoryLoad(inventory, catalog);
+  const nextWeight = roundWeight(load.totalWeight + additionalWeight);
+  if (nextWeight > load.maxWeight + 0.000001 && nextWeight > load.totalWeight + 0.000001) {
+    return { ...overweightResult(load, nextWeight) };
+  }
+
+  const update = {
+    $addToSet: { [receiptField]: receipt },
+    $set: { updatedAt: new Date() },
+  };
+  if (Object.keys(increments).length) update.$inc = increments;
+  const result = await col.updateOne(
+    { _id: profileKey, [receiptField]: { $ne: receipt } },
+    update,
+  );
+  if (!result.matchedCount) return { ok: true, already: true };
+  return {
+    ok: true,
+    already: false,
+    load: { ...load, totalWeight: nextWeight, overloaded: nextWeight > load.maxWeight + 0.000001 },
+  };
+}
+
 async function removeItem(profileId, itemId, quantity = 1, { exact = false } = {}) {
   const item = await getItem(itemId);
   if (!item) return { ok: false, reason: 'unknown_item' };
@@ -340,12 +452,18 @@ async function setItemQuantity(profileId, itemId, quantity) {
   const item = await getItem(itemId);
   if (!item) return { ok: false, reason: 'unknown_item' };
   const qty = Math.max(0, Math.floor(Number(quantity) || 0));
+  const inventory = await getInventory(profileId);
+  const catalog = await getCatalog();
+  const load = calculateInventoryLoad(inventory, catalog);
+  const currentQty = Math.max(0, Number(inventory.items[item.id]) || 0);
+  const nextWeight = load.totalWeight + (Number(item.weight) || 0) * (qty - currentQty);
+  if (nextWeight > load.maxWeight + 0.000001 && overloadAmount({ ...load, totalWeight: nextWeight }) > overloadAmount(load) + 0.000001) return { ...overweightResult(load, nextWeight), item };
   const col = await getInvCollection();
   const update = qty > 0
     ? { $set: { [`items.${item.id}`]: qty, updatedAt: new Date() } }
     : { $unset: { [`items.${item.id}`]: '' }, $set: { updatedAt: new Date() } };
   await col.updateOne({ _id: String(profileId) }, update, { upsert: true });
-  return { ok: true, item, quantity: qty };
+  return { ok: true, item, quantity: qty, load: await getInventoryLoad(profileId) };
 }
 
 async function useItem(profileId, itemId, options = {}) {
@@ -401,13 +519,27 @@ async function equipItem(profileId, itemId) {
   if (!item) return { ok: false, reason: 'unknown_item' };
   if (!item.slot) return { ok: false, reason: 'not_equipable', item };
   const inventory = await getInventory(profileId);
-  if (!(Number(inventory.items[itemId]) > 0)) return { ok: false, reason: 'not_owned', item };
+  const currentQty = Number(inventory.items[itemId]) || 0;
+  if (currentQty <= 0) return { ok: false, reason: 'not_owned', item };
   const previousItemId = inventory.equipement[item.slot] || null;
+  const catalog = await getCatalog();
+  const projected = {
+    items: { ...inventory.items },
+    equipement: { ...inventory.equipement, [item.slot]: itemId },
+  };
+  if (currentQty <= 1) delete projected.items[itemId];
+  else projected.items[itemId] = currentQty - 1;
+  if (previousItemId) projected.items[previousItemId] = (Number(projected.items[previousItemId]) || 0) + 1;
+  const currentLoad = calculateInventoryLoad(inventory, catalog);
+  const projectedLoad = calculateInventoryLoad(projected, catalog);
+  if (overloadAmount(projectedLoad) > overloadAmount(currentLoad) + 0.000001) return overweightResult(projectedLoad, projectedLoad.totalWeight);
+
   const removed = await removeItem(profileId, itemId, 1);
   if (!removed.ok) return removed;
   const col = await getInvCollection();
-  await col.updateOne({ _id: String(profileId) }, { $set: { [`equipement.${item.slot}`]: itemId, updatedAt: new Date() } }, { upsert: true });
-  if (previousItemId) await addItem(profileId, previousItemId, 1);
+  const update = { $set: { [`equipement.${item.slot}`]: itemId, updatedAt: new Date() } };
+  if (previousItemId) update.$inc = { [`items.${previousItemId}`]: 1 };
+  await col.updateOne({ _id: String(profileId) }, update, { upsert: true });
   return { ok: true, item, slot: item.slot, previousItem: previousItemId ? await getItem(previousItemId) : null };
 }
 async function unequipSlot(profileId, slot) {
@@ -415,9 +547,19 @@ async function unequipSlot(profileId, slot) {
   const inventory = await getInventory(profileId);
   const itemId = inventory.equipement[slot];
   if (!itemId) return { ok: false, reason: 'empty_slot' };
+  const catalog = await getCatalog();
+  const projected = {
+    items: { ...inventory.items, [itemId]: (Number(inventory.items[itemId]) || 0) + 1 },
+    equipement: { ...inventory.equipement, [slot]: null },
+  };
+  const currentLoad = calculateInventoryLoad(inventory, catalog);
+  const projectedLoad = calculateInventoryLoad(projected, catalog);
+  if (overloadAmount(projectedLoad) > overloadAmount(currentLoad) + 0.000001) return overweightResult(projectedLoad, projectedLoad.totalWeight);
   const col = await getInvCollection();
-  await col.updateOne({ _id: String(profileId) }, { $set: { [`equipement.${slot}`]: null, updatedAt: new Date() } }, { upsert: true });
-  await addItem(profileId, itemId, 1);
+  await col.updateOne({ _id: String(profileId) }, {
+    $set: { [`equipement.${slot}`]: null, updatedAt: new Date() },
+    $inc: { [`items.${itemId}`]: 1 },
+  }, { upsert: true });
   return { ok: true, item: await getItem(itemId), slot };
 }
 async function getEquippedStatBonuses(profileId) {
@@ -445,6 +587,8 @@ async function formatInventory(profileId, nomPrenom) {
   const lookup = new Map(catalog.map(item => [item.id, item]));
   const entries = Object.entries(inventory.items || {}).filter(([, quantity]) => Number(quantity) > 0);
   const lines = [`# 🎒 Inventaire - ${nomPrenom}`, ''];
+  const load = calculateInventoryLoad(inventory, catalog);
+  lines.push(`⚖️ Poids transporté : ${load.totalWeight.toLocaleString('fr-FR')} / ${load.maxWeight.toLocaleString('fr-FR')} kg`, '');
   if (!entries.length) lines.push('*Inventaire vide.*');
   else {
     const grouped = new Map();
@@ -471,9 +615,10 @@ async function formatInventory(profileId, nomPrenom) {
 }
 
 module.exports = {
-  EQUIPMENT_SLOTS, EQUIPMENT_SLOT_LABELS, ITEM_RARITIES, DEFAULT_CATALOG,
+  EQUIPMENT_SLOTS, EQUIPMENT_SLOT_LABELS, ITEM_RARITIES, DEFAULT_CATALOG, BASE_CARRY_CAPACITY_KG,
   normalizeUseAction, getCatalog, getExistingCatalogIds, getCatalogMetadata, getCatalogImageData,
   getItem, addCatalogItem, updateCatalogItem, removeCatalogItem, clearCatalog,
   getInventory, listAllInventories, addItem, removeItem, setItemQuantity,
   useItem, equipItem, unequipSlot, getEquippedStatBonuses, giveItem, formatInventory,
+  calculateInventoryLoad, getInventoryLoad, addItemsOnce,
 };
