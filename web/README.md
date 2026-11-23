@@ -1,30 +1,16 @@
-# Site admin  dossier `web/`
+# Application web — portail Joueur et Staff
 
-Ce dossier contient l'application Express (`server.js` + `public/`) : c'est
-elle qui sert l'interface et l'API. Voir le `README.md` à la racine du dépôt
-pour l'installation et le déploiement (Railway/Render).
+`server.js` sert l'application et ses API. Le portail joueur est l'espace par défaut ; le panel Staff historique reste disponible via le bouton Espace Staff, affiché uniquement lorsque le serveur reconnaît un rôle Staff/Admin.
 
-## Ce que ça permet
+## Espace joueur
 
-- **Profils** : voir/modifier statut, garde personnelle, bourse, renommée,
-  notes, relations avec les factions et stats la liste vient de MongoDB
-  (collection `profils`), exactement les mêmes personnages que ceux gérés
-  via `/staffedit` ou `/inventaire` sur Discord.
-- L'identité d'un personnage (nom, surnom, âge, faceclaim, rôle, faction)
-  est affichée en lecture seule : elle vient de la fiche validée côté
-  Discord et ne doit être changée que par ce biais, pour ne jamais désync
-  du rôle Discord réellement attribué.
+- `public/player-portal.js` et `public/player-portal.css` : tableau de bord, personnages, planètes, secteurs, missions, primes et boutique.
+- Les API joueur sont préfixées par `/api/player`. Elles sont réservées aux rôles whitelist `1545274332614230084`, membre `1545274332614230082` et Staff/Admin.
+- Les personnages et missions sont vérifiés côté serveur à partir du compte Discord connecté.
+- Les destinations connues ouvrent directement leurs salons Discord ; l'Espace du Noyau et le Forum général attendent des identifiants de destination.
 
-Pas encore de maisons/régions : le bot actuel ne gère que les profils. Si un
-jour un système de factions territoriales est ajouté côté bot, ce site
-pourra être étendu pour le gérer aussi.
+## Espace Staff
 
-## Sécurité
+Le panel historique est conservé dans `public/app.js`. Les API de gestion restent sous le middleware Staff de `/api` ; elles ne sont pas rendues accessibles aux membres ordinaires par l'ajout du portail joueur.
 
-- Les secrets (`CLIENT_SECRET`, `SESSION_SECRET`, `MONGO_URI`) ne sont **jamais**
-  dans le code  uniquement dans `.env` (donc jamais poussés sur GitHub si le
-  `.gitignore` est en place).
-- Authentification par Discord OAuth2 : seuls les membres ayant le rôle Staff
-  du serveur peuvent se connecter ; le panel Admin est réservé au créateur.
-- En production, utilise HTTPS (Railway/Render le font automatiquement) :
-  le cookie de session n'est marqué « secure » que sur une connexion HTTPS.
+Voir le README à la racine pour la configuration OAuth2, les variables d'environnement et le déploiement.

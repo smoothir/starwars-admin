@@ -104,13 +104,8 @@ async function verifierSessionExistante() {
     const me = await meRes.json();
     if (me.authenticated) {
       afficherUtilisateurConnecte(me);
-      afficherApplication();
-      if (state.isStaff) {
-        demarrerApplication().then(() => chargerDonnees('dashboard'));
-      } else {
-        setStatutConnexion(true);
-        chargerDonnees('factions');
-      }
+      afficherApplication(me);
+      if (typeof window.initialiserPortailJoueur === 'function') window.initialiserPortailJoueur(me);
     }
   } catch { /* pas connecté : l'écran de connexion reste affiché */ }
 }
@@ -118,6 +113,10 @@ async function verifierSessionExistante() {
 function afficherUtilisateurConnecte(me) {
   state.isFounder = me?.isFounder === true;
   state.isStaff = me?.isStaff === true;
+  const staffSwitch = document.getElementById('btn-open-staff');
+  if (staffSwitch) staffSwitch.hidden = !state.isStaff;
+  const returnSwitch = document.getElementById('btn-retour-joueur');
+  if (returnSwitch) returnSwitch.hidden = !state.isStaff;
   state.factionKeys = Array.isArray(me?.factionKeys) ? me.factionKeys : [];
   document.querySelectorAll('.nav-btn').forEach(button => {
     button.hidden = !state.isStaff && button.dataset.collection !== 'factions';
@@ -132,7 +131,7 @@ function afficherUtilisateurConnecte(me) {
 }
 
 // -----------------------------------------------------------------------
-// Écran de connexion - Discord uniquement (rôle Staff vérifié côté serveur)
+// Écran de connexion - Discord uniquement (rôle joueur ou Staff vérifié côté serveur)
 // -----------------------------------------------------------------------
 function deconnexion() {
   fetch('/auth/logout', { method: 'POST' })
@@ -142,8 +141,33 @@ function deconnexion() {
 
 function afficherApplication() {
   document.getElementById('ecran-connexion').hidden = true;
-  document.getElementById('app-shell').hidden = false;
+  const playerShell = document.getElementById('player-shell');
+  const staffShell = document.getElementById('app-shell');
+  if (playerShell) playerShell.hidden = false;
+  if (staffShell) staffShell.hidden = true;
 }
+
+// L'espace Staff est volontairement accessible uniquement via cette action
+// et uniquement lorsque la session a été reconnue comme Staff côté serveur.
+let staffApplicationStarted = false;
+window.ouvrirEspaceStaff = function ouvrirEspaceStaff() {
+  if (!state.isStaff) return;
+  const playerShell = document.getElementById('player-shell');
+  const staffShell = document.getElementById('app-shell');
+  if (playerShell) playerShell.hidden = true;
+  if (staffShell) staffShell.hidden = false;
+  if (!staffApplicationStarted) {
+    staffApplicationStarted = true;
+    demarrerApplication().then(() => chargerDonnees('dashboard'));
+  }
+};
+window.retourEspaceJoueur = function retourEspaceJoueur() {
+  const staffShell = document.getElementById('app-shell');
+  const playerShell = document.getElementById('player-shell');
+  if (staffShell) staffShell.hidden = true;
+  if (playerShell) playerShell.hidden = false;
+  if (typeof window.naviguerPortail === 'function') window.naviguerPortail('dashboard');
+};
 
 // La session Discord vit dans un cookie envoyé automatiquement par le
 // navigateur sur chaque requête same-origin : pas d'en-tête à ajouter.

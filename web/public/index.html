@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Star wars : Mirage Admin</title>
+<title>Mirage — Portail galactique</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="player-portal.css">
   <link rel="stylesheet" href="factions.css">
 <link rel="icon" href="logoad.jpg">
 </head>
@@ -13,13 +14,51 @@
   <div id="ecran-connexion" class="ecran-connexion">
     <div class="connexion-carte">
       <img class="connexion-logo" src="logoad.jpg" alt="Logo">
-      <h1 class="connexion-titre">Panel<br><span>ADMIN</span></h1>
-      <p class="connexion-sub">Identifiez-vous</p>
+      <h1 class="connexion-titre">Mirage<br><span>PORTAIL GALACTIQUE</span></h1>
+      <p class="connexion-sub">Connecte-toi avec ton compte Discord</p>
 
       <a href="/auth/discord" class="btn-principal btn-discord" id="btn-discord">🔐 Se connecter avec Discord</a>
-      <p id="connexion-erreur" class="connexion-erreur" hidden>Accès refusé - un rôle Staff ou un rôle de faction est requis.</p>
-      <p class="connexion-note">Le Staff accède à toute l’administration. Les membres d’une faction accèdent uniquement à la gestion des vaisseaux de leur faction.</p>
+      <p id="connexion-erreur" class="connexion-erreur" hidden>Accès refusé : un rôle membre, whitelist ou Staff est requis.</p>
+      <p class="connexion-note">Le portail joueur est accessible aux membres autorisés du serveur. Les comptes Staff disposent d’un accès supplémentaire à leur espace de gestion.</p>
     </div>
+  </div>
+
+  <div class="player-shell" id="player-shell" hidden>
+    <header class="player-topbar">
+      <a class="player-brand" href="#" onclick="naviguerPortail('dashboard'); return false;">
+        <img src="logoad.jpg" alt="Mirage" class="player-brand-logo">
+        <span><strong>MIRAGE</strong><small>PORTAIL GALACTIQUE</small></span>
+      </a>
+      <div class="player-topbar-right">
+        <span class="player-presence"><i></i> Connecté</span>
+        <div class="player-user" id="player-user">
+          <img id="player-avatar" alt="">
+          <span id="player-username">Joueur</span>
+          <b id="player-role-badge">Membre</b>
+        </div>
+        <button id="btn-open-staff" class="portal-staff-button" type="button" onclick="ouvrirEspaceStaff()" hidden>⚙ Espace Staff</button>
+        <button class="portal-logout" type="button" onclick="deconnexion()">Déconnexion</button>
+      </div>
+    </header>
+    <div class="player-layout">
+      <aside class="player-sidebar">
+        <div class="player-sidebar-caption">CENTRE DE NAVIGATION</div>
+        <nav id="player-nav" class="player-nav" aria-label="Navigation joueur"></nav>
+        <div class="player-sidebar-footer">
+          <div class="player-help-orb">?</div>
+          <div><strong>Besoin d'aide ?</strong><span>Retrouve la communauté sur Discord.</span></div>
+          <button type="button" onclick="naviguerPortail('forum')" aria-label="Ouvrir l'aide">↗</button>
+        </div>
+      </aside>
+      <main class="player-main">
+        <div class="player-main-topline"><span id="player-breadcrumb">QUARTIER GÉNÉRAL</span><span id="player-current-date"></span></div>
+        <div id="player-content" class="player-content">
+          <div class="player-loading"><span class="player-spinner"></span> Synchronisation du terminal…</div>
+        </div>
+        <footer class="player-footer"><span>GALACTIC DATABASE · MIRAGE</span><span>Transmission sécurisée</span></footer>
+      </main>
+    </div>
+    <div id="player-toast" class="player-toast" role="status" aria-live="polite"></div>
   </div>
 
   <div class="app-shell" id="app-shell" hidden>
@@ -39,6 +78,7 @@
         </div>
 
         <div class="topbar-right">
+          <button class="topbar-side btn-deconnexion" id="btn-retour-joueur" type="button" onclick="retourEspaceJoueur()" hidden>← Espace joueur</button>
           <div class="topbar-side topbar-user" id="topbar-user" hidden>
             <img id="user-avatar" class="user-avatar" alt="">
             <span id="user-nom"></span>
@@ -177,5 +217,6 @@
 
   <script src="app.js"></script>
   <script src="factions.js"></script>
+  <script src="player-portal.js"></script>
 </body>
 </html>
