@@ -1,0 +1,266 @@
+/* Mirage Staff — thème bleu nuit repris du portail Joueur.
+   Cette feuille ne modifie que la présentation : navigation, formulaires et logique
+   d'administration restent ceux de la version Staff d'origine. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --bg-void: #050b18;
+  --bg-deep: #071225;
+  --bg-panel: #0b1528;
+  --bg-card: #0d1b30;
+  --bg-card-hover: #142946;
+  --bg-input: #08172b;
+  --border-subtle: rgba(151, 183, 224, .16);
+  --border-soft: rgba(151, 183, 224, .30);
+  --border-gold: rgba(100, 167, 255, .48);
+
+  --gold: #d7b66d;
+  --gold-bright: #e8ce96;
+  --gold-dim: #8e784c;
+  --blue: #64a7ff;
+  --blue-bright: #91c5ff;
+  --crimson: #ff828c;
+  --crimson-bright: #ffa0a8;
+  --emerald: #6fe0b1;
+  --steel: #91a4c2;
+
+  --text-primary: #edf4ff;
+  --text-secondary: #b6c7df;
+  --text-muted: #91a4c2;
+
+  --font-title: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-text: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  --shadow-soft: 0 10px 28px rgba(0, 0, 0, .22);
+  --shadow-lg: 0 22px 70px rgba(0, 0, 0, .5);
+  --shadow-gold: 0 0 0 1px rgba(100, 167, 255, .28), 0 0 22px rgba(65, 130, 210, .13);
+}
+
+html, body {
+  background: #050b18;
+  color: var(--text-primary);
+  font-family: var(--font-text);
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 78% -10%, rgba(45, 86, 151, .23), transparent 42%),
+    radial-gradient(ellipse at 0% 75%, rgba(24, 68, 116, .12), transparent 35%),
+    #050b18;
+}
+
+h1, h2, h3, h4 { color: #edf4ff; font-family: var(--font-text); }
+::selection { background: rgba(100, 167, 255, .35); color: #fff; }
+* { scrollbar-color: rgba(100, 167, 255, .38) transparent; }
+*::-webkit-scrollbar-thumb { background: rgba(100, 167, 255, .32); }
+*::-webkit-scrollbar-thumb:hover { background: rgba(100, 167, 255, .55); }
+
+/* Connexion */
+.ecran-connexion {
+  background:
+    radial-gradient(ellipse at 50% 35%, rgba(36, 79, 135, .25), transparent 48%),
+    #050b18;
+}
+.connexion-carte {
+  background: linear-gradient(155deg, rgba(15, 32, 56, .97), rgba(7, 17, 32, .98));
+  border: 1px solid rgba(100, 167, 255, .24);
+  border-radius: 18px;
+  box-shadow: 0 26px 80px rgba(0, 0, 0, .48), 0 0 55px rgba(38, 91, 154, .10);
+}
+.connexion-logo { border-color: rgba(100, 167, 255, .38); box-shadow: 0 0 25px rgba(100, 167, 255, .13); }
+.connexion-titre, .connexion-titre span { color: #edf4ff; }
+.connexion-sub, .connexion-note { color: #91a4c2; }
+.connexion-erreur { color: #ff929b; }
+
+/* Barre supérieure et navigation latérale */
+.topbar {
+  background: rgba(5, 11, 24, .91);
+  border-bottom: 1px solid rgba(151, 183, 224, .18);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .18);
+}
+.topbar-side { color: #aebfd7; }
+.topbar-logo { border-color: rgba(100, 167, 255, .28); }
+.topbar-brand-text h1, .topbar-brand-text h1 span { color: #edf4ff; }
+.topbar-sub { color: #8198b8; }
+.btn-deconnexion {
+  color: #c7d6e9;
+  border-color: rgba(151, 183, 224, .22);
+  background: rgba(15, 30, 52, .72);
+}
+.btn-deconnexion:hover { color: #fff; border-color: rgba(100, 167, 255, .55); background: rgba(40, 78, 125, .28); }
+.sidebar-nav {
+  background: rgba(7, 15, 30, .88);
+  border-right-color: rgba(151, 183, 224, .16);
+  box-shadow: 8px 0 28px rgba(0, 0, 0, .12);
+}
+.sidebar-nav-head { border-bottom-color: rgba(151, 183, 224, .14); }
+.sidebar-title { color: #7791b3; }
+.sidebar-toggle:focus-visible { outline-color: rgba(100, 167, 255, .85); }
+.sidebar-nav .nav-btn { color: #9fb0c9; border-radius: 9px; }
+.sidebar-nav .nav-btn::after { background: #64a7ff; box-shadow: 0 0 12px rgba(100, 167, 255, .48); }
+.sidebar-nav .nav-btn:hover {
+  color: #f2f7ff;
+  background: rgba(92, 137, 197, .09);
+  border-color: rgba(100, 167, 255, .12);
+}
+.sidebar-nav .nav-btn.active {
+  color: #eef5ff;
+  background: linear-gradient(90deg, rgba(63, 118, 189, .22), rgba(63, 118, 189, .055));
+  border-color: rgba(100, 167, 255, .19);
+  box-shadow: inset 2px 0 0 #64a7ff;
+}
+.sidebar-nav .nav-count { color: #aec5e3; background: rgba(100, 167, 255, .12); }
+.sidebar-nav .nav-btn.active .nav-count { color: #eaf3ff; background: rgba(100, 167, 255, .22); }
+
+/* Zone de travail, titres et recherche */
+.main-area {
+  background:
+    radial-gradient(ellipse at 84% 0%, rgba(34, 72, 122, .11), transparent 35%),
+    transparent;
+}
+#titre-section { color: #f1f6ff; letter-spacing: -.025em; text-transform: none; }
+.sous-titre { color: #91a4c2; }
+.search-wrap input {
+  background: rgba(10, 23, 42, .88);
+  border-color: rgba(151, 183, 224, .2);
+  color: #edf4ff;
+}
+.search-wrap input:focus {
+  border-color: rgba(100, 167, 255, .58);
+  box-shadow: 0 0 0 3px rgba(100, 167, 255, .12);
+}
+.search-wrap input::placeholder { color: #7187a6; }
+
+/* Cartes et lignes de données */
+.ligne, .admin-backup-bar, .backup-ligne, .item-row,
+.catalogue-actions-summary, .catalogue-categorie,
+.catalogue-item, .production-intro, .production-card,
+.mission-card, .mission-reward-row, .fac-card, .fac-ship,
+.fac-admin-tools, .fac-possession-card, .fac-role-summary,
+.fac-table-wrap, .fac-modal {
+  background-color: rgba(12, 26, 46, .90);
+  border-color: rgba(151, 183, 224, .16);
+}
+.ligne { background: linear-gradient(145deg, rgba(14, 29, 51, .96), rgba(8, 18, 33, .95)); }
+.ligne:hover, .catalogue-item:hover, .armee-tile:hover {
+  background-color: rgba(18, 39, 68, .95);
+  border-color: rgba(100, 167, 255, .30);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, .18);
+}
+.ligne-sigil, .backup-icone {
+  background: linear-gradient(145deg, rgba(100, 167, 255, .15), rgba(100, 167, 255, .045));
+  border-color: rgba(100, 167, 255, .18);
+}
+.ligne-avatar { border-color: rgba(100, 167, 255, .22); }
+.ligne-nom, .item-nom, .catalogue-item-title-row .item-nom { color: #edf4ff; }
+.ligne-meta, .backup-meta, .item-meta { color: #91a4c2; }
+.badge-defaut { background: rgba(100, 167, 255, .10); color: #bdd8ff; border-color: rgba(100, 167, 255, .2); }
+.badge-or { background: rgba(215, 182, 109, .11); color: #efd69b; border-color: rgba(215, 182, 109, .28); }
+.badge-sang { background: rgba(255, 130, 140, .10); color: #ffabb1; border-color: rgba(255, 130, 140, .24); }
+.badge-vert { background: rgba(111, 224, 177, .10); color: #8eeac4; border-color: rgba(111, 224, 177, .24); }
+.badge-acier { background: rgba(151, 183, 224, .09); color: #c4d3e7; border-color: rgba(151, 183, 224, .2); }
+
+/* Boutons : bleu de navigation, secondaire en panneau sombre */
+.btn-hero, .btn-modifier, .btn-principal {
+  color: #f4f8ff;
+  background: linear-gradient(135deg, #3478c8, #245a9a);
+  border: 1px solid rgba(115, 177, 255, .52);
+  box-shadow: 0 7px 20px rgba(23, 78, 139, .2);
+}
+.btn-hero:hover, .btn-modifier:hover, .btn-principal:hover {
+  color: #fff;
+  background: linear-gradient(135deg, #438bdd, #2e6eb5);
+  border-color: rgba(145, 197, 255, .72);
+  filter: none;
+}
+.btn-secondaire {
+  color: #c6d7ec;
+  background: rgba(16, 34, 58, .88);
+  border-color: rgba(151, 183, 224, .22);
+}
+.btn-secondaire:hover { color: #fff; border-color: rgba(100, 167, 255, .52); background: rgba(35, 68, 108, .62); }
+.btn-danger { color: #ff9aa2; border-color: rgba(255, 130, 140, .35); }
+.btn-danger:hover { color: #ffd4d7; border-color: rgba(255, 130, 140, .7); background: rgba(120, 35, 48, .2); }
+.btn-principal .spin { border-color: rgba(255,255,255,.26); border-top-color: #fff; }
+
+/* États, tableaux, panneaux et modales */
+.etat-vide { color: #91a4c2; }
+.etat-vide p { color: #dce8fa; }
+.overlay, .overlay-catalogue { background: rgba(1, 7, 17, .76); }
+.confirm-overlay { background: rgba(1, 7, 17, .80); }
+.panneau-edition, .panneau-catalogue, .confirm-boite {
+  background: linear-gradient(180deg, #0d1b30, #071225);
+  border-color: rgba(151, 183, 224, .25);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .52);
+}
+.panneau-header { border-bottom-color: rgba(151, 183, 224, .16); }
+.panneau-header h3, .confirm-boite h4 { color: #edf4ff; }
+.panneau-eyebrow { color: #79b5ff; }
+.btn-fermer { color: #a9bfdc; border-color: rgba(151, 183, 224, .24); background: rgba(100, 167, 255, .07); }
+.btn-fermer:hover { color: #fff; background: rgba(100, 167, 255, .22); border-color: rgba(100, 167, 255, .55); }
+
+/* Formulaires */
+.champ label, .fac-label { color: #91a4c2; }
+.champ input[type="text"], .champ input[type="password"], .champ input[type="number"],
+.champ select, .champ textarea, .champ input[type="file"],
+.ligne-ajout select, .ligne-ajout input, .qte-input,
+.fac-input, .fac-select, .armee-tile input {
+  background-color: #08172b;
+  color: #edf4ff;
+  border-color: rgba(151, 183, 224, .20);
+}
+.champ input::placeholder, .champ textarea::placeholder, .fac-input::placeholder { color: #7187a6; }
+.champ input:focus, .champ select:focus, .champ textarea:focus,
+.fac-input:focus, .fac-select:focus, .ligne-ajout select:focus, .ligne-ajout input:focus {
+  background-color: #0b1c33;
+  border-color: rgba(100, 167, 255, .62);
+  box-shadow: 0 0 0 3px rgba(100, 167, 255, .12);
+}
+.champ input:disabled { background: rgba(255,255,255,.025); }
+.champ input[type="file"]::file-selector-button { background: rgba(100, 167, 255, .14); color: #cfe3ff; border-color: rgba(100, 167, 255, .3); }
+.champ select option, .fac-select option { background: #0b1528; color: #edf4ff; }
+.case-label input[type="checkbox"] { accent-color: #64a7ff; }
+
+/* Inventaire, production, catalogue et faction */
+.item-row { background: rgba(12, 26, 46, .9); }
+.item-row:hover { border-color: rgba(100, 167, 255, .28); }
+.image-objet-apercu { background: #08172b; border-color: rgba(151, 183, 224, .2); }
+.armee-tile { background: linear-gradient(155deg, rgba(100, 167, 255, .10), rgba(10, 24, 43, .7)); border-color: rgba(151, 183, 224, .16); }
+.armee-tile .armee-valeur, .section-titre { color: #91c5ff; }
+.historique-liste li { background: rgba(12, 26, 46, .9); border-left-color: #64a7ff; }
+.catalogue-categorie-chip, .boutique-categorie-chip { background: rgba(13, 27, 48, .9); border-color: rgba(151, 183, 224, .17); color: #c6d7ec; }
+.catalogue-categorie-chip.active, .fac-tab.active { color: #eef5ff; border-color: rgba(100, 167, 255, .5); background: rgba(63, 118, 189, .18); box-shadow: inset 0 0 0 1px rgba(100, 167, 255, .18); }
+.catalogue-categorie-header h3, .production-section-heading h3, .production-intro strong,
+.production-card-title h3, .fac-section-head h3, .fac-class-preview-info strong { color: #edf4ff; }
+.catalogue-categorie-count, .production-section-heading p, .production-intro p,
+.production-card-title p, .fac-section-head p, .fac-hint, .fac-possession-card span,
+.fac-possession-card small { color: #91a4c2; }
+.catalogue-item, .production-card, .production-intro, .mission-reward-row { background: linear-gradient(150deg, rgba(14, 29, 51, .94), rgba(8, 18, 33, .94)); }
+.catalogue-item:hover, .production-card:hover { border-color: rgba(100, 167, 255, .32); }
+.rarity-commun { color: #d7e4f7; background: rgba(151,183,224,.07); border-color: rgba(151,183,224,.2); }
+.fac-note { background: rgba(100, 167, 255, .045); border-color: rgba(151, 183, 224, .2); }
+.fac-tab { background: rgba(13, 27, 48, .92); border-color: rgba(151, 183, 224, .18); color: #c6d7ec; }
+.fac-tab.active { border-color: rgba(100, 167, 255, .48); box-shadow: inset 0 0 0 1px rgba(100, 167, 255, .17); }
+.fac-ship-image, .fac-class-preview img, .fac-class-preview-empty { background: rgba(7, 18, 34, .7); }
+.fac-grade-chip { background: rgba(100,167,255,.08); }
+.fac-footprint i { background: rgba(100,167,255,.34); border-color: rgba(145,197,255,.55); }
+.fac-modal { background: linear-gradient(155deg, #0d1b30, #071225); border-color: rgba(100,167,255,.38); }
+.fac-overlay { background: rgba(1,7,17,.8); }
+.fac-table-wrap { background: rgba(12,26,46,.9); }
+.fac-table th, .fac-table td { border-bottom-color: rgba(151,183,224,.14); }
+.fac-grade-list li { background: #08172b; border-color: rgba(151,183,224,.18); }
+.fac-possession-card, .fac-role-summary, .fac-admin-tools { background: rgba(12,26,46,.9); }
+
+/* Les listes, les notes et les lignes de statut restent lisibles en bleu nuit. */
+.log-liste { border-color: rgba(151,183,224,.18); }
+.log-entry { background: rgba(12,26,46,.92); border-bottom-color: rgba(151,183,224,.14); }
+.log-details strong, .admin-backup-bar strong, .catalogue-actions-summary strong { color: #edf4ff; }
+.log-date, .admin-backup-bar p, .backup-meta { color: #91a4c2; }
+.mission-reward-row { border-color: rgba(151,183,224,.17); }
+.boutique-categorie-chip strong { color: #edf4ff; }
+
+@media (max-width: 760px) {
+  .sidebar-nav { background: rgba(7, 15, 30, .96); box-shadow: 8px 0 25px rgba(0,0,0,.28); }
+  .topbar { background: rgba(5, 11, 24, .96); }
+}
