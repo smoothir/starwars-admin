@@ -319,8 +319,8 @@ function safePlayerCharacter(profile) {
     renommee: Number(profile.renommee) || 0,
     ficheUrl: profile.ficheUrl || null,
     prime: profile.prime?.active && Number(profile.prime.amount) > 0
-      ? { active: true, amount: Number(profile.prime.amount), description: profile.prime.description || '' }
-      : { active: false, amount: 0, description: '' },
+      ? { active: true, amount: Number(profile.prime.amount), description: profile.prime.description || '', threadId: profile.prime.discordThreadId || null }
+      : { active: false, amount: 0, description: '', threadId: null },
   };
 }
 

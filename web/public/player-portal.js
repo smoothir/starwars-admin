@@ -176,6 +176,7 @@
           <img class="portal-character-avatar" src="${esc(character.imageUrl || '')}" alt="Portrait de ${esc(character.nomPrenom)}" onerror="this.style.visibility='hidden'">
           <div class="portal-character-info"><span class="portal-tag ${character.statut === 'Vivant' ? 'green' : ''}">${esc(character.statut)}</span><h3>${esc(character.nomPrenom)}</h3>
             <p>${esc(character.roleName || 'Rôle non renseigné')}</p><p>${esc(character.categoryName || 'Faction non renseignée')}</p>
+            ${character.prime?.active && Number(character.prime.amount) > 0 ? `<div class="portal-character-bounty"><span>🎯 RECHERCHÉ</span><strong>${fmt(character.prime.amount)} crédits</strong>${character.prime.description ? `<small>${esc(character.prime.description)}</small>` : ''}</div>` : ''}
             <div class="portal-card-actions"><button class="portal-button" data-action="open-character" data-id="${esc(character.id)}">Ouvrir le dossier →</button></div>
           </div></div></article>`).join('')}</div>`;
     } catch (error) { content().innerHTML = empty('⚠️','Impossible de lire les personnages',error.message); }
@@ -192,7 +193,7 @@
       const items = data.items || [];
       content().innerHTML = `
         <button class="portal-button portal-button-quiet" data-action="navigate" data-page="characters">← Retour à mes personnages</button>
-        <div class="portal-detail-hero" style="margin-top:15px"><img src="${esc(c.imageUrl || '')}" alt="Portrait" onerror="this.style.visibility='hidden'"><div><div class="portal-eyebrow">DOSSIER PERSONNEL · ${esc(c.statut)}</div><h2>${esc(c.nomPrenom)}</h2><p>${esc(c.roleName || 'Rôle non renseigné')} · ${esc(c.categoryName || 'Aucune faction')}</p><p>${c.age ? `${esc(c.age)} ans` : 'Âge non renseigné'}${c.faceclaim ? ` · ${esc(c.faceclaim)}` : ''}</p><div class="portal-hero-actions">${c.ficheUrl ? `<a class="portal-button portal-button-gold" href="${esc(c.ficheUrl)}" target="_blank" rel="noopener">Ouvrir la fiche ↗</a>` : ''}<button class="portal-button" data-action="show-character-inventory" data-id="${esc(c.id)}">🎒 Mon inventaire</button></div></div></div>
+        <div class="portal-detail-hero" style="margin-top:15px"><img src="${esc(c.imageUrl || '')}" alt="Portrait" onerror="this.style.visibility='hidden'"><div><div class="portal-eyebrow">DOSSIER PERSONNEL · ${esc(c.statut)}</div><h2>${esc(c.nomPrenom)}</h2><p>${esc(c.roleName || 'Rôle non renseigné')} · ${esc(c.categoryName || 'Aucune faction')}</p><p>${c.age ? `${esc(c.age)} ans` : 'Âge non renseigné'}${c.faceclaim ? ` · ${esc(c.faceclaim)}` : ''}</p>${c.prime?.active && Number(c.prime.amount) > 0 ? `<div class="portal-bounty-panel"><div><span>🎯 MISE À PRIX ACTIVE</span><strong>${fmt(c.prime.amount)} crédits</strong></div><p>${esc(c.prime.description || 'Aucun motif renseigné.')}</p>${c.prime.threadId ? `<button class="portal-button portal-button-gold" data-action="open-discord" data-channel="${esc(c.prime.threadId)}">Ouvrir le dossier de prime ↗</button>` : ''}</div>` : ''}<div class="portal-hero-actions">${c.ficheUrl ? `<a class="portal-button portal-button-gold" href="${esc(c.ficheUrl)}" target="_blank" rel="noopener">Ouvrir la fiche ↗</a>` : ''}<button class="portal-button" data-action="show-character-inventory" data-id="${esc(c.id)}">🎒 Mon inventaire</button></div></div></div>
         <div class="portal-detail-columns"><section class="portal-panel"><h3>Statistiques</h3>${stats.length ? stats.map(([name,value]) => { const n=Math.max(0,Math.min(100,Number(value)||0)); return `<div class="portal-stat-line"><span>${esc(name)}</span><div class="portal-stat-track"><i style="width:${n}%"></i></div><strong>${n}</strong></div>`; }).join('') : '<p class="portal-lead">Aucune statistique disponible.</p>'}</section>
         <section class="portal-panel"><h3>Relations & réputation</h3><div class="portal-weight"><strong>${fmt(c.renommee)} pts</strong><small>Renommée de ton personnage</small></div>${Object.entries(c.relations || {}).map(([name,value]) => `<div class="portal-inventory-row"><span>◆</span><div><strong>${esc(name.replace(/_/g,' '))}</strong><small>Relation : ${esc(value)}/5</small></div></div>`).join('') || '<p class="portal-lead">Aucune relation renseignée.</p>'}</section></div>
         <section id="character-inventory-panel" class="portal-panel" style="margin-top:15px" hidden></section>`;
@@ -209,11 +210,11 @@
   const INVENTORY_EQUIPMENT_RECTS = {
     casque: { x: 101.6, y: 92.1, w: 61.1, h: 61.1, label: 'Tête' },
     plastron: { x: 101.6, y: 191.7, w: 61.1, h: 61.1, label: 'Plastron' },
-    avantBras: { x: 101.6, y: 291.6, w: 61.1, h: 61.1, label: 'Avant-bras' },
+    jambes: { x: 101.6, y: 291.6, w: 61.1, h: 61.1, label: 'Jambières' },
     mainGauche: { x: 160.5, y: 378.2, w: 103, h: 57.9, label: 'Main gauche' },
     mainDroite: { x: 267.3, y: 378.2, w: 103, h: 57.9, label: 'Main droite' },
     ceinture: { x: 378, y: 94.6, w: 61.1, h: 61.1, label: 'Ceinture' },
-    jambes: { x: 378, y: 190.9, w: 61.1, h: 61.1, label: 'Jambières' },
+    avantBras: { x: 378, y: 190.9, w: 61.1, h: 61.1, label: 'Avant-bras' },
     pieds: { x: 378, y: 290.2, w: 61.1, h: 61.1, label: 'Bottes' },
     sac: { x: 13.9, y: 378.6, w: 90.1, h: 89.4, label: 'Sac' },
   };
