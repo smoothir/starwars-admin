@@ -9,6 +9,10 @@
     primes: [],
     shop: [],
     selectedCharacter: null,
+    selectedInventoryCharacterId: null,
+    inventoryData: null,
+    inventoryPage: 0,
+    inventorySelection: null,
     heartbeat: null,
     toastTimer: null,
   };
@@ -49,6 +53,7 @@
 
   const LABELS = {
     dashboard: ['QUARTIER GÉNÉRAL', 'Tableau de bord'], characters: ['DOSSIERS PERSONNELS', 'Mes personnages'],
+    inventory: ['ÉQUIPEMENT PERSONNEL', 'Mon inventaire'],
     planets: ['CARTE GALACTIQUE', 'Planètes'], hutt: ['SECTEUR HUTT & MÉDIANE', 'Espace Hutt & Médiane'],
     outer: ['BORDURES EXTÉRIEURES', 'Bordures extérieures'], core: ['RÉGION CENTRALE', 'Espace du Noyau'],
     forum: ['COMMUNAUTÉ', 'Forum'], missions: ['CONTRATS GALACTIQUES', 'Missions'],
@@ -86,7 +91,7 @@
   }
   function navMarkup() {
     const groups = [
-      { label: 'PERSONNEL', rows: [['dashboard','⌂','Tableau de bord'], ['characters','◈','Mes personnages']] },
+      { label: 'PERSONNEL', rows: [['dashboard','⌂','Tableau de bord'], ['characters','◈','Mes personnages'], ['inventory','🎒','Mon inventaire']] },
       { label: 'EXPLORATION', rows: [['planets','◎','Planètes'], ['hutt','◉','Espace Hutt & Médiane'], ['outer','✧','Bordures extérieures'], ['core','✦','Espace du Noyau'], ['forum','▤','Forum']] },
       { label: 'ACTIVITÉS', rows: [['missions','⚑','Missions'], ['primes','◎','Primes'], ['shop','◇','Boutique']] },
     ];
@@ -119,7 +124,7 @@
     setPageActive();
     if (!options.keepScroll) window.scrollTo({ top: 0, behavior: 'smooth' });
     const render = {
-      dashboard: renderDashboard, characters: renderCharacters,
+      dashboard: renderDashboard, characters: renderCharacters, inventory: renderInventory,
       planets: () => renderLocationPage('planets'), hutt: () => renderLocationPage('hutt'),
       outer: () => renderLocationPage('outer'), core: renderCorePage, forum: renderForumPage,
       missions: renderMissions, primes: renderPrimes, shop: renderShop,
@@ -187,7 +192,7 @@
       const items = data.items || [];
       content().innerHTML = `
         <button class="portal-button portal-button-quiet" data-action="navigate" data-page="characters">← Retour à mes personnages</button>
-        <div class="portal-detail-hero" style="margin-top:15px"><img src="${esc(c.imageUrl || '')}" alt="Portrait" onerror="this.style.visibility='hidden'"><div><div class="portal-eyebrow">DOSSIER PERSONNEL · ${esc(c.statut)}</div><h2>${esc(c.nomPrenom)}</h2><p>${esc(c.roleName || 'Rôle non renseigné')} · ${esc(c.categoryName || 'Aucune faction')}</p><p>${c.age ? `${esc(c.age)} ans` : 'Âge non renseigné'}${c.faceclaim ? ` · ${esc(c.faceclaim)}` : ''}</p><div class="portal-hero-actions">${c.ficheUrl ? `<a class="portal-button portal-button-gold" href="${esc(c.ficheUrl)}" target="_blank" rel="noopener">Ouvrir la fiche ↗</a>` : ''}<button class="portal-button" data-action="show-character-inventory" data-id="${esc(c.id)}">🎒 Voir l’inventaire</button></div></div></div>
+        <div class="portal-detail-hero" style="margin-top:15px"><img src="${esc(c.imageUrl || '')}" alt="Portrait" onerror="this.style.visibility='hidden'"><div><div class="portal-eyebrow">DOSSIER PERSONNEL · ${esc(c.statut)}</div><h2>${esc(c.nomPrenom)}</h2><p>${esc(c.roleName || 'Rôle non renseigné')} · ${esc(c.categoryName || 'Aucune faction')}</p><p>${c.age ? `${esc(c.age)} ans` : 'Âge non renseigné'}${c.faceclaim ? ` · ${esc(c.faceclaim)}` : ''}</p><div class="portal-hero-actions">${c.ficheUrl ? `<a class="portal-button portal-button-gold" href="${esc(c.ficheUrl)}" target="_blank" rel="noopener">Ouvrir la fiche ↗</a>` : ''}<button class="portal-button" data-action="show-character-inventory" data-id="${esc(c.id)}">🎒 Mon inventaire</button></div></div></div>
         <div class="portal-detail-columns"><section class="portal-panel"><h3>Statistiques</h3>${stats.length ? stats.map(([name,value]) => { const n=Math.max(0,Math.min(100,Number(value)||0)); return `<div class="portal-stat-line"><span>${esc(name)}</span><div class="portal-stat-track"><i style="width:${n}%"></i></div><strong>${n}</strong></div>`; }).join('') : '<p class="portal-lead">Aucune statistique disponible.</p>'}</section>
         <section class="portal-panel"><h3>Relations & réputation</h3><div class="portal-weight"><strong>${fmt(c.renommee)} pts</strong><small>Renommée de ton personnage</small></div>${Object.entries(c.relations || {}).map(([name,value]) => `<div class="portal-inventory-row"><span>◆</span><div><strong>${esc(name.replace(/_/g,' '))}</strong><small>Relation : ${esc(value)}/5</small></div></div>`).join('') || '<p class="portal-lead">Aucune relation renseignée.</p>'}</section></div>
         <section id="character-inventory-panel" class="portal-panel" style="margin-top:15px" hidden></section>`;
@@ -195,17 +200,150 @@
   }
 
   async function showCharacterInventory(id) {
-    const panel = document.getElementById('character-inventory-panel');
-    if (!panel) return;
-    panel.hidden = false;
-    panel.innerHTML = '<div class="player-loading"><span class="player-spinner"></span>Chargement de l’inventaire…</div>';
+    state.selectedInventoryCharacterId = String(id || '');
+    state.inventoryPage = 0;
+    state.inventorySelection = null;
+    await navigate('inventory');
+  }
+
+  const INVENTORY_EQUIPMENT_RECTS = {
+    casque: { x: 101.6, y: 92.1, w: 61.1, h: 61.1, label: 'Tête' },
+    plastron: { x: 101.6, y: 191.7, w: 61.1, h: 61.1, label: 'Plastron' },
+    avantBras: { x: 101.6, y: 291.6, w: 61.1, h: 61.1, label: 'Avant-bras' },
+    mainGauche: { x: 160.5, y: 378.2, w: 103, h: 57.9, label: 'Main gauche' },
+    mainDroite: { x: 267.3, y: 378.2, w: 103, h: 57.9, label: 'Main droite' },
+    ceinture: { x: 378, y: 94.6, w: 61.1, h: 61.1, label: 'Ceinture' },
+    jambes: { x: 378, y: 190.9, w: 61.1, h: 61.1, label: 'Jambières' },
+    pieds: { x: 378, y: 290.2, w: 61.1, h: 61.1, label: 'Bottes' },
+    sac: { x: 13.9, y: 378.6, w: 90.1, h: 89.4, label: 'Sac' },
+  };
+  const INVENTORY_GRID_X = [548, 629, 711, 794, 876];
+  const INVENTORY_GRID_Y = [37, 119, 201, 283, 365, 447];
+  const INVENTORY_GRID_W = 80;
+  const INVENTORY_GRID_H = 79;
+
+  function rectStyle(rect) {
+    return `left:${(rect.x / 960) * 100}%;top:${(rect.y / 540) * 100}%;width:${(rect.w / 960) * 100}%;height:${(rect.h / 540) * 100}%`;
+  }
+  function inventoryImageUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (/^(data:image\/|https?:\/\/)/i.test(raw)) return raw;
+    if (raw.startsWith('/')) return raw;
+    return `/${raw.replace(/^\.\//, '')}`;
+  }
+  function inventoryRarityRank(value) {
+    const normalized = String(value || 'Commun').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    return ({ epique: 0, rare: 1, 'peu commun': 2, commun: 3 })[normalized] ?? 3;
+  }
+  function inventoryWeightText(value) {
+    const number = Math.max(0, Number(value) || 0);
+    if (Number.isInteger(number)) return String(number).padStart(2, '0');
+    return fmt(number).padStart(2, '0');
+  }
+  function sortedInventoryItems(items) {
+    return [...(items || [])].sort((a, b) => inventoryRarityRank(a.rarity) - inventoryRarityRank(b.rarity)
+      || String(a.name || '').localeCompare(String(b.name || ''), 'fr', { sensitivity: 'base' }));
+  }
+  function inventoryDetailMarkup(selection, data) {
+    if (!selection) return '<div class="player-inventory-detail-empty">Sélectionne un objet ou un équipement pour afficher ses informations.</div>';
+    const source = selection.kind === 'equipment'
+      ? (data.equipment || []).find(item => String(item.slot) === String(selection.slot))
+      : (data.items || []).find(item => String(item.id) === String(selection.id));
+    if (!source) return '<div class="player-inventory-detail-empty">Cet objet n’est plus dans ton inventaire. Actualise la page.</div>';
+    const image = inventoryImageUrl(source.image);
+    const quantity = selection.kind === 'equipment' ? 1 : Number(source.quantity) || 0;
+    const stats = Object.entries(source.statBonus || {}).filter(([, amount]) => Number(amount));
+    return `<div class="player-inventory-detail-card">
+      <div class="player-inventory-detail-art">${image ? `<img src="${esc(image)}" alt="${esc(source.name)}" onerror="this.style.display='none'">` : `<span>${esc(source.emoji || '📦')}</span>`}</div>
+      <div class="player-inventory-detail-copy"><div class="portal-eyebrow">${selection.kind === 'equipment' ? esc(source.slotLabel || INVENTORY_EQUIPMENT_RECTS[selection.slot]?.label || 'Équipement') : esc(source.category || 'OBJET')}</div>
+        <h3>${esc(source.name)}</h3><p>${esc(source.description || 'Aucune description renseignée.')}</p>
+        <div class="player-inventory-detail-meta"><span>${esc(source.rarity || 'Commun')}</span><span>×${fmt(quantity)}</span><span>${fmt(source.weight)} kg / unité</span>${source.bagCapacity ? `<span>+${fmt(source.bagCapacity)} kg de charge</span>` : ''}</div>
+        ${stats.length ? `<div class="player-inventory-detail-stats">${stats.map(([name, value]) => `<span>${esc(name)} : +${fmt(value)}</span>`).join('')}</div>` : ''}
+        <div class="player-inventory-detail-actions">${selection.kind === 'equipment'
+          ? `<button class="portal-button portal-button-quiet" data-action="inventory-unequip" data-slot="${esc(selection.slot)}">Déséquiper</button>`
+          : source.slot ? `<button class="portal-button portal-button-gold" data-action="inventory-equip" data-item-id="${esc(source.id)}">Équiper · ${esc(INVENTORY_EQUIPMENT_RECTS[source.slot]?.label || source.slot)}</button>`
+          : '<span class="portal-tag">Objet transporté</span>'}</div>
+      </div></div>`;
+  }
+
+  async function renderInventory() {
+    loading('Chargement de ton inventaire…');
     try {
-      const data = await api(`/api/player/characters/${encodeURIComponent(id)}`);
-      const load = data.load || { totalWeight: 0, maxWeight: 10 };
-      const items = data.items || [];
-      const equipment = data.equipment || [];
-      panel.innerHTML = `<h3>Inventaire de ${esc(data.character.nomPrenom)}</h3><div class="portal-weight"><strong>${fmt(load.totalWeight)} / ${fmt(load.maxWeight)} KG</strong><small>Poids transporté · ${load.overloaded ? 'Charge dépassée' : 'Charge disponible'}</small></div><div class="portal-detail-columns"><div><h3>Équipements</h3><div class="portal-inventory-list">${equipment.map(item => `<div class="portal-inventory-row">${item.image ? `<img src="${esc(item.image)}" alt="">` : `<span>${esc(item.emoji)}</span>`}<div><strong>${esc(item.slotLabel)}</strong><small>${esc(item.name)}</small></div></div>`).join('') || '<p class="portal-lead">Aucun équipement.</p>'}</div></div><div><h3>Objets transportés</h3><div class="portal-inventory-list">${items.map(item => `<div class="portal-inventory-row">${item.image ? `<img src="${esc(item.image)}" alt="">` : `<span>${esc(item.emoji)}</span>`}<div><strong>${esc(item.name)} ×${fmt(item.quantity)}</strong><small>${fmt(item.weight)} kg / unité</small></div></div>`).join('') || '<p class="portal-lead">Inventaire vide.</p>'}</div></div></div>`;
-    } catch (error) { panel.innerHTML = `<p class="portal-lead">${esc(error.message)}</p>`; }
+      if (!state.characters.length) state.characters = await api('/api/player/characters');
+      if (!state.characters.length) {
+        content().innerHTML = `<div class="portal-eyebrow">ÉQUIPEMENT PERSONNEL</div><h1 class="portal-title">Mon inventaire</h1><p class="portal-lead">Choisis un personnage pour consulter son équipement et ses objets transportés.</p><div style="margin-top:22px">${empty('🎒','Aucun personnage disponible','Crée d’abord un personnage pour disposer d’un inventaire.')}</div>`;
+        return;
+      }
+      const selected = state.characters.find(c => String(c.id) === String(state.selectedInventoryCharacterId)) || state.characters[0];
+      state.selectedInventoryCharacterId = String(selected.id);
+      const data = await api(`/api/player/characters/${encodeURIComponent(selected.id)}`);
+      state.inventoryData = data;
+      const items = sortedInventoryItems(data.items || []);
+      const totalPages = Math.max(1, Math.ceil(items.length / 30));
+      state.inventoryPage = Math.min(Math.max(0, Number(state.inventoryPage) || 0), totalPages - 1);
+      const pageItems = items.slice(state.inventoryPage * 30, (state.inventoryPage + 1) * 30);
+      const equipmentLookup = new Map((data.equipment || []).map(item => [String(item.slot), item]));
+      const equipmentMarkup = Object.entries(INVENTORY_EQUIPMENT_RECTS).map(([slot, rect]) => {
+        const item = equipmentLookup.get(slot);
+        if (!item) return '';
+        const image = inventoryImageUrl(item.image);
+        return `<button type="button" class="player-inventory-equipped" style="${rectStyle(rect)}" title="${esc(rect.label)} : ${esc(item.name)}" data-action="select-inventory-item" data-kind="equipment" data-slot="${esc(slot)}">
+          ${image ? `<img src="${esc(image)}" alt="${esc(item.name)}" onerror="this.style.display='none'">` : `<span class="player-inventory-fallback">${esc(item.emoji || '📦')}</span>`}
+        </button>`;
+      }).join('');
+      const gridMarkup = pageItems.map((item, index) => {
+        const cell = { x: INVENTORY_GRID_X[index % 5], y: INVENTORY_GRID_Y[Math.floor(index / 5)], w: INVENTORY_GRID_W, h: INVENTORY_GRID_H };
+        const image = inventoryImageUrl(item.image);
+        return `<button type="button" class="player-inventory-grid-item" style="${rectStyle(cell)}" title="${esc(item.name)} ×${fmt(item.quantity)}" data-action="select-inventory-item" data-kind="grid" data-item-id="${esc(item.id)}">
+          ${image ? `<img src="${esc(image)}" alt="${esc(item.name)}" onerror="this.style.display='none'">` : `<span class="player-inventory-fallback">${esc(item.emoji || '📦')}</span>`}
+          ${Number(item.quantity) > 1 ? `<b>×${fmt(item.quantity)}</b>` : ''}
+        </button>`;
+      }).join('');
+      const load = data.load || { totalWeight: 0, maxWeight: 10, overloaded: false };
+      const selectedMarkup = inventoryDetailMarkup(state.inventorySelection, data);
+      const characterOptions = state.characters.map(character => `<option value="${esc(character.id)}" ${String(character.id) === String(selected.id) ? 'selected' : ''}>${esc(character.nomPrenom)}</option>`).join('');
+      content().innerHTML = `
+        <div class="portal-eyebrow">ÉQUIPEMENT PERSONNEL</div>
+        <div class="player-inventory-titlebar"><div><h1 class="portal-title">Mon inventaire</h1><p class="portal-lead">Équipement porté, sac et objets transportés par ton personnage.</p></div><label class="player-inventory-character-select"><span>Personnage</span><select id="player-inventory-character" class="portal-select">${characterOptions}</select></label></div>
+        <section class="player-inventory-visual-wrap">
+          <div class="player-inventory-stage" aria-label="Inventaire visuel de ${esc(selected.nomPrenom)}">
+            <div class="player-inventory-character-name">${esc(selected.nomPrenom)}</div>
+            <div class="player-inventory-weight ${load.overloaded ? 'overloaded' : ''}">${inventoryWeightText(load.totalWeight)}/${inventoryWeightText(load.maxWeight)} KG</div>
+            ${equipmentMarkup}${gridMarkup}
+            ${totalPages > 1 ? `<div class="player-inventory-page-indicator">${state.inventoryPage + 1}/${totalPages}</div>` : ''}
+          </div>
+          ${totalPages > 1 ? `<div class="player-inventory-pagination"><button class="portal-button portal-button-quiet" data-action="inventory-page" data-page-index="${Math.max(0, state.inventoryPage - 1)}" ${state.inventoryPage === 0 ? 'disabled' : ''}>← Précédent</button><span>Page ${state.inventoryPage + 1} / ${totalPages}</span><button class="portal-button portal-button-quiet" data-action="inventory-page" data-page-index="${Math.min(totalPages - 1, state.inventoryPage + 1)}" ${state.inventoryPage >= totalPages - 1 ? 'disabled' : ''}>Suivant →</button></div>` : ''}
+        </section>
+        <section class="portal-panel player-inventory-detail-panel" id="player-inventory-details">${selectedMarkup}</section>
+      `;
+    } catch (error) {
+      content().innerHTML = empty('⚠️', 'Inventaire indisponible', error.message);
+    }
+  }
+
+  async function refreshPlayerInventory(message) {
+    state.inventorySelection = null;
+    await renderInventory();
+    if (message) toast(message);
+  }
+
+  async function equipPlayerInventoryItem(itemId) {
+    const profileId = state.selectedInventoryCharacterId;
+    if (!profileId || !itemId) return;
+    try {
+      const result = await api(`/api/player/characters/${encodeURIComponent(profileId)}/equip`, { method: 'POST', body: JSON.stringify({ itemId }) });
+      await refreshPlayerInventory(result.message || 'Équipement mis à jour.');
+    } catch (error) { toast(error.message, true); }
+  }
+
+  async function unequipPlayerInventorySlot(slot) {
+    const profileId = state.selectedInventoryCharacterId;
+    if (!profileId || !slot) return;
+    try {
+      const result = await api(`/api/player/characters/${encodeURIComponent(profileId)}/unequip`, { method: 'POST', body: JSON.stringify({ slot }) });
+      await refreshPlayerInventory(result.message || 'Équipement retiré.');
+    } catch (error) { toast(error.message, true); }
   }
 
   function renderLocationPage(group) {
@@ -299,8 +437,25 @@
         if (action === 'navigate') return navigate(btn.dataset.page);
         if (action === 'open-character') return openCharacter(btn.dataset.id);
         if (action === 'show-character-inventory') return showCharacterInventory(btn.dataset.id);
+        if (action === 'select-inventory-item') {
+          state.inventorySelection = { kind: btn.dataset.kind, id: btn.dataset.itemId || '', slot: btn.dataset.slot || '' };
+          const details = document.getElementById('player-inventory-details');
+          if (details && state.inventoryData) details.innerHTML = inventoryDetailMarkup(state.inventorySelection, state.inventoryData);
+          return;
+        }
+        if (action === 'inventory-equip') return equipPlayerInventoryItem(btn.dataset.itemId);
+        if (action === 'inventory-unequip') return unequipPlayerInventorySlot(btn.dataset.slot);
+        if (action === 'inventory-page') { state.inventoryPage = Number(btn.dataset.pageIndex) || 0; return renderInventory(); }
         if (action === 'accept-mission') return acceptMission(btn.dataset.id);
         if (action === 'open-discord') return openDiscord(btn.dataset.channel || null);
+      });
+      body.addEventListener('change', event => {
+        if (event.target?.id === 'player-inventory-character') {
+          state.selectedInventoryCharacterId = String(event.target.value || '');
+          state.inventoryPage = 0;
+          state.inventorySelection = null;
+          renderInventory();
+        }
       });
     }
   }

@@ -58,6 +58,8 @@ const {
   addItem,
   removeItem,
   setItemQuantity,
+  equipItem,
+  unequipSlot,
 } = require('../Data/invStore.js');
 const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup, deleteBackup } = require('../Data/adminStore.js');
 const { connect, getItemCatalogCollection, getBoutiqueItemsCollection, getBoutiqueStateCollection, getMissionsCollection, getMissionStateCollection, getPossessionsCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection, getCharacterTraitsCollection } = require('../Data/mongo.js');
@@ -192,6 +194,9 @@ app.get('/iconpages.png', (req, res) => {
 });
 
 app.use('/ship', express.static(path.join(__dirname, 'ship'), { maxAge: '1d' }));
+// Fond de l'inventaire du portail joueur : servi explicitement depuis le dossier
+// image du site pour éviter de dépendre du dossier image du bot.
+app.use('/site-image', express.static(path.join(__dirname, '..', 'image'), { maxAge: '1d' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // /api/me reste avant le middleware d'authentification général : le client
@@ -369,17 +374,71 @@ app.get('/api/player/characters/:profileId', async (req, res) => {
     const lookup = new Map(catalog.map(item => [String(item.id), item]));
     const items = Object.entries(inventory.items || {}).filter(([, quantity]) => Number(quantity) > 0).map(([id, quantity]) => {
       const item = lookup.get(id);
-      return { id, name: item?.name || id, emoji: item?.emoji || '📦', image: item?.image || null, quantity: Number(quantity), weight: Number(item?.weight) || 0 };
+      return {
+        id, name: item?.name || id, emoji: item?.emoji || '📦', image: item?.image || null,
+        quantity: Number(quantity), weight: Number(item?.weight) || 0,
+        rarity: item?.rarity || 'Commun', category: item?.category || 'Divers',
+        description: item?.description || '', slot: item?.slot || null,
+        usable: Boolean(item?.usable), statBonus: item?.statBonus || {}, bagCapacity: Number(item?.bagCapacity) || 0,
+      };
     });
     const equipment = Object.entries(inventory.equipement || {}).filter(([, id]) => id).map(([slot, id]) => {
       const item = lookup.get(String(id));
-      return { slot, slotLabel: (EQUIPMENT_SLOT_LABELS[slot] || slot), id: String(id), name: item?.name || String(id), image: item?.image || null, emoji: item?.emoji || '🧰' };
+      return {
+        slot, slotLabel: (EQUIPMENT_SLOT_LABELS[slot] || slot), id: String(id),
+        name: item?.name || String(id), image: item?.image || null, emoji: item?.emoji || '🧰',
+        weight: Number(item?.weight) || 0, description: item?.description || '',
+        rarity: item?.rarity || 'Commun', statBonus: item?.statBonus || {}, bagCapacity: Number(item?.bagCapacity) || 0,
+      };
     });
     res.set('Cache-Control', 'private, no-store');
     res.json({ character: safePlayerCharacter(profile), items, equipment, load });
   } catch (err) {
     console.error('Détail du personnage joueur indisponible :', err);
     res.status(500).json({ error: 'Impossible de charger ce personnage.' });
+  }
+});
+
+async function getOwnedPlayerProfile(req, res) {
+  const profile = await getProfile(String(req.params.profileId));
+  if (!profile || String(profile.userId) !== String(req.session.user.id)) {
+    res.status(404).json({ error: 'Personnage introuvable.' });
+    return null;
+  }
+  return profile;
+}
+
+app.post('/api/player/characters/:profileId/equip', async (req, res) => {
+  try {
+    const profile = await getOwnedPlayerProfile(req, res);
+    if (!profile) return;
+    const itemId = String(req.body?.itemId || '').trim();
+    if (!itemId) return res.status(400).json({ error: 'Objet à équiper manquant.' });
+    const result = await equipItem(String(profile._id), itemId);
+    if (!result.ok) return res.status(400).json({ error: result.message || 'Cet objet ne peut pas être équipé.' });
+    const load = await getInventoryLoad(String(profile._id));
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ ok: true, load, message: `${result.item?.name || 'Objet'} équipé.` });
+  } catch (err) {
+    console.error('Équipement depuis le portail joueur impossible :', err);
+    res.status(500).json({ error: 'Impossible d’équiper cet objet.' });
+  }
+});
+
+app.post('/api/player/characters/:profileId/unequip', async (req, res) => {
+  try {
+    const profile = await getOwnedPlayerProfile(req, res);
+    if (!profile) return;
+    const slot = String(req.body?.slot || '').trim();
+    if (!EQUIPMENT_SLOTS.includes(slot)) return res.status(400).json({ error: 'Emplacement d’équipement invalide.' });
+    const result = await unequipSlot(String(profile._id), slot);
+    if (!result.ok) return res.status(400).json({ error: result.message || 'Cet emplacement ne peut pas être déséquipé.' });
+    const load = await getInventoryLoad(String(profile._id));
+    res.set('Cache-Control', 'private, no-store');
+    res.json({ ok: true, load, message: `${result.item?.name || 'Objet'} déséquipé.` });
+  } catch (err) {
+    console.error('Déséquipement depuis le portail joueur impossible :', err);
+    res.status(500).json({ error: 'Impossible de déséquiper cet objet.' });
   }
 });
 

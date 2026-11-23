@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Michroma&display=swap');
 
 .player-shell[hidden] { display: none !important; }
 .player-shell {
@@ -191,4 +192,64 @@
   .portal-detail-columns { grid-template-columns: 1fr; }
   .portal-stat-line { grid-template-columns: 115px minmax(0,1fr) 25px; }
   .player-footer { font-size: 7px; }
+}
+
+
+/* Inventaire joueur : même composition que la carte générée par le bot (960 × 540). */
+.player-inventory-titlebar { display:flex; justify-content:space-between; align-items:flex-end; gap:18px; margin-bottom:16px; }
+.player-inventory-titlebar .portal-title { margin-bottom:7px; }
+.player-inventory-character-select { display:flex; flex-direction:column; gap:6px; min-width:min(250px, 42%); color:var(--p-muted); font-size:9px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+.player-inventory-character-select .portal-select { width:100%; }
+.player-inventory-visual-wrap { width:100%; overflow-x:auto; padding:2px 0 10px; }
+.player-inventory-stage {
+  position:relative; width:100%; max-width:960px; margin:0 auto; aspect-ratio:16/9;
+  background:#061024 url('/site-image/inventaire.png') center / 100% 100% no-repeat;
+  border:1px solid rgba(100,167,255,.2); box-shadow:0 18px 45px rgba(0,0,0,.22);
+  isolation:isolate; overflow:hidden;
+}
+.player-inventory-character-name {
+  position:absolute; left:12.25%; top:94.1%; width:19.63%; height:4.6%; display:flex; align-items:center;
+  overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:#fff; font-family:'Michroma',Inter,sans-serif;
+  font-size:clamp(7px,1.2vw,13px); line-height:1; pointer-events:none; z-index:4;
+}
+.player-inventory-weight {
+  position:absolute; left:85.42%; top:1.85%; width:14.06%; height:3.15%; display:flex; align-items:center; justify-content:center;
+  overflow:hidden; white-space:nowrap; color:#fff; font-family:'Michroma',Inter,sans-serif; font-size:clamp(6px,.92vw,10.5px);
+  line-height:1; letter-spacing:-.04em; pointer-events:none; z-index:4;
+}
+.player-inventory-weight.overloaded { color:#ff8791; text-shadow:0 0 7px rgba(255,80,100,.55); }
+.player-inventory-equipped, .player-inventory-grid-item {
+  position:absolute; display:flex; align-items:center; justify-content:center; min-width:0; min-height:0; padding:2px;
+  border:0; border-radius:0; background:transparent; color:#fff; overflow:hidden; z-index:2;
+}
+.player-inventory-equipped { cursor:pointer; }
+.player-inventory-equipped img { display:block; width:100%; height:100%; max-width:100%; max-height:100%; object-fit:contain; filter:drop-shadow(0 1px 2px rgba(0,0,0,.3)); }
+.player-inventory-grid-item { cursor:pointer; padding:0; }
+.player-inventory-grid-item img { display:block; width:100%; height:100%; object-fit:cover; }
+.player-inventory-equipped:hover, .player-inventory-grid-item:hover { outline:2px solid rgba(215,182,109,.9); outline-offset:-2px; z-index:5; }
+.player-inventory-equipped:focus-visible, .player-inventory-grid-item:focus-visible { outline:2px solid #f4d48f; outline-offset:-2px; z-index:6; }
+.player-inventory-fallback { display:grid; place-items:center; width:100%; height:100%; font-size:clamp(11px,2vw,24px); background:rgba(22,43,69,.55); }
+.player-inventory-grid-item b { position:absolute; right:4%; bottom:4%; padding:2px 5px; background:rgba(0,0,0,.78); color:#fff; font:700 clamp(7px,.95vw,12px) Inter,sans-serif; line-height:1.2; }
+.player-inventory-page-indicator { position:absolute; top:5.4%; right:2.5%; z-index:4; color:#fff; font:10px 'Michroma',Inter,sans-serif; text-shadow:0 1px 3px #000; }
+.player-inventory-pagination { display:flex; align-items:center; justify-content:center; gap:14px; margin:10px auto 2px; color:var(--p-muted); font-size:10px; }
+.player-inventory-pagination .portal-button { min-height:32px; padding:7px 11px; }
+.player-inventory-pagination button:disabled { opacity:.35; cursor:not-allowed; transform:none; }
+.player-inventory-detail-panel { margin-top:7px; }
+.player-inventory-detail-empty { padding:15px 5px; color:var(--p-muted); font-size:11px; text-align:center; }
+.player-inventory-detail-card { display:grid; grid-template-columns:84px minmax(0,1fr); gap:15px; align-items:start; }
+.player-inventory-detail-art { width:84px; height:84px; display:grid; place-items:center; background:rgba(100,167,255,.08); border:1px solid var(--p-line); border-radius:10px; overflow:hidden; font-size:28px; }
+.player-inventory-detail-art img { width:100%; height:100%; object-fit:contain; }
+.player-inventory-detail-copy h3 { margin:4px 0 6px; color:#f0f5ff; font-size:14px; }
+.player-inventory-detail-copy p { margin:0; color:var(--p-muted); font-size:10px; line-height:1.65; }
+.player-inventory-detail-meta, .player-inventory-detail-stats, .player-inventory-detail-actions { display:flex; align-items:center; flex-wrap:wrap; gap:7px; margin-top:10px; }
+.player-inventory-detail-meta span, .player-inventory-detail-stats span { padding:5px 7px; border:1px solid var(--p-line); border-radius:6px; color:#c1d0e5; background:rgba(255,255,255,.025); font-size:9px; }
+.player-inventory-detail-actions .portal-button { min-height:32px; padding:7px 11px; }
+@media (max-width:760px) {
+  .player-inventory-titlebar { align-items:stretch; flex-direction:column; }
+  .player-inventory-character-select { min-width:100%; }
+  .player-inventory-visual-wrap { padding-bottom:8px; }
+  .player-inventory-stage { min-width:320px; }
+  .player-inventory-detail-card { grid-template-columns:64px minmax(0,1fr); gap:11px; }
+  .player-inventory-detail-art { width:64px; height:64px; }
+  .player-inventory-pagination { gap:7px; }
 }
