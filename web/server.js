@@ -1,5 +1,7 @@
-// Portail galactique Joueur + Staff. Réutilise directement les modules du bot
-// (Data/...) afin que le portail et Discord partagent les mêmes données.
+// Petit site d'admin pour gérer les profils de personnages sans passer par
+// Discord. Réutilise directement les modules du bot (Data/...) pour ne jamais
+// dupliquer la logique ni risquer que le site et le bot voient des données
+// différentes.
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -11,7 +13,6 @@ const { ObjectId } = require('mongodb');
 
 const {
   listAllProfiles,
-  listProfilesForUser,
   getProfile,
   updateProfileFields,
   STATUTS,
@@ -49,7 +50,6 @@ const {
   getCatalogMetadata,
   getCatalogImageData,
   getInventory,
-  getInventoryLoad,
   addCatalogItem,
   updateCatalogItem,
   removeCatalogItem,
@@ -58,8 +58,6 @@ const {
   addItem,
   removeItem,
   setItemQuantity,
-  equipItem,
-  unequipSlot,
 } = require('../Data/invStore.js');
 const { recordConnexion, listConnexions, logAction, listLogs, createBackup, listBackups, restoreBackup, deleteBackup } = require('../Data/adminStore.js');
 const { connect, getItemCatalogCollection, getBoutiqueItemsCollection, getBoutiqueStateCollection, getMissionsCollection, getMissionStateCollection, getPossessionsCollection, getProductionRecipesCollection, getPersonnelTypesCollection, getInvCollection, getCharacterTraitsCollection } = require('../Data/mongo.js');
@@ -112,7 +110,7 @@ function createRateLimiter({ windowMs, max, message }) {
 app.use('/auth', createRateLimiter({ windowMs: 10 * 60 * 1000, max: 40, message: 'Trop de tentatives de connexion, réessaie dans quelques minutes.' }));
 app.use('/api', createRateLimiter({ windowMs: 60 * 1000, max: 600, message: 'Trop de requêtes, ralentis un peu.' }));
 
-// --- Connexion Discord : membres whitelist, membres et Staff autorisés. ---
+// --- Connexion Discord : Staff et membres d'une faction peuvent se connecter. ---
 const {
   CLIENT_ID: DISCORD_CLIENT_ID,
   CLIENT_SECRET: DISCORD_CLIENT_SECRET,
@@ -194,14 +192,17 @@ app.get('/iconpages.png', (req, res) => {
 });
 
 app.use('/ship', express.static(path.join(__dirname, 'ship'), { maxAge: '1d' }));
-// Fond de l'inventaire du portail joueur : servi explicitement depuis le dossier
-// image du site pour éviter de dépendre du dossier image du bot.
-app.use('/site-image', express.static(path.join(__dirname, '..', 'image'), { maxAge: '1d' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// /api/me reste avant le middleware d'authentification général : le client
-// doit pouvoir vérifier la session avant d'afficher le portail joueur ou Staff.
-// Les rôles Discord sont mémorisés dans la session au retour OAuth2.
+// Qui est connecte (utilise par le site au chargement pour savoir si une
+// session Discord est deja ouverte et sauter l'ecran de connexion). Doit
+// rester déclarée AVANT le middleware d'auth ci-dessous : sinon ce dernier
+// bloque /api/me lui-même (401 permanent), et plus personne — même avec une
+// session Discord parfaitement valide — ne peut jamais passer l'écran de
+// connexion, puisque le site ne saurait plus jamais lui dire qu'il est connecté.
+// Accès au panel Admin : le créateur OU un membre ayant l'un des rôles de config.ADMIN_ROLE_IDS.
+// Les rôles sont mémorisés dans la session à la connexion ; pour une session ouverte avant cette
+// fonctionnalité, ils sont relus une fois via le bot puis mis en cache dans la session.
 async function canAccessAdmin(req) {
   const user = req.session?.user;
   if (!user) return false;
@@ -233,19 +234,8 @@ function hasStaffSiteAccess(req) {
   return memberRoleIds.some(roleId => allowedRoleIds.includes(roleId));
 }
 
-// Les deux rôles transmis pour le portail joueur : whitelist et membre non whitelist.
-// Le rôle Staff/Admin reste indépendant et donne accès aux deux espaces.
-const PLAYER_WHITELIST_ROLE_ID = String(config.FIXED_ROLES?.ROLISTE || '1545274332614230084');
-const PLAYER_MEMBER_ROLE_ID = '1545274332614230082';
-function hasPlayerSiteAccess(req) {
-  if (hasStaffSiteAccess(req)) return true;
-  if (!req.session?.user) return false;
-  const roles = Array.isArray(req.session.roles) ? req.session.roles.map(String) : [];
-  return roles.includes(PLAYER_WHITELIST_ROLE_ID) || roles.includes(PLAYER_MEMBER_ROLE_ID);
-}
-
 app.get('/api/me', async (req, res) => {
-  if (!hasPlayerSiteAccess(req)) {
+  if (!hasStaffSiteAccess(req)) {
     if (req.session?.user) {
       return req.session.destroy(() => {
         res.clearCookie('rpadmin.sid');
@@ -254,17 +244,11 @@ app.get('/api/me', async (req, res) => {
     }
     return res.json({ authenticated: false });
   }
-  const roles = Array.isArray(req.session.roles) ? req.session.roles.map(String) : [];
-  const isStaff = hasStaffSiteAccess(req);
   return res.json({
     authenticated: true,
     via: 'discord',
     ...req.session.user,
-    isStaff,
-    isPlayer: true,
-    isWhitelisted: roles.includes(PLAYER_WHITELIST_ROLE_ID),
-    playerRole: roles.includes(PLAYER_WHITELIST_ROLE_ID) ? 'whitelist' : (roles.includes(PLAYER_MEMBER_ROLE_ID) ? 'member' : (isStaff ? 'staff' : 'unknown')),
-    guildId: GUILD_ID,
+    isStaff: true,
     factionKeys: [],
     isSuperAdmin: await canAccessAdmin(req),
     isFounder: req.session.user.id === FOUNDER_DISCORD_ID,
@@ -284,264 +268,8 @@ app.get('/readyz', async (_req, res) => {
   }
 });
 
-// API du portail joueur : accessibles aux rôles whitelist / membre et au Staff.
-// Elles sont déclarées avant le middleware /api général, qui reste strictement Staff.
-app.use('/api/player', (req, res, next) => {
-  if (!req.session?.user) return res.status(401).json({ error: 'Authentification requise.' });
-  if (!hasPlayerSiteAccess(req)) return res.status(403).json({ error: 'Accès au portail joueur refusé.' });
-  next();
-});
-
-async function touchPlayerPresence(req) {
-  const user = req.session.user;
-  const col = (await connect()).collection('site_presence');
-  await col.updateOne(
-    { _id: String(user.id) },
-    { $set: { username: String(user.username || 'Joueur').slice(0, 100), avatar: user.avatar || null, lastSeen: new Date() } },
-    { upsert: true },
-  );
-  return col;
-}
-
-function safePlayerCharacter(profile) {
-  return {
-    id: String(profile._id),
-    nomPrenom: profile.nomPrenom || profile.surnom || 'Personnage sans nom',
-    surnom: profile.surnom || '',
-    age: profile.age || '',
-    faceclaim: profile.faceclaim || '',
-    imageUrl: profile.imageUrl || null,
-    roleName: profile.roleName || '',
-    categoryName: profile.categoryName || '',
-    statut: profile.statut || 'Vivant',
-    stats: profile.stats || {},
-    relations: profile.relations || {},
-    renommee: Number(profile.renommee) || 0,
-    ficheUrl: profile.ficheUrl || null,
-    prime: profile.prime?.active && Number(profile.prime.amount) > 0
-      ? { active: true, amount: Number(profile.prime.amount), description: profile.prime.description || '', threadId: profile.prime.discordThreadId || null }
-      : { active: false, amount: 0, description: '', threadId: null },
-  };
-}
-
-app.get('/api/player/dashboard', async (req, res) => {
-  try {
-    const presence = await touchPlayerPresence(req);
-    const onlineSince = new Date(Date.now() - 2 * 60 * 1000);
-    const [onlineCount, characters, missionsAvailable, activeBounties] = await Promise.all([
-      presence.countDocuments({ lastSeen: { $gte: onlineSince } }),
-      listProfilesForUser(String(req.session.user.id)),
-      (await getMissionsCollection()).countDocuments({ status: 'available' }),
-      (await connect()).collection('profils').countDocuments({ 'prime.active': true, 'prime.amount': { $gt: 0 }, _id: { $not: /^__/ } }),
-    ]);
-    res.set('Cache-Control', 'no-store');
-    res.json({ onlineCount, characterCount: characters.length, missionsAvailable, activeBounties, serverTime: new Date().toISOString() });
-  } catch (err) {
-    console.error('Dashboard joueur indisponible :', err);
-    res.status(500).json({ error: 'Impossible de charger le tableau de bord.' });
-  }
-});
-
-app.post('/api/player/heartbeat', async (req, res) => {
-  try {
-    const presence = await touchPlayerPresence(req);
-    const onlineCount = await presence.countDocuments({ lastSeen: { $gte: new Date(Date.now() - 2 * 60 * 1000) } });
-    res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, onlineCount });
-  } catch (err) {
-    res.status(500).json({ error: 'Présence momentanément indisponible.' });
-  }
-});
-
-app.get('/api/player/characters', async (req, res) => {
-  try {
-    const profiles = await listProfilesForUser(String(req.session.user.id));
-    res.set('Cache-Control', 'private, no-store');
-    res.json(profiles.filter(profile => !String(profile._id).startsWith('__')).map(safePlayerCharacter));
-  } catch (err) {
-    console.error('Personnages joueur indisponibles :', err);
-    res.status(500).json({ error: 'Impossible de charger tes personnages.' });
-  }
-});
-
-app.get('/api/player/characters/:profileId', async (req, res) => {
-  try {
-    const profile = await getProfile(String(req.params.profileId));
-    if (!profile || String(profile.userId) !== String(req.session.user.id)) return res.status(404).json({ error: 'Personnage introuvable.' });
-    const [inventory, catalog, load] = await Promise.all([
-      getInventory(String(profile._id)), getCatalog(), getInventoryLoad(String(profile._id)),
-    ]);
-    const lookup = new Map(catalog.map(item => [String(item.id), item]));
-    const items = Object.entries(inventory.items || {}).filter(([, quantity]) => Number(quantity) > 0).map(([id, quantity]) => {
-      const item = lookup.get(id);
-      return {
-        id, name: item?.name || id, emoji: item?.emoji || '📦', image: item?.image || null,
-        quantity: Number(quantity), weight: Number(item?.weight) || 0,
-        rarity: item?.rarity || 'Commun', category: item?.category || 'Divers',
-        description: item?.description || '', slot: item?.slot || null,
-        usable: Boolean(item?.usable), statBonus: item?.statBonus || {}, bagCapacity: Number(item?.bagCapacity) || 0,
-      };
-    });
-    const equipment = Object.entries(inventory.equipement || {}).filter(([, id]) => id).map(([slot, id]) => {
-      const item = lookup.get(String(id));
-      return {
-        slot, slotLabel: (EQUIPMENT_SLOT_LABELS[slot] || slot), id: String(id),
-        name: item?.name || String(id), image: item?.image || null, emoji: item?.emoji || '🧰',
-        weight: Number(item?.weight) || 0, description: item?.description || '',
-        rarity: item?.rarity || 'Commun', statBonus: item?.statBonus || {}, bagCapacity: Number(item?.bagCapacity) || 0,
-      };
-    });
-    res.set('Cache-Control', 'private, no-store');
-    res.json({ character: safePlayerCharacter(profile), items, equipment, load });
-  } catch (err) {
-    console.error('Détail du personnage joueur indisponible :', err);
-    res.status(500).json({ error: 'Impossible de charger ce personnage.' });
-  }
-});
-
-async function getOwnedPlayerProfile(req, res) {
-  const profile = await getProfile(String(req.params.profileId));
-  if (!profile || String(profile.userId) !== String(req.session.user.id)) {
-    res.status(404).json({ error: 'Personnage introuvable.' });
-    return null;
-  }
-  return profile;
-}
-
-app.post('/api/player/characters/:profileId/equip', async (req, res) => {
-  try {
-    const profile = await getOwnedPlayerProfile(req, res);
-    if (!profile) return;
-    const itemId = String(req.body?.itemId || '').trim();
-    if (!itemId) return res.status(400).json({ error: 'Objet à équiper manquant.' });
-    const result = await equipItem(String(profile._id), itemId);
-    if (!result.ok) return res.status(400).json({ error: result.message || 'Cet objet ne peut pas être équipé.' });
-    const load = await getInventoryLoad(String(profile._id));
-    res.set('Cache-Control', 'private, no-store');
-    res.json({ ok: true, load, message: `${result.item?.name || 'Objet'} équipé.` });
-  } catch (err) {
-    console.error('Équipement depuis le portail joueur impossible :', err);
-    res.status(500).json({ error: 'Impossible d’équiper cet objet.' });
-  }
-});
-
-app.post('/api/player/characters/:profileId/unequip', async (req, res) => {
-  try {
-    const profile = await getOwnedPlayerProfile(req, res);
-    if (!profile) return;
-    const slot = String(req.body?.slot || '').trim();
-    if (!EQUIPMENT_SLOTS.includes(slot)) return res.status(400).json({ error: 'Emplacement d’équipement invalide.' });
-    const result = await unequipSlot(String(profile._id), slot);
-    if (!result.ok) return res.status(400).json({ error: result.message || 'Cet emplacement ne peut pas être déséquipé.' });
-    const load = await getInventoryLoad(String(profile._id));
-    res.set('Cache-Control', 'private, no-store');
-    res.json({ ok: true, load, message: `${result.item?.name || 'Objet'} déséquipé.` });
-  } catch (err) {
-    console.error('Déséquipement depuis le portail joueur impossible :', err);
-    res.status(500).json({ error: 'Impossible de déséquiper cet objet.' });
-  }
-});
-
-app.get('/api/player/missions', async (req, res) => {
-  try {
-    const docs = await (await getMissionsCollection()).find({
-      $or: [{ status: 'available' }, { claimedByUserId: String(req.session.user.id) }],
-    }).sort({ createdAt: -1 }).toArray();
-    res.set('Cache-Control', 'private, no-store');
-    res.json(docs.map(({ _id, ...mission }) => ({
-      id: String(_id), title: mission.title || 'Mission', description: mission.description || '',
-      image: mission.image || null, rewards: Array.isArray(mission.rewards) ? mission.rewards : [],
-      status: mission.status, profileId: mission.claimedByUserId === String(req.session.user.id) ? mission.profileId || null : null,
-      profileName: mission.claimedByUserId === String(req.session.user.id) ? mission.profileName || '' : '',
-      publicThreadId: mission.publicThreadId || null,
-      acceptedThreadId: mission.claimedByUserId === String(req.session.user.id) ? mission.acceptedThreadId || null : null,
-      createdAt: mission.createdAt || null,
-    })));
-  } catch (err) {
-    console.error('Missions joueur indisponibles :', err);
-    res.status(500).json({ error: 'Impossible de charger les missions.' });
-  }
-});
-
-app.post('/api/player/missions/:missionId/accept', async (req, res) => {
-  try {
-    if (!ObjectId.isValid(String(req.params.missionId))) return res.status(400).json({ error: 'Identifiant de mission invalide.' });
-    const profileId = String(req.body?.profileId || '').trim();
-    if (!profileId) return res.status(400).json({ error: 'Choisis un personnage pour cette mission.' });
-    const profile = await getProfile(profileId);
-    if (!profile || String(profile.userId) !== String(req.session.user.id)) return res.status(403).json({ error: 'Ce personnage ne t’appartient pas.' });
-
-    const col = await getMissionsCollection();
-    const filter = { _id: new ObjectId(String(req.params.missionId)), status: 'available' };
-    const claimedAt = new Date();
-    const update = await col.updateOne(filter, { $set: {
-      status: 'in_progress',
-      claimedByUserId: String(req.session.user.id),
-      claimedByName: String(req.session.user.username || req.session.user.id),
-      guildId: String(GUILD_ID || ''),
-      profileId: String(profile._id),
-      profileName: String(profile.nomPrenom || profile.surnom || profile._id),
-      claimedAt,
-      updatedAt: claimedAt,
-    } });
-    if (!update.matchedCount) return res.status(409).json({ error: 'Cette mission vient d’être prise ou n’est plus disponible.' });
-    // Le bot surveille cette version et crée automatiquement le fil de suivi Discord.
-    await (await getMissionStateCollection()).updateOne(
-      { _id: 'meta' }, { $inc: { version: 1 }, $setOnInsert: { createdAt: new Date() } }, { upsert: true },
-    );
-    const mission = await col.findOne({ _id: filter._id });
-    res.status(201).json({ ok: true, mission: { id: String(mission._id), title: mission.title, profileName: mission.profileName } });
-  } catch (err) {
-    console.error('Acceptation de mission joueur impossible :', err);
-    res.status(500).json({ error: 'La mission n’a pas pu être acceptée.' });
-  }
-});
-
-app.get('/api/player/primes', async (req, res) => {
-  try {
-    const docs = await (await connect()).collection('profils').find({
-      _id: { $not: /^__/ }, 'prime.active': true, 'prime.amount': { $gt: 0 },
-    }).sort({ 'prime.amount': -1 }).toArray();
-    res.set('Cache-Control', 'private, no-store');
-    res.json(docs.map(profile => ({
-      id: String(profile._id), name: profile.nomPrenom || profile.surnom || 'Cible inconnue',
-      faction: profile.categoryName || '', role: profile.roleName || '', faceclaim: profile.faceclaim || '',
-      imageUrl: profile.imageUrl || null, amount: Math.max(0, Number(profile.prime?.amount) || 0),
-      description: String(profile.prime?.description || '').slice(0, 1000),
-      threadId: profile.prime?.discordThreadId || null,
-    })));
-  } catch (err) {
-    console.error('Primes joueur indisponibles :', err);
-    res.status(500).json({ error: 'Impossible de charger les primes.' });
-  }
-});
-
-app.get('/api/player/shop', async (req, res) => {
-  try {
-    const [catalog, shopDocs, categoryDoc] = await Promise.all([
-      getCatalog(), getBoutiqueItemsCollection().then(col => col.find({ enabled: { $ne: false } }).toArray()),
-      getBoutiqueStateCollection().then(col => col.findOne({ _id: 'categories' })),
-    ]);
-    const lookup = new Map(catalog.map(item => [String(item.id), item]));
-    const categories = Array.isArray(categoryDoc?.items) ? categoryDoc.items : [];
-    res.set('Cache-Control', 'private, no-store');
-    res.json(shopDocs.map(({ _id, ...row }) => {
-      const item = lookup.get(String(_id));
-      return item ? {
-        id: String(_id), name: item.name, emoji: item.emoji, description: item.description,
-        image: item.image, category: categories.find(category => category.id === row.categoryId)?.name || 'Autres',
-        stock: Number(row.stock) || 0, buyable: ['achetable', 'mixte'].includes(row.type),
-        minPrice: Number(row.minPrice) || 0, maxPrice: Number(row.maxPrice) || 0,
-      } : null;
-    }).filter(Boolean));
-  } catch (err) {
-    console.error('Boutique joueur indisponible :', err);
-    res.status(500).json({ error: 'Impossible de charger la boutique.' });
-  }
-});
-
-// Toutes les API d’administration restent réservées aux comptes Staff autorisés.
-// Les comptes joueur ne peuvent jamais appeler les routes de gestion ci-dessous.
+// Toutes les API du site restent réservées aux comptes Staff autorisés.
+// Les anciennes sessions ouvertes uniquement avec un rôle de faction sont refusées.
 app.use('/api', (req, res, next) => {
   if (!req.session?.user) return res.status(401).json({ error: 'Authentification requise.' });
   if (!hasStaffSiteAccess(req)) return res.status(403).json({ error: 'Cette section est réservée au Staff.' });
@@ -958,12 +686,8 @@ app.get('/auth/discord/callback', async (req, res) => {
     const member = await memberRes.json();
 
     const memberRoleIds = Array.isArray(member.roles) ? member.roles.map(String) : [];
-    const canPlayer = memberRoleIds.includes(PLAYER_WHITELIST_ROLE_ID) || memberRoleIds.includes(PLAYER_MEMBER_ROLE_ID);
-    const canStaff = memberRoleIds.includes(String(config.STAFF_ROLE_ID))
-      || (config.ADMIN_ROLE_IDS || []).map(String).some(id => memberRoleIds.includes(id))
-      || String(me.id) === String(config.SUPER_ADMIN_ID);
-    if (!canPlayer && !canStaff) {
-      return res.redirect('/?auth_error=' + encodeURIComponent("Ton compte n'a pas de rôle autorisé pour accéder au portail joueur ou au Staff."));
+    if (!config.STAFF_ROLE_ID || !memberRoleIds.includes(String(config.STAFF_ROLE_ID))) {
+      return res.redirect('/?auth_error=' + encodeURIComponent("Tu n'as pas le role Staff requis sur le serveur Discord, connexion refusee."));
     }
 
     const sessionUser = {
